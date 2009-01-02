@@ -31,7 +31,7 @@ public class ManagerTester {
 	public void run() {
 		this.manager.init();
 
-		String[] testValues = { "create Pont", "create Pont[Alma]",
+		String[] testValues = { "create Pont", "create Fleuve", "create Pont[Alma]",
 				"create Pont.Hauteur", "create Pont->enjambe->Fleuve", };
 
 		for (String value : testValues) {
