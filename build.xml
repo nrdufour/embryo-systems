@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+
+<!-- Copyright 2009 Nicolas R. Dufour -->
+
+<project name="Embryo Systems" basedir="." default="build">
+
+	<!-- Set up the global properties and classpath -->
+
+	<property file="build.properties" />
+
+	<path id="master-classpath">
+		<pathelement path="${build.classes}" />
+
+		<fileset dir="${lib}">
+			<include name="*.jar" />
+		</fileset>
+	</path>
+
+	<!-- ================================================================= -->
+
+	<target name="clean" description="clean the generated directories">
+		<delete includeemptydirs="yes" dir="${build}" />
+		<delete includeemptydirs="yes" dir="${dist}" />
+		<delete includeemptydirs="yes" dir="${doc}" />
+	</target>
+
+	<target name="init" description="create the generated directories">
+		<mkdir dir="${build}" />
+		<mkdir dir="${build.classes}" />
+		<mkdir dir="${dist}" />
+		<mkdir dir="${doc}" />
+		<mkdir dir="${doc}/api" />
+	</target>
+
+	<target name="compile" depends="init" description="compile the source code">
+		<javac destdir="${build.classes}" deprecation="true" optimize="true" failonerror="true">
+			<src path="${src}" />
+			<classpath refid="master-classpath" />
+		</javac>
+	</target>
+
+	<!-- ================================================================= -->
+
+	<target name="echo_props">
+		<echoproperties />
+	</target>
+
+	<!-- ================================================================= -->
+
+	<target name="build" depends="clean,compile" description="Build all the components">
+	</target>
+
+</project>
