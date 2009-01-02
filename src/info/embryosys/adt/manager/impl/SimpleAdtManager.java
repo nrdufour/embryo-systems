@@ -13,6 +13,7 @@ import info.embryosys.adt.core.AdtState;
 import info.embryosys.adt.core.AdtType;
 import info.embryosys.adt.manager.AdtManager;
 import info.embryosys.adt.manager.Workspace;
+import info.embryosys.adt.request.AdtOperation;
 import info.embryosys.adt.request.AdtRequest;
 import info.embryosys.adt.storage.Storage;
 import info.embryosys.adt.storage.impl.DummyStorage;
@@ -64,8 +65,52 @@ public class SimpleAdtManager implements AdtManager {
 		case CREATE:
 			create(storage, request.getType(), request.getArguments());
 			break;
+		case HIBERN:
+		case AWAKE:
+		case DESTROY:
+		case RESUR:
+			hadr(storage, request.getOperation(), request.getType(), request.getArguments());
+			break;
+		case PURGE:
+			purge(storage, request.getType(), request.getArguments());
+			break;
+		case RENAME:
+			rename(storage, request.getType(), request.getArguments());
+			break;
 		default:
 		}
+	}
+
+/**
+	 * @param storage
+	 * @param type
+	 * @param arguments
+	 */
+	private void rename(Storage storage, AdtType type, List<String> arguments) {
+		// TODO Auto-generated method stub
+		
+	}
+
+/**
+	 * @param storage
+	 * @param type
+	 * @param arguments
+	 */
+	private void purge(Storage storage, AdtType type, List<String> arguments) {
+		// TODO Auto-generated method stub
+		
+	}
+
+/**
+	 * @param storage
+	 * @param operation
+	 * @param type
+	 * @param arguments
+	 */
+	private void hadr(Storage storage, AdtOperation operation, AdtType type,
+			List<String> arguments) {
+		// TODO Auto-generated method stub
+		
 	}
 
 	public void create(final Storage storage, final AdtType type,
