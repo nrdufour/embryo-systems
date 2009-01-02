@@ -39,6 +39,14 @@
 		</javac>
 	</target>
 
+	<target name="build-jar" depends="compile" description="build the main jar file">
+		<jar destfile="${dist}/embryosys.jar">
+			<fileset dir="${build.classes}">
+				<include name="**/*.class" />
+			</fileset>
+		</jar>
+	</target>
+
 	<!-- ================================================================= -->
 
 	<target name="echo_props">
@@ -47,7 +55,7 @@
 
 	<!-- ================================================================= -->
 
-	<target name="build" depends="clean,compile" description="Build all the components">
+	<target name="build" depends="clean,build-jar" description="Build all the components">
 	</target>
 
 </project>
