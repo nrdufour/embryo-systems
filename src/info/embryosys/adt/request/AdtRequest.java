@@ -19,15 +19,19 @@ public final class AdtRequest {
 
 	private final AdtOperation operation;
 	private final AdtType type;
+	private final String name;
+	private final List<String> parents;
 	private final List<String> arguments;
 
 	/**
 	 * 
 	 */
-	public AdtRequest(final AdtOperation op, AdtType type,
-			final List<String> args) {
+	public AdtRequest(final AdtOperation op, AdtType type, final String name,
+			final List<String> parents, final List<String> args) {
 		this.operation = op;
 		this.type = type;
+		this.name = name;
+		this.parents = parents;
 		this.arguments = args;
 	}
 
@@ -43,6 +47,20 @@ public final class AdtRequest {
 	 */
 	public AdtType getType() {
 		return type;
+	}
+	
+	/**
+	 * @return the name
+	 */
+	public String getName() {
+		return name;
+	}
+	
+	/**
+	 * @return the parents
+	 */
+	public List<String> getParents() {
+		return parents;
 	}
 
 	/**
@@ -65,6 +83,10 @@ public final class AdtRequest {
 		buffer.append(this.operation);
 		buffer.append(", type: ");
 		buffer.append(this.type);
+		buffer.append(", name: ");
+		buffer.append(this.name);
+		buffer.append(", parents: ");
+		buffer.append(this.parents);
 		buffer.append(", arguments: ");
 		buffer.append(this.arguments);
 		buffer.append(")");

@@ -34,6 +34,8 @@ public class RequestFactory {
 
 	private static final Map<AdtType, Pattern> TYPE_PATTERNS;
 
+	private static final Map<AdtType, Integer> NAME_INDEX;
+
 	static {
 		TYPE_PATTERNS = new HashMap<AdtType, Pattern>();
 
@@ -41,6 +43,13 @@ public class RequestFactory {
 		TYPE_PATTERNS.put(AdtType.OBJECT, Pattern.compile(OBJECT_REGEXP));
 		TYPE_PATTERNS.put(AdtType.ATTRIBUTE, Pattern.compile(ATTRIBUTE_REGEXP));
 		TYPE_PATTERNS.put(AdtType.LINK, Pattern.compile(LINK_REGEXP));
+
+		NAME_INDEX = new HashMap<AdtType, Integer>();
+
+		NAME_INDEX.put(AdtType.CLASS, 0);
+		NAME_INDEX.put(AdtType.ATTRIBUTE, 1);
+		NAME_INDEX.put(AdtType.LINK, 1);
+		NAME_INDEX.put(AdtType.OBJECT, 1);
 	}
 
 	// FIXME probably need to refactor the exceptions here ...
@@ -61,26 +70,33 @@ public class RequestFactory {
 		String argument = elements[1];
 
 		AdtType type = AdtType.NONE;
-		List<String> arguments = new LinkedList<String>();
-		// FIXME bug to fix: the last element should be the name: not the case for link
+		List<String> parents = new LinkedList<String>();
+		// FIXME bug to fix: the last element should be the name: not the case
+		// for link
 		for (AdtType possibleType : TYPE_PATTERNS.keySet()) {
 			Pattern pattern = TYPE_PATTERNS.get(possibleType);
 			Matcher matcher = pattern.matcher(argument);
 			if (matcher.matches()) {
 				type = possibleType;
 				for (int i = 1; i <= matcher.groupCount(); i++) {
-					arguments.add(matcher.group(i));
+					parents.add(matcher.group(i));
 				}
 			}
 		}
 
-//		if (elements.length > 2) {
-//			for (int i = 2; i < elements.length; i++) {
-//				arguments.add(elements[i]);
-//			}
-//		}
+		int nameLocation = NAME_INDEX.get(type);
+		String name = parents.get(nameLocation);
+		parents.remove(nameLocation);
 
-		AdtRequest request = new AdtRequest(operation, type, arguments);
+		List<String> arguments = new LinkedList<String>();
+		if (elements.length > 2) {
+			for (int i = 2; i < elements.length; i++) {
+				arguments.add(elements[i]);
+			}
+		}
+
+		AdtRequest request = new AdtRequest(operation, type, name, parents,
+				arguments);
 
 		return request;
 	}

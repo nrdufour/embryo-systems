@@ -11,15 +11,11 @@ import info.embryosys.adt.core.Adt;
 import info.embryosys.adt.core.AdtFactory;
 import info.embryosys.adt.core.AdtId;
 import info.embryosys.adt.core.AdtState;
-import info.embryosys.adt.core.AdtType;
 import info.embryosys.adt.manager.AdtManager;
 import info.embryosys.adt.manager.Workspace;
-import info.embryosys.adt.request.AdtOperation;
 import info.embryosys.adt.request.AdtRequest;
 import info.embryosys.adt.storage.Storage;
 import info.embryosys.adt.storage.impl.DummyStorage;
-
-import java.util.List;
 
 /**
  * @author nrdufour
@@ -64,20 +60,19 @@ public class SimpleAdtManager implements AdtManager {
 
 		switch (request.getOperation()) {
 		case CREATE:
-			create(storage, request.getType(), request.getArguments());
+			create(storage, request);
 			break;
 		case HIBERN:
 		case AWAKE:
 		case DESTROY:
 		case RESUR:
-			hadr(storage, request.getOperation(), request.getType(), request
-					.getArguments());
+			hadr(storage, request);
 			break;
 		case PURGE:
-			purge(storage, request.getType(), request.getArguments());
+			purge(storage, request);
 			break;
 		case RENAME:
-			rename(storage, request.getType(), request.getArguments());
+			rename(storage, request);
 			break;
 		default:
 		}
@@ -85,77 +80,69 @@ public class SimpleAdtManager implements AdtManager {
 
 	/**
 	 * @param storage
-	 * @param type
-	 * @param arguments
+	 * @param request
 	 */
-	private void rename(Storage storage, AdtType type, List<String> arguments) {
+	private void purge(Storage storage, AdtRequest request) {
 		// TODO Auto-generated method stub
 
 	}
 
 	/**
 	 * @param storage
-	 * @param type
-	 * @param arguments
+	 * @param request
 	 */
-	private void purge(Storage storage, AdtType type, List<String> arguments) {
+	private void rename(Storage storage, AdtRequest request) {
 		// TODO Auto-generated method stub
 
 	}
 
 	/**
 	 * @param storage
-	 * @param operation
-	 * @param type
-	 * @param arguments
+	 * @param request
 	 */
-	private void hadr(Storage storage, AdtOperation operation, AdtType type,
-			List<String> arguments) {
-		// TODO Auto-generated method stub
-		
-		String name = arguments.get(arguments.size() - 1);
-		
-		AdtId adtId = storage.find(type, name);
-		if(adtId == null) {
-			throw new RuntimeException("The ADT ["+name+"] doesn't exist !");
+	private void hadr(Storage storage, AdtRequest request) {
+		String name = request.getName();
+
+		AdtId adtId = storage.find(request.getType(), name);
+		if (adtId == null) {
+			throw new RuntimeException("The ADT [" + name + "] doesn't exist !");
 		}
-		
+
 		Adt adt = storage.load(adtId);
-		
+
 		// FIXME need to check that the CURRENT state is compatible here
-		
+
 		AdtState state = null;
-		switch(operation) {
-			case HIBERN:
-				state = AdtState.FROZEN;
-				break;
-			case AWAKE:
-				state = AdtState.ALIVE;
-				break;
-			case DESTROY:
-				state = AdtState.DESTROYED;
-				break;
-			case RESUR:
-				state = AdtState.ALIVE;
-				break;
-			default:
+		switch (request.getOperation()) {
+		case HIBERN:
+			state = AdtState.FROZEN;
+			break;
+		case AWAKE:
+			state = AdtState.ALIVE;
+			break;
+		case DESTROY:
+			state = AdtState.DESTROYED;
+			break;
+		case RESUR:
+			state = AdtState.ALIVE;
+			break;
+		default:
 		}
-		
-		if(state == null) {
-			throw new RuntimeException("Wrong state/Wrong Operation during HADR operation !");
+
+		if (state == null) {
+			throw new RuntimeException(
+					"Wrong state/Wrong Operation during HADR operation !");
 		}
-		
+
 		adt.setState(state);
-		
+
 		storage.store(adt);
 	}
 
-	public void create(final Storage storage, final AdtType type,
-			final List<String> arguments) {
+	public void create(final Storage storage, final AdtRequest request) {
 		// FIXME must check first if that adt exists or not.
 
-		String name = arguments.get(arguments.size() - 1);
-		Adt adt = AdtFactory.createNewAdt(type, name);
+		Adt adt = AdtFactory.createNewAdt(request.getType(), request.getName());
 
 		adt.setState(AdtState.ALIVE);
 
