@@ -45,6 +45,6 @@ public class SimpleAdtManager implements AdtManager {
 	 * @see info.embryosys.adt.manager.AdtManager#processRequest(info.embryosys.adt.manager.AdtRequest)
 	 */
 	public void processRequest(final AdtRequest request) {
-
+		System.out.println("Processing request: "+request);
 	}
 }
