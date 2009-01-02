@@ -9,6 +9,8 @@ package info.embryosys.tools.launcher;
 
 import info.embryosys.adt.manager.AdtManager;
 import info.embryosys.adt.manager.impl.SimpleAdtManager;
+import info.embryosys.adt.request.AdtRequest;
+import info.embryosys.adt.request.RequestFactory;
 
 /**
  * @author nrdufour
@@ -17,7 +19,7 @@ import info.embryosys.adt.manager.impl.SimpleAdtManager;
 public class ManagerTester {
 
 	private AdtManager manager;
-	
+
 	/**
 	 * 
 	 */
@@ -26,7 +28,9 @@ public class ManagerTester {
 	}
 
 	public void run() {
+		AdtRequest request = RequestFactory.analyzeString("create Pont");
 
+		this.manager.processRequest(request);
 	}
 
 	/**
