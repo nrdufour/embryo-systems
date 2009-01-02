@@ -47,6 +47,20 @@
 		</jar>
 	</target>
 
+	<target name="deploy-tools" depends="init" description="Deploy the scripts and other tools">
+		<copy todir="${dist}">
+			<fileset dir="${tools}">
+				<include name="**/*.sh" />
+			</fileset>
+		</copy>
+
+		<chmod perm="0755">
+			<fileset dir="${dist}">
+				<include name="**/*.sh" />
+			</fileset>
+		</chmod>
+	</target>
+
 	<!-- ================================================================= -->
 
 	<target name="echo_props">
@@ -55,7 +69,7 @@
 
 	<!-- ================================================================= -->
 
-	<target name="build" depends="clean,build-jar" description="Build all the components">
+	<target name="build" depends="clean,build-jar,deploy-tools" description="Build all the components">
 	</target>
 
 </project>
