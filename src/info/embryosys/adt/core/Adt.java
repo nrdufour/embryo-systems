@@ -18,6 +18,7 @@ import java.util.TreeMap;
 public class Adt {
 
 	private AdtId id;
+	private AdtState state = AdtState.NONE;
 	private String name;
 	private Map<String, String> extra = new TreeMap<String, String>();
 
@@ -34,6 +35,21 @@ public class Adt {
 	 */
 	public void setId(AdtId id) {
 		this.id = id;
+	}
+
+	/**
+	 * @return the state
+	 */
+	public AdtState getState() {
+		return state;
+	}
+
+	/**
+	 * @param state
+	 *            the state to set
+	 */
+	public void setState(AdtState state) {
+		this.state = state;
 	}
 
 	/**
@@ -82,6 +98,8 @@ public class Adt {
 
 		buffer.append("Adt(");
 		buffer.append(this.id);
+		buffer.append(", state: ");
+		buffer.append(this.state);
 		buffer.append(", name: ");
 		buffer.append(this.name);
 		buffer.append(", extra: ");

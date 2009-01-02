@@ -8,7 +8,8 @@
 package info.embryosys.adt.manager.impl;
 
 import info.embryosys.adt.core.Adt;
-import info.embryosys.adt.core.AdtId;
+import info.embryosys.adt.core.AdtFactory;
+import info.embryosys.adt.core.AdtState;
 import info.embryosys.adt.core.AdtType;
 import info.embryosys.adt.manager.AdtManager;
 import info.embryosys.adt.manager.Workspace;
@@ -17,7 +18,6 @@ import info.embryosys.adt.storage.Storage;
 import info.embryosys.adt.storage.impl.DummyStorage;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * @author nrdufour
@@ -54,27 +54,28 @@ public class SimpleAdtManager implements AdtManager {
 	 * .manager.AdtRequest)
 	 */
 	public void processRequest(final AdtRequest request) {
+		Storage storage = workspace.getStorage();
+
 		System.out.println("Processing request: " + request);
+		
+		// FIXME must check the existence of the parents
 
 		switch (request.getOperation()) {
 		case CREATE:
-			create(request.getType(), request.getArguments());
+			create(storage, request.getType(), request.getArguments());
 			break;
 		default:
 		}
 	}
 
-	public void create(AdtType type, List<String> arguments) {
-		Storage storage = workspace.getStorage();
+	public void create(final Storage storage, final AdtType type,
+			final List<String> arguments) {
+		// FIXME must check first if that adt exists or not.
 
-		// FIXME need an ADT Factory here ...
-		Adt adt = new Adt();
-		AdtId id = new AdtId(type, UUID.randomUUID());
-		adt.setId(id);
-
-		// FIXME must be a better way to get that.
-		// FIXME doesn't work for LINK !!!
-		adt.setName(arguments.get(arguments.size() - 1));
+		String name = arguments.get(arguments.size() - 1);
+		Adt adt = AdtFactory.createNewAdt(type, name);
+		
+		adt.setState(AdtState.ALIVE);
 
 		storage.store(adt);
 	}

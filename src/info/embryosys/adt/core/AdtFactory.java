@@ -7,10 +7,23 @@
  */
 package info.embryosys.adt.core;
 
+import java.util.UUID;
+
 /**
  * @author nrdufour
- *
+ * 
  */
 public class AdtFactory {
 
+	public static Adt createNewAdt(final AdtType type, final String name) {
+		Adt adt = new Adt();
+
+		UUID uuid = UUID.randomUUID();
+		AdtId id = new AdtId(type, uuid);
+
+		adt.setId(id);
+		adt.setName(name);
+
+		return adt;
+	}
 }
