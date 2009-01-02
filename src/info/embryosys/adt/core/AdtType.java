@@ -13,6 +13,7 @@ package info.embryosys.adt.core;
  */
 public enum AdtType {
 
+	NONE,
 	CLASS,
 	ATTRIBUTE,
 	LINK,
