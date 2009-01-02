@@ -9,6 +9,7 @@ package info.embryosys.adt.manager.impl;
 
 import info.embryosys.adt.core.Adt;
 import info.embryosys.adt.core.AdtFactory;
+import info.embryosys.adt.core.AdtId;
 import info.embryosys.adt.core.AdtState;
 import info.embryosys.adt.core.AdtType;
 import info.embryosys.adt.manager.AdtManager;
@@ -58,7 +59,7 @@ public class SimpleAdtManager implements AdtManager {
 		Storage storage = workspace.getStorage();
 
 		System.out.println("Processing request: " + request);
-		
+
 		// FIXME must check the existence of the parents
 
 		switch (request.getOperation()) {
@@ -69,7 +70,8 @@ public class SimpleAdtManager implements AdtManager {
 		case AWAKE:
 		case DESTROY:
 		case RESUR:
-			hadr(storage, request.getOperation(), request.getType(), request.getArguments());
+			hadr(storage, request.getOperation(), request.getType(), request
+					.getArguments());
 			break;
 		case PURGE:
 			purge(storage, request.getType(), request.getArguments());
@@ -81,27 +83,27 @@ public class SimpleAdtManager implements AdtManager {
 		}
 	}
 
-/**
+	/**
 	 * @param storage
 	 * @param type
 	 * @param arguments
 	 */
 	private void rename(Storage storage, AdtType type, List<String> arguments) {
 		// TODO Auto-generated method stub
-		
+
 	}
 
-/**
+	/**
 	 * @param storage
 	 * @param type
 	 * @param arguments
 	 */
 	private void purge(Storage storage, AdtType type, List<String> arguments) {
 		// TODO Auto-generated method stub
-		
+
 	}
 
-/**
+	/**
 	 * @param storage
 	 * @param operation
 	 * @param type
@@ -111,6 +113,41 @@ public class SimpleAdtManager implements AdtManager {
 			List<String> arguments) {
 		// TODO Auto-generated method stub
 		
+		String name = arguments.get(arguments.size() - 1);
+		
+		AdtId adtId = storage.find(type, name);
+		if(adtId == null) {
+			throw new RuntimeException("The ADT ["+name+"] doesn't exist !");
+		}
+		
+		Adt adt = storage.load(adtId);
+		
+		// FIXME need to check that the CURRENT state is compatible here
+		
+		AdtState state = null;
+		switch(operation) {
+			case HIBERN:
+				state = AdtState.FROZEN;
+				break;
+			case AWAKE:
+				state = AdtState.ALIVE;
+				break;
+			case DESTROY:
+				state = AdtState.DESTROYED;
+				break;
+			case RESUR:
+				state = AdtState.ALIVE;
+				break;
+			default:
+		}
+		
+		if(state == null) {
+			throw new RuntimeException("Wrong state/Wrong Operation during HADR operation !");
+		}
+		
+		adt.setState(state);
+		
+		storage.store(adt);
 	}
 
 	public void create(final Storage storage, final AdtType type,
@@ -119,7 +156,7 @@ public class SimpleAdtManager implements AdtManager {
 
 		String name = arguments.get(arguments.size() - 1);
 		Adt adt = AdtFactory.createNewAdt(type, name);
-		
+
 		adt.setState(AdtState.ALIVE);
 
 		storage.store(adt);

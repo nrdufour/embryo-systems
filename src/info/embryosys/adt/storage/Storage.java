@@ -9,6 +9,7 @@ package info.embryosys.adt.storage;
 
 import info.embryosys.adt.core.Adt;
 import info.embryosys.adt.core.AdtId;
+import info.embryosys.adt.core.AdtType;
 
 /**
  * @author nrdufour
@@ -21,6 +22,8 @@ public interface Storage {
 	void store(Adt adt);
 
 	void clean(AdtId id);
+	
+	AdtId find(AdtType type, String name);
 	
 	void debugDump();
 }

@@ -9,6 +9,7 @@ package info.embryosys.adt.storage.impl;
 
 import info.embryosys.adt.core.Adt;
 import info.embryosys.adt.core.AdtId;
+import info.embryosys.adt.core.AdtType;
 import info.embryosys.adt.storage.Storage;
 
 import java.util.Map;
@@ -73,6 +74,20 @@ public class DummyStorage implements Storage {
 		for (AdtId id : this.memoryStorage.keySet()) {
 			System.out.println("\t" + this.memoryStorage.get(id));
 		}
+	}
+
+	/* (non-Javadoc)
+	 * @see info.embryosys.adt.storage.Storage#find(info.embryosys.adt.core.AdtType, java.lang.String)
+	 */
+	@Override
+	public AdtId find(AdtType type, String name) {
+		// FIXME very very very stupid implementation for now !!
+		for(Adt adt:this.memoryStorage.values()) {
+			if(adt.getId().getType().equals(type) && adt.getName().equals(name)) {
+				return adt.getId();
+			}
+		}
+		return null;
 	}
 
 }
