@@ -62,6 +62,7 @@ public class RequestFactory {
 
 		AdtType type = AdtType.NONE;
 		List<String> arguments = new LinkedList<String>();
+		// FIXME bug to fix: the last element should be the name: not the case for link
 		for (AdtType possibleType : TYPE_PATTERNS.keySet()) {
 			Pattern pattern = TYPE_PATTERNS.get(possibleType);
 			Matcher matcher = pattern.matcher(argument);
