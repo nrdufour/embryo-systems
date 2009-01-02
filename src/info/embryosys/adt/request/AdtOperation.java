@@ -5,7 +5,7 @@
  *
  * Copyright 2009 Nicolas R. Dufour <nrdufour@gmail.com>
  */
-package info.embryosys.adt.manager;
+package info.embryosys.adt.request;
 
 /**
  * @author nrdufour

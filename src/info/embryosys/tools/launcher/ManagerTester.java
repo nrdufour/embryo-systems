@@ -7,7 +7,8 @@
  */
 package info.embryosys.tools.launcher;
 
-import info.embryosys.adt.manager.SimpleAdtManager;
+import info.embryosys.adt.manager.AdtManager;
+import info.embryosys.adt.manager.impl.SimpleAdtManager;
 
 /**
  * @author nrdufour
@@ -15,7 +16,7 @@ import info.embryosys.adt.manager.SimpleAdtManager;
  */
 public class ManagerTester {
 
-	private SimpleAdtManager manager;
+	private AdtManager manager;
 	
 	/**
 	 * 
