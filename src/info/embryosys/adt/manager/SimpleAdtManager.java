@@ -16,21 +16,26 @@ import java.util.List;
  * @author nrdufour
  * 
  */
-public class AdtManager {
+public class SimpleAdtManager {
 
 	private List<Workspace> workspaces;
 
 	/**
 	 * 
 	 */
-	public AdtManager() {
+	public SimpleAdtManager() {
 		this.workspaces = new LinkedList<Workspace>();
 	}
-	
+
 	public void init() {
-		// FIXME for now it's hardcoded .. I will find a way to configure that through a conf file
-		
+		// FIXME for now it's hardcoded .. I will find a way to configure that
+		// through a conf file
+
 		Workspace dummy = new Workspace("default", new DummyStorage());
 		workspaces.add(dummy);
+	}
+
+	public void processRequest(final AdtRequest request) {
+
 	}
 }
