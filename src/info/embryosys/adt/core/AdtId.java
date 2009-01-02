@@ -13,7 +13,7 @@ import java.util.UUID;
  * @author nrdufour
  * 
  */
-public final class AdtId {
+public final class AdtId implements Comparable<AdtId> {
 
 	private final AdtType type;
 	private UUID id;
@@ -71,5 +71,36 @@ public final class AdtId {
 	@Override
 	public int hashCode() {
 		return this.id.hashCode() + 31 * this.type.hashCode();
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see java.lang.Object#toString()
+	 */
+	@Override
+	public String toString() {
+		StringBuffer buffer = new StringBuffer();
+
+		buffer.append("AdtId(type: ");
+		buffer.append(this.type);
+		buffer.append(", id: ");
+		buffer.append(this.id);
+		buffer.append(")");
+
+		return buffer.toString();
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see java.lang.Comparable#compareTo(java.lang.Object)
+	 */
+	@Override
+	public int compareTo(AdtId o) {
+		if (o == this)
+			return 0;
+
+		return this.toString().compareTo(o.toString());
 	}
 }

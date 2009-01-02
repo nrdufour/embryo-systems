@@ -62,4 +62,17 @@ public class DummyStorage implements Storage {
 		this.memoryStorage.put(adt.getId(), adt);
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see info.embryosys.adt.storage.Storage#debugDump()
+	 */
+	@Override
+	public void debugDump() {
+		System.out.println("Dummy Storage Debug Dump:\n");
+		for (AdtId id : this.memoryStorage.keySet()) {
+			System.out.println("\t" + this.memoryStorage.get(id));
+		}
+	}
+
 }

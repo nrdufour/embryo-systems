@@ -21,4 +21,6 @@ public interface Storage {
 	void store(Adt adt);
 
 	void clean(AdtId id);
+	
+	void debugDump();
 }

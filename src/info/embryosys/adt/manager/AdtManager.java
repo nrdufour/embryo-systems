@@ -18,5 +18,7 @@ public interface AdtManager {
 	public abstract void init();
 
 	public abstract void processRequest(final AdtRequest request);
+	
+	Workspace getWorkspace();
 
 }

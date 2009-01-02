@@ -8,6 +8,7 @@
 package info.embryosys.tools.launcher;
 
 import info.embryosys.adt.manager.AdtManager;
+import info.embryosys.adt.manager.Workspace;
 import info.embryosys.adt.manager.impl.SimpleAdtManager;
 import info.embryosys.adt.request.AdtRequest;
 import info.embryosys.adt.request.RequestFactory;
@@ -28,6 +29,8 @@ public class ManagerTester {
 	}
 
 	public void run() {
+		this.manager.init();
+
 		String[] testValues = { "create Pont", "create Pont[Alma]",
 				"create Pont.Hauteur", "create Pont->enjambe->Fleuve", };
 
@@ -35,6 +38,9 @@ public class ManagerTester {
 			AdtRequest request = RequestFactory.analyzeString(value);
 			this.manager.processRequest(request);
 		}
+
+		Workspace workspace = this.manager.getWorkspace();
+		workspace.getStorage().debugDump();
 	}
 
 	/**

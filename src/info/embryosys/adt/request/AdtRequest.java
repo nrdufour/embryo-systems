@@ -9,7 +9,6 @@ package info.embryosys.adt.request;
 
 import info.embryosys.adt.core.AdtType;
 
-import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -49,8 +48,8 @@ public final class AdtRequest {
 	/**
 	 * @return the arguments
 	 */
-	public Iterator<String> getArguments() {
-		return arguments.iterator();
+	public List<String> getArguments() {
+		return arguments;
 	}
 
 	/*

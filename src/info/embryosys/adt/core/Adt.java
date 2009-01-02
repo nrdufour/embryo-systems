@@ -54,20 +54,40 @@ public class Adt {
 	public void setField(final String key, final String value) {
 		this.extra.put(key, value);
 	}
-	
+
 	public void removeField(final String key) {
 		this.extra.remove(key);
 	}
-	
+
 	public String getField(final String key) {
 		return this.extra.get(key);
 	}
-	
+
 	public void clearFields() {
 		this.extra.clear();
 	}
-	
+
 	public Iterator<String> fieldKeysIterator() {
 		return this.extra.keySet().iterator();
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see java.lang.Object#toString()
+	 */
+	@Override
+	public String toString() {
+		StringBuffer buffer = new StringBuffer();
+
+		buffer.append("Adt(");
+		buffer.append(this.id);
+		buffer.append(", name: ");
+		buffer.append(this.name);
+		buffer.append(", extra: ");
+		buffer.append(this.extra);
+		buffer.append(")");
+
+		return buffer.toString();
 	}
 }
