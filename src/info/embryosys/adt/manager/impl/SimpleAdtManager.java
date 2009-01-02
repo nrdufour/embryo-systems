@@ -11,6 +11,7 @@ import info.embryosys.adt.core.Adt;
 import info.embryosys.adt.core.AdtFactory;
 import info.embryosys.adt.core.AdtId;
 import info.embryosys.adt.core.AdtState;
+import info.embryosys.adt.core.AdtType;
 import info.embryosys.adt.manager.AdtManager;
 import info.embryosys.adt.manager.Workspace;
 import info.embryosys.adt.request.AdtRequest;
@@ -57,58 +58,77 @@ public class SimpleAdtManager implements AdtManager {
 		System.out.println("Processing request: " + request);
 
 		// FIXME must check the existence of the parents
+		if (!checkIfParentsExist(storage, request)) {
+			throw new IllegalArgumentException("Parent classes missing !");
+		}
+
+		AdtId possibleId = storage.find(request.getType(), request.getName());
 
 		switch (request.getOperation()) {
 		case CREATE:
-			create(storage, request);
+			create(storage, request, possibleId);
 			break;
 		case HIBERN:
 		case AWAKE:
 		case DESTROY:
 		case RESUR:
-			hadr(storage, request);
+			hadr(storage, request, possibleId);
 			break;
 		case PURGE:
-			purge(storage, request);
+			purge(storage, request, possibleId);
 			break;
 		case RENAME:
-			rename(storage, request);
+			rename(storage, request, possibleId);
 			break;
 		default:
 		}
 	}
 
 	/**
-	 * @param storage
 	 * @param request
 	 */
-	private void purge(Storage storage, AdtRequest request) {
-		// TODO Auto-generated method stub
-
-	}
-
-	/**
-	 * @param storage
-	 * @param request
-	 */
-	private void rename(Storage storage, AdtRequest request) {
-		// TODO Auto-generated method stub
-
-	}
-
-	/**
-	 * @param storage
-	 * @param request
-	 */
-	private void hadr(Storage storage, AdtRequest request) {
-		String name = request.getName();
-
-		AdtId adtId = storage.find(request.getType(), name);
-		if (adtId == null) {
-			throw new RuntimeException("The ADT [" + name + "] doesn't exist !");
+	private boolean checkIfParentsExist(Storage storage, AdtRequest request) {
+		// FIXME for now, the parents are always of type class because we have
+		// only CALO.
+		for (String parent : request.getParents()) {
+			AdtId parentId = storage.find(AdtType.CLASS, parent);
+			if (parentId == null) {
+				return false;
+			}
 		}
 
-		Adt adt = storage.load(adtId);
+		return true;
+	}
+
+	/**
+	 * @param storage
+	 * @param request
+	 */
+	private void purge(Storage storage, AdtRequest request, AdtId possibleId) {
+		// TODO Auto-generated method stub
+
+	}
+
+	/**
+	 * @param storage
+	 * @param request
+	 */
+	private void rename(Storage storage, AdtRequest request, AdtId possibleId) {
+		// TODO Auto-generated method stub
+
+	}
+
+	/**
+	 * @param storage
+	 * @param request
+	 */
+	private void hadr(Storage storage, AdtRequest request, AdtId possibleId) {
+		if (possibleId == null) {
+			throw new RuntimeException("The ADT [" + request.getName()
+					+ "] doesn't exist !");
+		}
+
+		Adt adt = storage.load(possibleId);
 
 		// FIXME need to check that the CURRENT state is compatible here
 
@@ -139,8 +159,12 @@ public class SimpleAdtManager implements AdtManager {
 		storage.store(adt);
 	}
 
-	public void create(final Storage storage, final AdtRequest request) {
-		// FIXME must check first if that adt exists or not.
+	public void create(final Storage storage, final AdtRequest request,
+			AdtId possibleId) {
+		if (possibleId != null) {
+			throw new RuntimeException("The ADT [" + request.getName()
+					+ "] already exists as " + possibleId);
+		}
 
 		Adt adt = AdtFactory.createNewAdt(request.getType(), request.getName());
 
