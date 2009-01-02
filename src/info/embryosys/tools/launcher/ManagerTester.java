@@ -28,9 +28,13 @@ public class ManagerTester {
 	}
 
 	public void run() {
-		AdtRequest request = RequestFactory.analyzeString("create Pont");
+		String[] testValues = { "create Pont", "create Pont[Alma]",
+				"create Pont.Hauteur", "create Pont-enjambe-Fleuve", };
 
-		this.manager.processRequest(request);
+		for (String value : testValues) {
+			AdtRequest request = RequestFactory.analyzeString(value);
+			this.manager.processRequest(request);
+		}
 	}
 
 	/**
