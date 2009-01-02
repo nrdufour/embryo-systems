@@ -29,7 +29,7 @@ public class ManagerTester {
 
 	public void run() {
 		String[] testValues = { "create Pont", "create Pont[Alma]",
-				"create Pont.Hauteur", "create Pont-enjambe-Fleuve", };
+				"create Pont.Hauteur", "create Pont->enjambe->Fleuve", };
 
 		for (String value : testValues) {
 			AdtRequest request = RequestFactory.analyzeString(value);
