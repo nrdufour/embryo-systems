@@ -41,6 +41,14 @@ public class ManagerTester {
 
 		Workspace workspace = this.manager.getWorkspace();
 		workspace.getStorage().debugDump();
+
+		AdtRequest request = RequestFactory.analyzeString("hibern Pont[Alma]");
+		this.manager.processRequest(request);
+		
+		request = RequestFactory.analyzeString("destroy Pont.Hauteur");
+		this.manager.processRequest(request);
+
+		workspace.getStorage().debugDump();
 	}
 
 	/**
