@@ -33,8 +33,8 @@ public class ManagerTester {
 	public void run() {
 		this.manager.init();
 
-		String[] testValues = { "create Pont", "create Fleuve", "create Pont[Alma]",
-				"create Pont.Hauteur", "create Pont->enjambe->Fleuve", };
+		String[] testValues = { "create Bridge", "create River", "create Bridge[Washington]",
+				"create Bridge.height", "create Bridge->cross->River", };
 
 		for (String value : testValues) {
 			AdtRequest request = RequestFactory.analyzeString(value);
@@ -44,10 +44,10 @@ public class ManagerTester {
 		Workspace workspace = this.manager.getWorkspace();
 		workspace.getStorage().debugDump();
 
-		AdtRequest request = RequestFactory.analyzeString("hibern Pont[Alma]");
+		AdtRequest request = RequestFactory.analyzeString("hibern Bridge[Washington]");
 		this.manager.processRequest(request);
 		
-		request = RequestFactory.analyzeString("destroy Pont.Hauteur");
+		request = RequestFactory.analyzeString("destroy Bridge.height");
 		this.manager.processRequest(request);
 
 		workspace.getStorage().debugDump();
