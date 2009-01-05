@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 
 <!-- Copyright 2009 Nicolas R. Dufour -->
+<!-- This source code is released under the BSD License. -->
 
 <project name="Embryo Systems" basedir="." default="build">
 
