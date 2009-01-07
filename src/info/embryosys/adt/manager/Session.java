@@ -11,13 +11,17 @@ package info.embryosys.adt.manager;
 
 /**
  * @author nrdufour
- *
+ * 
  */
 public interface Session {
 
 	void execute(String query);
-	
+
 	void doThis(String query);
-	
+
 	void commit();
+
+	Repository getRepository();
+
+	Workspace getWorkspace();
 }
