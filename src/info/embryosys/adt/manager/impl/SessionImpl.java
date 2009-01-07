@@ -17,6 +17,7 @@ import info.embryosys.adt.request.AdtRequest;
 import info.embryosys.adt.request.RequestFactory;
 
 import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * @author nrdufour
@@ -24,13 +25,30 @@ import java.util.Queue;
  */
 public class SessionImpl implements Session {
 
-	private AdtManager adtManager;
+	public static Session create(Repository repository, AdtManager adtManager) {
 
-	private Workspace workspace;
+		// FIXME need to change here !
+		Session session = new SessionImpl(adtManager,
+				adtManager.getWorkspace(), repository);
 
-	private Repository repository;
+		return session;
+	}
 
-	private Queue<AdtRequest> requests;
+	private SessionImpl(AdtManager adtManager, Workspace workspace,
+			Repository repository) {
+		this.adtManager = adtManager;
+		this.workspace = workspace;
+		this.repository = repository;
+		this.requests = new ConcurrentLinkedQueue<AdtRequest>();
+	}
+
+	private final AdtManager adtManager;
+
+	private final Workspace workspace;
+
+	private final Repository repository;
+
+	private final Queue<AdtRequest> requests;
 
 	/*
 	 * (non-Javadoc)
@@ -43,6 +61,16 @@ public class SessionImpl implements Session {
 		while ((request = requests.poll()) != null) {
 			executeRequest(request);
 		}
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see info.embryosys.adt.manager.Session#clear()
+	 */
+	@Override
+	public void clear() {
+		this.requests.clear();
 	}
 
 	/*
@@ -95,4 +123,5 @@ public class SessionImpl implements Session {
 			// exception
 		}
 	}
+
 }

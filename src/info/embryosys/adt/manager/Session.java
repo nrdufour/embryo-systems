@@ -20,6 +20,8 @@ public interface Session {
 	void doThis(String query);
 
 	void commit();
+	
+	void clear();
 
 	Repository getRepository();
 
