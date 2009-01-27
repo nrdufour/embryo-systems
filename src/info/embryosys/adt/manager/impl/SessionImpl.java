@@ -55,7 +55,6 @@ public class SessionImpl implements Session {
 	 * 
 	 * @see info.embryosys.adt.manager.Session#commit()
 	 */
-	@Override
 	public void commit() {
 		AdtRequest request = null;
 		while ((request = requests.poll()) != null) {
@@ -68,7 +67,6 @@ public class SessionImpl implements Session {
 	 * 
 	 * @see info.embryosys.adt.manager.Session#clear()
 	 */
-	@Override
 	public void clear() {
 		this.requests.clear();
 	}
@@ -78,7 +76,6 @@ public class SessionImpl implements Session {
 	 * 
 	 * @see info.embryosys.adt.manager.Session#doThis(java.lang.String)
 	 */
-	@Override
 	public void doThis(String query) {
 		AdtRequest request = RequestFactory.analyzeString(query);
 		this.requests.add(request);
@@ -89,7 +86,6 @@ public class SessionImpl implements Session {
 	 * 
 	 * @see info.embryosys.adt.manager.Session#execute(java.lang.String)
 	 */
-	@Override
 	public void execute(String query) {
 		AdtRequest request = RequestFactory.analyzeString(query);
 		executeRequest(request);
@@ -100,7 +96,6 @@ public class SessionImpl implements Session {
 	 * 
 	 * @see info.embryosys.adt.manager.Session#getRepository()
 	 */
-	@Override
 	public Repository getRepository() {
 		return this.repository;
 	}
@@ -110,7 +105,6 @@ public class SessionImpl implements Session {
 	 * 
 	 * @see info.embryosys.adt.manager.Session#getWorkspace()
 	 */
-	@Override
 	public Workspace getWorkspace() {
 		return this.workspace;
 	}

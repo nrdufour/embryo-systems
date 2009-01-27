@@ -38,7 +38,6 @@ public class DummyStorage implements Storage {
 	 * @see
 	 * info.embryosys.adt.storage.Storage#clean(info.embryosys.adt.core.AdtId)
 	 */
-	@Override
 	public void clean(AdtId id) {
 		this.memoryStorage.remove(id);
 	}
@@ -49,7 +48,6 @@ public class DummyStorage implements Storage {
 	 * @see
 	 * info.embryosys.adt.storage.Storage#load(info.embryosys.adt.core.AdtId)
 	 */
-	@Override
 	public Adt load(AdtId id) {
 		return this.memoryStorage.get(id);
 	}
@@ -60,7 +58,6 @@ public class DummyStorage implements Storage {
 	 * @see
 	 * info.embryosys.adt.storage.Storage#store(info.embryosys.adt.core.Adt)
 	 */
-	@Override
 	public void store(Adt adt) {
 		this.memoryStorage.put(adt.getId(), adt);
 	}
@@ -70,7 +67,6 @@ public class DummyStorage implements Storage {
 	 * 
 	 * @see info.embryosys.adt.storage.Storage#debugDump()
 	 */
-	@Override
 	public void debugDump() {
 		System.out.println("Dummy Storage Debug Dump:\n");
 		for (AdtId id : this.memoryStorage.keySet()) {
@@ -81,7 +77,6 @@ public class DummyStorage implements Storage {
 	/* (non-Javadoc)
 	 * @see info.embryosys.adt.storage.Storage#find(info.embryosys.adt.core.AdtType, java.lang.String)
 	 */
-	@Override
 	public AdtId find(AdtType type, String name) {
 		// FIXME very very very stupid implementation for now !!
 		for(Adt adt:this.memoryStorage.values()) {

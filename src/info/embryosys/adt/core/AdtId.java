@@ -98,7 +98,6 @@ public final class AdtId implements Comparable<AdtId> {
 	 * 
 	 * @see java.lang.Comparable#compareTo(java.lang.Object)
 	 */
-	@Override
 	public int compareTo(AdtId o) {
 		if (o == this)
 			return 0;
