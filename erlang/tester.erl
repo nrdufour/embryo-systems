@@ -1,5 +1,5 @@
 %%%
-%%%
+%%% Tester module from Joe Amrstrong's book (Programming Erlang)
 %%%
 -module(tester).
 -export([main/1]).
