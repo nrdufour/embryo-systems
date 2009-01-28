@@ -12,9 +12,12 @@
 	<path id="master-classpath">
 		<pathelement path="${build.classes}" />
 
+		<!-- no library so far to include -->
+		<!--
 		<fileset dir="${lib}">
 			<include name="*.jar" />
 		</fileset>
+		-->
 	</path>
 
 	<!-- ================================================================= -->
