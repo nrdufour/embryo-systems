@@ -1,4 +1,4 @@
--module(adt_exec_server).
+-module(adt_executor).
 -behavior(gen_server).
 
 -export([execute/0, start_link/0]).
