@@ -4,9 +4,11 @@
 	[{description, "Embryo Systems"},
 	 {vsn, "0.1"},
 	 {modules, [embryosys_app, embryosys_supervisor, adt_executor,
-		    adtm_family, adtm_property, adtm_link, adtm_entity]},
+		    adtm_family, adtm_property, adtm_link, adtm_entity,
+		    storage_server]},
 	 {registered, [adt_executor, adtm_family, adtm_property,
-		       adtm_link, adtm_entity, embryosys_supervisor]},
+		       adtm_link, adtm_entity, storage_server,
+		       embryosys_supervisor]},
 	 {applications, [kernel,stdlib]},
 	 {mod, {embryosys_app, []}},
 	 {start_phases, []}

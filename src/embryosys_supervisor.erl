@@ -51,6 +51,12 @@ init([]) ->
 			permanent,
 			10000,
 			worker,
-			[adtm_entity]}
+			[adtm_entity]},
+		{tag6,
+			{storage_server, start_link, []},
+			permanent,
+			10000,
+			worker,
+			[storage_server]}
 	]}}.
 
