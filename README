@@ -2,11 +2,10 @@
 * README FILE                *
 ******************************
 
-This project is currently still in development.
+Embryo Systems is a server allowing you to create entities that follow
+*or* not a given "family" (or sometimes called model, or class).
 
-A java version is available as a first prototype.
-An Erlang version is about to be written to confirm
-the prototype in java.
+Those entities are always persisted and can be redefined at any moment.
 
 Nicolas Dufour
 
