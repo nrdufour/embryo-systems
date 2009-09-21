@@ -2,11 +2,10 @@
 * README FILE                *
 ******************************
 
-This project is currently still in development.
+This is the java version of embryo-systems.
+It's mostly a prototype to make sure it's working properly.
 
-A java version is available as a first prototype.
-An Erlang version is about to be written to confirm
-the prototype in java.
+The main development is now on the master branch in erlang.
 
 Nicolas Dufour
 
