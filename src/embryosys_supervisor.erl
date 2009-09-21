@@ -16,6 +16,7 @@
 
 -module(embryosys_supervisor).
 -behavior(supervisor).
+-author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -export([start/0, start_in_shell_for_testing/0, start_link/1, init/1]).
 

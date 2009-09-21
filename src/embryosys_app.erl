@@ -16,6 +16,7 @@
 
 -module(embryosys_app).
 -behavior(application).
+-author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -export([start/2, stop/1]).
 

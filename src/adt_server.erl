@@ -16,6 +16,7 @@
 
 -module(adt_server).
 -behavior(gen_server).
+-author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -export([execute/4, start_link/0]).
 

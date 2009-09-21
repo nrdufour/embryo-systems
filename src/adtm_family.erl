@@ -16,6 +16,7 @@
 
 -module(adtm_family).
 -behavior(gen_server).
+-author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -export([execute/2, start_link/0]).
 
