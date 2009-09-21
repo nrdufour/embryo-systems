@@ -35,33 +35,27 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
 %%% ==========================================================================
 
-execute_operation({Operation, [FamilyName], _Extra}) ->
-	io:format("Familiy Manager: Executing ~p operation on ~p~n", [Operation, FamilyName]),
+execute_operation({create, [Name], _Extra}) ->
+	io:format("Create family ~p~n", [Name]),
+	ok;
 
-	case Operation of
-		create  -> create_family(FamilyName);
-		hibern  -> hibern_family(FamilyName);
-		awake   -> awake_family(FamilyName);
-		destroy -> destroy_family(FamilyName);
-		resur   -> resur_family(FamilyName);
-		purge   -> purge_family(FamilyName)
-	end.
+execute_operation({hibern, [Name], _Extra}) ->
+	io:format("Hibern family ~p~n", [Name]),
+	ok;
 
-create_family(Name) ->
-	io:format("Create family ~p~n", [Name]).
+execute_operation({awake, [Name], _Extra}) ->
+	io:format("Awake family ~p~n", [Name]),
+	ok;
 
-hibern_family(Name) ->
-	io:format("Hibern family ~p~n", [Name]).
+execute_operation({destroy, [Name], _Extra}) ->
+	io:format("Destroy family ~p~n", [Name]),
+	ok;
 
-awake_family(Name) ->
-	io:format("Awake family ~p~n", [Name]).
+execute_operation({resur, [Name], _Extra}) ->
+	io:format("Resur family ~p~n", [Name]),
+	ok;
 
-destroy_family(Name) ->
-	io:format("Destroy family ~p~n", [Name]).
-
-resur_family(Name) ->
-	io:format("Resur family ~p~n", [Name]).
-
-purge_family(Name) ->
-	io:format("Purge family ~p~n", [Name]).
+execute_operation({purge, [Name], _Extra}) ->
+	io:format("Purge family ~p~n", [Name]),
+	ok.
 
