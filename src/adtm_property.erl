@@ -1,7 +1,7 @@
 -module(adtm_property).
 -behavior(gen_server).
 
--export([start_link/0]).
+-export([execute/3, start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -9,6 +9,9 @@
 
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+execute(Operation, Names, Extra) ->
+	gen_server:call(?MODULE, {execute, {Operation, Names, Extra}}).
 
 init([]) ->
 	%% Note we must set trap_exit = true if we
@@ -18,7 +21,7 @@ init([]) ->
 	io:format("~p starting~n", [?MODULE]),
 	{ok, 0}.
 
-handle_call({execute, _Args}, _From, N) -> {reply, ok, N+1}.
+handle_call({execute, Args}, _From, N) -> {reply, execute_operation(Args), N+1}.
 
 handle_cast(_Msg, N) -> {noreply, N}.
 
@@ -29,4 +32,7 @@ terminate(_Reason, _N) ->
 	ok.
 
 code_change(_OldVsn, N, _Extra) -> {ok, N}.
+
+execute_operation({Operation, Names, _Extra}) ->
+	io:format("Property Manager: Executing ~p operation on ~p~n", [Operation, Names]).
 
