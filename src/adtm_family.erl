@@ -1,7 +1,7 @@
 -module(adtm_family).
 -behavior(gen_server).
 
--export([execute/3, start_link/0]).
+-export([execute/2, start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -10,8 +10,8 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-execute(Operation, Names, Extra) ->
-	gen_server:call(?MODULE, {execute, {Operation, Names, Extra}}).
+execute(Operation, Name) ->
+	gen_server:call(?MODULE, {execute, {Operation, Name}}).
 
 init([]) ->
 	%% Note we must set trap_exit = true if we
@@ -35,27 +35,27 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
 %%% ==========================================================================
 
-execute_operation({create, [Name], _Extra}) ->
+execute_operation({create, Name}) ->
 	io:format("Create family ~p~n", [Name]),
 	ok;
 
-execute_operation({hibern, [Name], _Extra}) ->
+execute_operation({hibern, Name}) ->
 	io:format("Hibern family ~p~n", [Name]),
 	ok;
 
-execute_operation({awake, [Name], _Extra}) ->
+execute_operation({awake, Name}) ->
 	io:format("Awake family ~p~n", [Name]),
 	ok;
 
-execute_operation({destroy, [Name], _Extra}) ->
+execute_operation({destroy, Name}) ->
 	io:format("Destroy family ~p~n", [Name]),
 	ok;
 
-execute_operation({resur, [Name], _Extra}) ->
+execute_operation({resur, Name}) ->
 	io:format("Resur family ~p~n", [Name]),
 	ok;
 
-execute_operation({purge, [Name], _Extra}) ->
+execute_operation({purge, Name}) ->
 	io:format("Purge family ~p~n", [Name]),
 	ok.
 
