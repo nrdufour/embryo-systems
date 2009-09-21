@@ -33,6 +33,35 @@ terminate(_Reason, _N) ->
 
 code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
-execute_operation({Operation, Names, _Extra}) ->
-	io:format("Familiy Manager: Executing ~p operation on ~p~n", [Operation, Names]).
+%%% ==========================================================================
+
+execute_operation({Operation, [FamilyName], _Extra}) ->
+	io:format("Familiy Manager: Executing ~p operation on ~p~n", [Operation, FamilyName]),
+
+	case Operation of
+		create  -> create_family(FamilyName);
+		hibern  -> hibern_family(FamilyName);
+		awake   -> awake_family(FamilyName);
+		destroy -> destroy_family(FamilyName);
+		resur   -> resur_family(FamilyName);
+		purge   -> purge_family(FamilyName)
+	end.
+
+create_family(Name) ->
+	io:format("Create family ~p~n", [Name]).
+
+hibern_family(Name) ->
+	io:format("Hibern family ~p~n", [Name]).
+
+awake_family(Name) ->
+	io:format("Awake family ~p~n", [Name]).
+
+destroy_family(Name) ->
+	io:format("Destroy family ~p~n", [Name]).
+
+resur_family(Name) ->
+	io:format("Resur family ~p~n", [Name]).
+
+purge_family(Name) ->
+	io:format("Purge family ~p~n", [Name]).
 
