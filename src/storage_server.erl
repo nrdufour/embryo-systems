@@ -26,6 +26,9 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+store(Type, Data) ->
+	gen_server:call(?MODULE, {store, {Type, Data}}).
+
 init([]) ->
 	%% Note we must set trap_exit = true if we
 	%% want terminate/2 to be called when the application
@@ -42,7 +45,9 @@ init([]) ->
 
 	{ok, 0}.
 
-handle_call({execute, Args}, _From, N) -> {reply, ok, N+1}.
+handle_call({store, {Type, Data}}, _From, N) ->
+	Reply = do_store(Type, Data),
+	{reply, Reply, N+1}.
 
 handle_cast(_Msg, N) -> {noreply, N}.
 
@@ -65,20 +70,21 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
 %%% ==========================================================================
 
-store(family, Data) ->
-	io:format("Storing data ~p in family file~n", [Data]),
-	dets:insert(es_family.dets, Data);
+do_store(Type, Data) ->
+	io:format("Storing data ~p in ~p file~n", [Data, Type]),
+	Filename = type_file(Type),
+	dets:insert(Filename, Data)
+	ok.
 
-store(property, Data) ->
-	io:format("Storing data ~p in property file~n", [Data]),
-	dets:insert(es_property.dets, Data);
-
-store(link, Data) ->
-	io:format("Storing data ~p in link file~n", [Data]),
-	dets:insert(es_link.dets, Data);
-
-store(entity, Data) ->
-	io:format("Storing data ~p in entity file~n", [Data]),
-	dets:insert(es_entity.dets, Data).
+type_file(family) ->
+	es_family.dets;
+type_file(property) ->
+	es_property.dets;
+type_file(link) ->
+	es_link.dets;
+type_file(entity) ->
+	es_entity.dets;
+type_file(_) ->
+	throw(wrong_type).
 
 %%
