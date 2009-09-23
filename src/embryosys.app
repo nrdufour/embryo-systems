@@ -6,9 +6,7 @@
 	 {modules, [embryosys_app, embryosys_supervisor, adt_server,
 		    adtm_family, adtm_property, adtm_link, adtm_entity,
 		    storage_server]},
-	 {registered, [adt_server, adtm_family, adtm_property,
-		       adtm_link, adtm_entity, storage_server,
-		       embryosys_supervisor]},
+	 {registered, [adt_server, storage_server, embryosys_supervisor]},
 	 {applications, [kernel,stdlib]},
 	 {mod, {embryosys_app, []}},
 	 {start_phases, []}
