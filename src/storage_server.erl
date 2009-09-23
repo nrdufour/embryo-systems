@@ -17,7 +17,7 @@
 -module(storage_server).
 -behavior(gen_server).
 
--export([start_link/0]).
+-export([store/2, start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -32,6 +32,14 @@ init([]) ->
 	%% is stopped
 	process_flag(trap_exit, true),
 	io:format("~p starting~n", [?MODULE]),
+
+	%% opening dets files
+	%% FIXME need a nice way to configure the path of those files
+	dets:open_file(es_family.dets, [{type, set}]),
+	dets:open_file(es_property.dets, [{type, set}]),
+	dets:open_file(es_link.dets, [{type, set}]),
+	dets:open_file(es_entity.dets, [{type, set}]),
+
 	{ok, 0}.
 
 handle_call({execute, Args}, _From, N) -> {reply, ok, N+1}.
@@ -42,9 +50,35 @@ handle_info(_Info, N) -> {noreply, N}.
 
 terminate(_Reason, _N) ->
 	io:format("~p stopping~n", [?MODULE]),
+
+	%% closing the files
+	%% FIXME still need a way to configure the path
+
+	dets:close(es_family.dets),
+	dets:close(es_property.dets),
+	dets:close(es_link.dets),
+	dets:close(es_entity.dets),
+
 	ok.
 
 code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
 %%% ==========================================================================
 
+store(family, Data) ->
+	io:format("Storing data ~p in family file~n", [Data]),
+	dets:insert(es_family.dets, Data);
+
+store(property, Data) ->
+	io:format("Storing data ~p in property file~n", [Data]),
+	dets:insert(es_property.dets, Data);
+
+store(link, Data) ->
+	io:format("Storing data ~p in link file~n", [Data]),
+	dets:insert(es_link.dets, Data);
+
+store(entity, Data) ->
+	io:format("Storing data ~p in entity file~n", [Data]),
+	dets:insert(es_entity.dets, Data).
+
+%%
