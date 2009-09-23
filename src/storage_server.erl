@@ -73,7 +73,7 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 do_store(Type, Data) ->
 	io:format("Storing data ~p in ~p file~n", [Data, Type]),
 	Filename = type_file(Type),
-	dets:insert(Filename, Data)
+	dets:insert(Filename, Data),
 	ok.
 
 type_file(family) ->
