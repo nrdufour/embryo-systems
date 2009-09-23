@@ -50,7 +50,7 @@ terminate(_Reason, _N) ->
 
 code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
-execute_operation({Operation, family, Names, Extra}) ->
+execute_operation({Operation, family, Names, _Extra}) ->
 	[FamilyName] = Names,
 	adtm_family:execute(Operation, FamilyName);
 
