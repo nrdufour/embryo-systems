@@ -38,7 +38,8 @@ init([]) ->
 	io:format("~p starting~n", [?MODULE]),
 	{ok, 0}.
 
-handle_call({execute, Args}, _From, N) -> {reply, execute_operation(Args), N+1}.
+handle_call({execute, {Operation, Type, Names, Extra}}, _From, N) ->
+	{reply, execute_operation(Operation, Type, Names, Extra), N+1}.
 
 handle_cast(_Msg, N) -> {noreply, N}.
 
@@ -50,16 +51,16 @@ terminate(_Reason, _N) ->
 
 code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
-execute_operation({Operation, family, Names, _Extra}) ->
+execute_operation(Operation, family, Names, _Extra) ->
 	[FamilyName] = Names,
 	adtm_family:execute(Operation, FamilyName);
 
-execute_operation({Operation, property, Names, Extra}) ->
+execute_operation(Operation, property, Names, Extra) ->
 	adtm_property:execute(Operation, Names, Extra);
 
-execute_operation({Operation, link, Names, Extra}) ->
+execute_operation(Operation, link, Names, Extra) ->
 	adtm_link:execute(Operation, Names, Extra);
 
-execute_operation({Operation, entity, Names, Extra}) ->
+execute_operation(Operation, entity, Names, Extra) ->
 	adtm_entity:execute(Operation, Names, Extra).
 
