@@ -17,7 +17,7 @@
 -module(storage_server).
 -behavior(gen_server).
 
--export([store/2, start_link/0]).
+-export([store/2, load/1, start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -28,6 +28,9 @@ start_link() ->
 
 store(Header, Data) ->
 	gen_server:call(?MODULE, {store, {Header, Data}}).
+
+load(Header) ->
+	gen_server:call(?MODULE, {load, Header}).
 
 init([]) ->
 	%% Note we must set trap_exit = true if we
@@ -44,6 +47,10 @@ init([]) ->
 
 handle_call({store, {Header, Data}}, _From, N) ->
 	Reply = do_store(Header, Data),
+	{reply, Reply, N+1};
+
+handle_call({load, Header}, _From, N) ->
+	Reply = do_load(Header),
 	{reply, Reply, N+1}.
 
 handle_cast(_Msg, N) -> {noreply, N}.
@@ -66,5 +73,8 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 do_store(Header, Data) ->
 	dets:insert(embryosys.dets, {Header, Data}),
 	ok.
+
+do_load(Header) ->
+	dets:lookup(embryosys.dets, Header).
 
 %%
