@@ -40,7 +40,7 @@ init([]) ->
 	%% FIXME need a nice way to configure the path of those files
 	dets:open_file(es_family.dets, [{type, set}]),
 	dets:open_file(es_property.dets, [{type, set}]),
-	dets:open_file(es_link.dets, [{type, set}]),
+	dets:open_file(es_relation.dets, [{type, set}]),
 	dets:open_file(es_entity.dets, [{type, set}]),
 
 	{ok, 0}.
@@ -61,7 +61,7 @@ terminate(_Reason, _N) ->
 
 	dets:close(es_family.dets),
 	dets:close(es_property.dets),
-	dets:close(es_link.dets),
+	dets:close(es_relation.dets),
 	dets:close(es_entity.dets),
 
 	ok.
@@ -80,8 +80,8 @@ type_file(family) ->
 	es_family.dets;
 type_file(property) ->
 	es_property.dets;
-type_file(link) ->
-	es_link.dets;
+type_file(relation) ->
+	es_relation.dets;
 type_file(entity) ->
 	es_entity.dets;
 type_file(_) ->

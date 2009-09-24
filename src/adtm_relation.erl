@@ -14,11 +14,11 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(adtm_link).
+-module(adtm_relation).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -export([execute/3]).
 
 execute(Operation, Names, _Extra) ->
-	io:format("Link Manager: Executing ~p operation on ~p~n", [Operation, Names]).
+	io:format("Relation Manager: Executing ~p operation on ~p~n", [Operation, Names]).
 

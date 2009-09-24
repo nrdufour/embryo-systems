@@ -4,7 +4,7 @@
 	[{description, "Embryo Systems"},
 	 {vsn, "0.1"},
 	 {modules, [embryosys_app, embryosys_supervisor, adt_server,
-		    adtm_family, adtm_property, adtm_link, adtm_entity,
+		    adtm_family, adtm_property, adtm_relation, adtm_entity,
 		    storage_server]},
 	 {registered, [adt_server, storage_server, embryosys_supervisor]},
 	 {applications, [kernel,stdlib]},

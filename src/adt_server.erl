@@ -58,8 +58,8 @@ execute_operation(Operation, family, Names, _Extra) ->
 execute_operation(Operation, property, Names, Extra) ->
 	adtm_property:execute(Operation, Names, Extra);
 
-execute_operation(Operation, link, Names, Extra) ->
-	adtm_link:execute(Operation, Names, Extra);
+execute_operation(Operation, relation, Names, Extra) ->
+	adtm_relation:execute(Operation, Names, Extra);
 
 execute_operation(Operation, entity, Names, Extra) ->
 	adtm_entity:execute(Operation, Names, Extra).
