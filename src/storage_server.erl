@@ -26,8 +26,8 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-store(Type, Data) ->
-	gen_server:call(?MODULE, {store, {Type, Data}}).
+store(Header, Data) ->
+	gen_server:call(?MODULE, {store, {Header, Data}}).
 
 init([]) ->
 	%% Note we must set trap_exit = true if we
@@ -38,15 +38,12 @@ init([]) ->
 
 	%% opening dets files
 	%% FIXME need a nice way to configure the path of those files
-	dets:open_file(es_family.dets, [{type, set}]),
-	dets:open_file(es_property.dets, [{type, set}]),
-	dets:open_file(es_relation.dets, [{type, set}]),
-	dets:open_file(es_entity.dets, [{type, set}]),
+	dets:open_file(embryosys.dets, [{type, set}]),
 
 	{ok, 0}.
 
-handle_call({store, {Type, Data}}, _From, N) ->
-	Reply = do_store(Type, Data),
+handle_call({store, {Header, Data}}, _From, N) ->
+	Reply = do_store(Header, Data),
 	{reply, Reply, N+1}.
 
 handle_cast(_Msg, N) -> {noreply, N}.
@@ -58,11 +55,7 @@ terminate(_Reason, _N) ->
 
 	%% closing the files
 	%% FIXME still need a way to configure the path
-
-	dets:close(es_family.dets),
-	dets:close(es_property.dets),
-	dets:close(es_relation.dets),
-	dets:close(es_entity.dets),
+	dets:close(embryosys.dets),
 
 	ok.
 
@@ -70,21 +63,8 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
 %%% ==========================================================================
 
-do_store(Type, Data) ->
-	io:format("Storing data ~p in ~p file~n", [Data, Type]),
-	Filename = type_file(Type),
-	dets:insert(Filename, Data),
+do_store(Header, Data) ->
+	dets:insert(embryosys.dets, {Header, Data}),
 	ok.
-
-type_file(family) ->
-	es_family.dets;
-type_file(property) ->
-	es_property.dets;
-type_file(relation) ->
-	es_relation.dets;
-type_file(entity) ->
-	es_entity.dets;
-type_file(_) ->
-	throw(wrong_type).
 
 %%
