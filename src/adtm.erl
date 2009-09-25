@@ -14,27 +14,25 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
-%% @record adt_id
--record(adt_id, {
-		%% type: family / property / relation / entity (for now).
-		type,
-		%% address: tuple containing n uuid according to the type.
-		%% 	family:   { x }
-		%%	property: { x, y }
-		%%	relation: { x, y, z }
-		%%	entity:   { x, y }
-		address
-	}).
+-module(adtm).
+-author('Nicolas R Dufour <nrdufour@gmail.com>').
 
-%% @record adt
--record(adt, {
-		%% id: adt_id record
-		id,
-		%% fname: friendly name.
-		fname,
-		%% state: alive / frozen / destroyed.
-		state
+-export([new/2, new_id/1]).
 
-		%% TODO probably need to add more fields here ...
-	}).
+-include("adt.hrl").
+
+%% create a brand new adt (blank)
+new(Type, Name) ->
+	#adt{id = new_id(Type), fname = Name, state = alive}.
+
+%% create an adt id baed on its type
+new_id(Type) ->
+	Address = case Type of
+		family   -> { 0 };
+		property -> { 0 , 0 };
+		relation -> { 0 , 0 , 0 };
+		entity   -> { 0 , 0 };
+		_        -> { 0 }
+	end,
+	#adt_id{ type = family, address = Address }.
 
