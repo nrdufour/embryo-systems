@@ -17,7 +17,7 @@
 -module(storage_server).
 -behavior(gen_server).
 
--export([store/2, load/1, start_link/0]).
+-export([store/3, load/2, start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -26,11 +26,11 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-store(Header, Data) ->
-	gen_server:call(?MODULE, {store, {Header, Data}}).
+store(Type, Id, Data) ->
+	gen_server:call(?MODULE, {store, {{Type, Id}, Data}}).
 
-load(Header) ->
-	gen_server:call(?MODULE, {load, Header}).
+load(Type, Id) ->
+	gen_server:call(?MODULE, {load, {Type, Id}}).
 
 init([]) ->
 	%% Note we must set trap_exit = true if we
