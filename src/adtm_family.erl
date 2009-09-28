@@ -21,22 +21,37 @@
 
 execute(create, Name) ->
 	io:format("Create family ~p~n", [Name]),
+	Adt = adtm:new(family, Name),
+	storage_server:store(family, Name, Adt),
 	ok;
 
 execute(hibern, Name) ->
 	io:format("Hibern family ~p~n", [Name]),
+	Previous = storage_server:load(family, Name),
+	Adt = Previous#adt{state = frozen},
+	storage_server:store(family, Name, Adt),
 	ok;
 
 execute(awake, Name) ->
 	io:format("Awake family ~p~n", [Name]),
+	Previous = storage_server:load(family, Name),
+	Adt = Previous#adt{state = alive},
+	storage_server:store(family, Name, Adt),
 	ok;
 
 execute(destroy, Name) ->
 	io:format("Destroy family ~p~n", [Name]),
+	Previous = storage_server:load(family, Name),
+	Adt = Previous#adt{state = destroyed},
+	storage_server:store(family, Name, Adt),
 	ok;
 
 execute(resur, Name) ->
 	io:format("Resur family ~p~n", [Name]),
+	Adt = adtm:new(family, Name),
+	Previous = storage_server:load(family, Name),
+	Adt = Previous#adt{state = alive},
+	storage_server:store(family, Name, Adt),
 	ok;
 
 execute(purge, Name) ->
