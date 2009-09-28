@@ -36,3 +36,7 @@ new_id(Type) ->
 	end,
 	#adt_id{ type = family, address = Address }.
 
+change_adt_state(Operation, Adt) ->
+	ok.
+
+
