@@ -21,42 +21,32 @@
 
 -export([execute/2]).
 
-execute(create, Name) ->
+execute(Operation, Name) ->
+	case Operation of
+		create -> create(Name);
+		hibern -> hadr(Operation, Name);
+		awake -> hadr(Operation, Name);
+		destroy -> hadr(Operation, Name);
+		resur -> hadr(Operation, Name);
+		purge -> purge(Name)
+	end.
+
+create(Name) ->
 	io:format("Create family ~p~n", [Name]),
 	Adt = adtm:new(family, Name),
 	storage_server:store(family, Name, Adt),
-	ok;
+	ok.
 
-execute(hibern, Name) ->
-	io:format("Hibern family ~p~n", [Name]),
+hadr(Operation, Name) ->
+	io:format("~p family ~p~n", [Operation, Name]),
 	Previous = storage_server:load(family, Name),
-	Adt = Previous#adt{state = frozen},
+	PreviousState = Previous#adt.state,
+	NewState = adtm:new_state_after(Operation, PreviousState),
+	Adt = Previous#adt{state = NewState},
 	storage_server:store(family, Name, Adt),
-	ok;
+	ok.
 
-execute(awake, Name) ->
-	io:format("Awake family ~p~n", [Name]),
-	Previous = storage_server:load(family, Name),
-	Adt = Previous#adt{state = alive},
-	storage_server:store(family, Name, Adt),
-	ok;
-
-execute(destroy, Name) ->
-	io:format("Destroy family ~p~n", [Name]),
-	Previous = storage_server:load(family, Name),
-	Adt = Previous#adt{state = destroyed},
-	storage_server:store(family, Name, Adt),
-	ok;
-
-execute(resur, Name) ->
-	io:format("Resur family ~p~n", [Name]),
-	Adt = adtm:new(family, Name),
-	Previous = storage_server:load(family, Name),
-	Adt = Previous#adt{state = alive},
-	storage_server:store(family, Name, Adt),
-	ok;
-
-execute(purge, Name) ->
+purge(Name) ->
 	io:format("Purge family ~p~n", [Name]),
 	ok.
 

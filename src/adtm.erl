@@ -17,7 +17,7 @@
 -module(adtm).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
--export([new/2, new_id/1]).
+-export([new/2, new_id/1, new_state_after/2]).
 
 -include("adt.hrl").
 
@@ -36,4 +36,20 @@ new_id(Type) ->
 	end,
 	#adt_id{ type = family, address = Address }.
 
+%% State transition grid (strict)
+new_state_after(create, none) ->
+	alive;
+new_state_after(hibern, alive) ->
+	frozen;
+new_state_after(awake, frozen) ->
+	alive;
+new_state_after(destroy, alive) ->
+	destroyed;
+new_state_after(resur, destroyed) ->
+	alive;
+new_state_after(purge, destroyed) ->
+	none;
+new_state_after(_, _) ->
+	throw(wrong_state).
 
+%%
