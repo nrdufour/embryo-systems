@@ -37,19 +37,15 @@ new_id(Type) ->
 	#adt_id{ type = family, address = Address }.
 
 %% State transition grid (strict)
-new_state_after(create, none) ->
-	alive;
-new_state_after(hibern, alive) ->
-	frozen;
-new_state_after(awake, frozen) ->
-	alive;
-new_state_after(destroy, alive) ->
-	destroyed;
-new_state_after(resur, destroyed) ->
-	alive;
-new_state_after(purge, destroyed) ->
-	none;
-new_state_after(_, _) ->
-	wrong_state.
+new_state_after(Operation, State) ->
+	case {Operation, State} of
+		{creation, none}   -> alive;
+		{hibern, alive}    -> frozen;
+		{awake, frozen}    -> alive;
+		{destroy, alive}   -> destroyed;
+		{resur, destroyed} -> alive;
+		{purge, destroyed} -> none;
+		{_, _}             -> wrong_state
+	end.
 
 %%
