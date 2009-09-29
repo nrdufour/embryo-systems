@@ -40,12 +40,19 @@ create(Name) ->
 
 hadr(Operation, Name) ->
 	io:format("~p family ~p~n", [Operation, Name]),
+
 	Previous = storage_server:load(family, Name),
 	PreviousState = Previous#adt.state,
 	NewState = adtm:new_state_after(Operation, PreviousState),
-	Adt = Previous#adt{state = NewState},
-	storage_server:store(family, Name, Adt),
-	ok.
+
+	case NewState of
+		wrong_state ->
+			wrong_state;
+		_ ->
+			Adt = Previous#adt{state = NewState},
+			storage_server:store(family, Name, Adt),
+			ok
+	end.
 
 purge(Name) ->
 	io:format("Purge family ~p~n", [Name]),

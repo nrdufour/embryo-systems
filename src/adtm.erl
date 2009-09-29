@@ -50,6 +50,6 @@ new_state_after(resur, destroyed) ->
 new_state_after(purge, destroyed) ->
 	none;
 new_state_after(_, _) ->
-	throw(wrong_state).
+	wrong_state.
 
 %%
