@@ -34,7 +34,8 @@ execute(Operation, Name) ->
 create(Name) ->
 	io:format("Create family ~p~n", [Name]),
 	Adt = adtm:new(family, Name),
-	storage_server:store(family, Name, Adt),
+	AliveAdt = Adt#adt{state = alive},
+	storage_server:store(family, Name, AliveAdt),
 	ok.
 
 hadr(Operation, Name) ->
