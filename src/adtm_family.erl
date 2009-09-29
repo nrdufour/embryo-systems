@@ -17,6 +17,8 @@
 -module(adtm_family).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
+-include("adt.hrl").
+
 -export([execute/2]).
 
 execute(create, Name) ->
