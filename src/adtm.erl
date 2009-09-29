@@ -23,7 +23,7 @@
 
 %% create a brand new adt (blank)
 new(Type, Name) ->
-	#adt{id = new_id(Type), fname = Name, state = alive}.
+	#adt{id = new_id(Type), fname = Name, state = none}.
 
 %% create an adt id baed on its type
 new_id(Type) ->
@@ -35,4 +35,5 @@ new_id(Type) ->
 		_        -> { 0 }
 	end,
 	#adt_id{ type = family, address = Address }.
+
 

@@ -32,8 +32,8 @@
 		id,
 		%% fname: friendly name.
 		fname,
-		%% state: alive / frozen / destroyed.
-		state
+		%% state: none / alive / frozen / destroyed.
+		state = none
 
 		%% TODO probably need to add more fields here ...
 	}).
