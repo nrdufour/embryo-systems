@@ -17,7 +17,7 @@
 -module(adtm).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
--export([new/2, new_id/1, new_state_after/2]).
+-export([new/2, new_id/1, new_state_after/2, is_ready_for/2]).
 
 -include("adt.hrl").
 
@@ -47,5 +47,8 @@ new_state_after(Operation, State) ->
 		{purge, destroyed} -> none;
 		{_, _}             -> wrong_state
 	end.
+
+is_ready_for(Operation, State) ->
+	new_state_after(Operation, State) /= wrong_state.
 
 %%
