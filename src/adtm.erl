@@ -25,7 +25,7 @@
 new(Type, Name) ->
 	#adt{id = new_id(Type), fname = Name, state = none}.
 
-%% create an adt id baed on its type
+%% @spec new_id(type()) -> adt()
 new_id(Type) ->
 	Address = case Type of
 		family   -> { 0 };

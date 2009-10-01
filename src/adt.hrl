@@ -14,7 +14,11 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
-%% @record adt_id
+%% @type type() = family | property | relation | entity.
+%% @type state() = none | alive | frozen | destroyed.
+%% @type address() = { int() } | { int(), int() } | { int(), int(), int() }.
+
+%% @type adt_id() = {adt_id, type(), address()}.
 -record(adt_id, {
 		%% type: family / property / relation / entity (for now).
 		type,
@@ -26,7 +30,7 @@
 		address
 	}).
 
-%% @record adt
+%% @type adt() = {adt, adt_id(), string(), state()}.
 -record(adt, {
 		%% id: adt_id record
 		id,
