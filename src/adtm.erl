@@ -39,7 +39,7 @@ new_id(Type) ->
 %% State transition grid (strict)
 new_state_after(Operation, State) ->
 	case {Operation, State} of
-		{creation, none}   -> alive;
+		{create, none}   -> alive;
 		{hibern, alive}    -> frozen;
 		{awake, frozen}    -> alive;
 		{destroy, alive}   -> destroyed;
