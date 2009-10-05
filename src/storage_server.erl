@@ -76,7 +76,7 @@ do_store(Header, Data) ->
 
 do_load(Header) ->
 	case dets:lookup(embryosys.dets, Header) of
-		[{_Header, Data}] -> Data;
+		[{_ReturnedHeader, Data}] -> Data;
 		_ -> not_found
 	end.
 

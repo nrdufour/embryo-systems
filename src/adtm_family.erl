@@ -41,17 +41,23 @@ create(Name) ->
 hadr(Operation, Name) ->
 	io:format("~p family ~p~n", [Operation, Name]),
 
+	% first grab the adt from the storage
 	Previous = storage_server:load(family, Name),
-	PreviousState = Previous#adt.state,
-	NewState = adtm:new_state_after(Operation, PreviousState),
-
-	case NewState of
-		wrong_state ->
-			wrong_state;
+	case Previous of
+		not_found ->
+			not_found;
 		_ ->
-			Adt = Previous#adt{state = NewState},
-			storage_server:store(family, Name, Adt),
-			ok
+			% compute its new state
+			NewState = adtm:new_state_after(Operation, Previous#adt.state),
+			case NewState of
+				wrong_state ->
+					wrong_state;
+				_ ->
+					% and store it
+					UpdatedAdt = Previous#adt{state = NewState},
+					storage_server:store(family, Name, UpdatedAdt),
+					ok
+			end
 	end.
 
 purge(Name) ->
