@@ -17,7 +17,7 @@
 -module(storage_server).
 -behavior(gen_server).
 
--export([store/3, load/2, start_link/0]).
+-export([store/3, load/2, init_storage/0, start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -32,6 +32,9 @@ store(Type, Id, Data) ->
 load(Type, Id) ->
 	gen_server:call(?MODULE, {load, {Type, Id}}).
 
+init_storage() ->
+	gen_server:call(?MODULE, {init_storage}).
+
 init([]) ->
 	process_flag(trap_exit, true),
 	io:format("~p starting~n", [?MODULE]),
@@ -43,12 +46,25 @@ init([]) ->
 	{ok, []}.
 
 handle_call({store, {Header, Data}}, _From, State) ->
-	Reply = do_store(Header, Data),
+	Reply = case dets:insert(embryosys.dets, {Header, Data}) of
+		{error, Reason} -> Reason;
+		ok -> ok
+	end,
 	{reply, Reply, State};
 
 handle_call({load, Header}, _From, State) ->
-	Reply = do_load(Header),
-	{reply, Reply, State}.
+	Reply = case dets:lookup(embryosys.dets, Header) of
+		[{_ReturnedHeader, Data}] -> Data;
+		_ -> not_found
+	end,
+	{reply, Reply, State};
+
+handle_call({init_storage}, _From, State) ->
+	Reply = case dets:delete_all_objects(embryosys.dets) of
+		{error, Reason} -> Reason;
+		ok -> ok
+	end,
+	{ok, Reply, State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
 
@@ -64,17 +80,5 @@ terminate(_Reason, _State) ->
 	ok.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
-
-%%% ==========================================================================
-
-do_store(Header, Data) ->
-	dets:insert(embryosys.dets, {Header, Data}),
-	ok.
-
-do_load(Header) ->
-	case dets:lookup(embryosys.dets, Header) of
-		[{_ReturnedHeader, Data}] -> Data;
-		_ -> not_found
-	end.
 
 %%
