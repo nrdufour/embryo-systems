@@ -14,11 +14,14 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(embryosys_app).
+-module(embryosys).
 -behavior(application).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -export([start/2, stop/1]).
+-export([start/0]).
+
+%%
 
 start(_Type, StartArgs) ->
 	embryosys_sup:start_link(StartArgs).
@@ -26,3 +29,9 @@ start(_Type, StartArgs) ->
 stop(_State) ->
 	ok.
 
+%%
+
+start() ->
+	application:start(embryosys).
+
+%%
