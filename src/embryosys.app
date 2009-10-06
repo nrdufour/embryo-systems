@@ -3,10 +3,10 @@
 {application, embryosys,
 	[{description, "Embryo Systems"},
 	 {vsn, "0.1"},
-	 {modules, [embryosys, embryosys_sup, adt_server,
+	 {modules, [embryosys, embryosys_sup, adtm_server,
 		    adtm_family, adtm_property, adtm_relation, adtm_entity,
 		    storage_server]},
-	 {registered, [adt_server, storage_server, embryosys_sup]},
+	 {registered, [adtm_server, storage_server, embryosys_sup]},
 	 {applications, [kernel,stdlib]},
 	 {mod, {embryosys, []}},
 	 {start_phases, []}

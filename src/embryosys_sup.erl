@@ -40,11 +40,11 @@ init([]) ->
 	
 	{ok, {{one_for_one, 3, 10},
 		[{tag1,
-			{adt_server, start_link, []},
+			{adtm_server, start_link, []},
 			permanent,
 			10000,
 			worker,
-			[adt_server]},
+			[adtm_server]},
 		{tag2,
 			{storage_server, start_link, []},
 			permanent,
