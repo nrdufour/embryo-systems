@@ -14,7 +14,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(adtm).
+-module(adtm_util).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -export([new/2, new_id/1, new_state_after/2, is_ready_for/2]).

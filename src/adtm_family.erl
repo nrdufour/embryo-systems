@@ -33,7 +33,7 @@ execute(Operation, Name) ->
 
 create(Name) ->
 	io:format("Create family ~p~n", [Name]),
-	Adt = adtm:new(family, Name),
+	Adt = adtm_util:new(family, Name),
 	AliveAdt = Adt#adt{state = alive},
 	storage_server:store(family, Name, AliveAdt),
 	ok.
@@ -48,7 +48,7 @@ hadr(Operation, Name) ->
 			not_found;
 		_ ->
 			% compute its new state
-			NewState = adtm:new_state_after(Operation, Previous#adt.state),
+			NewState = adtm_util:new_state_after(Operation, Previous#adt.state),
 			case NewState of
 				wrong_state ->
 					wrong_state;
