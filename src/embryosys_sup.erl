@@ -14,7 +14,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(embryosys_supervisor).
+-module(embryosys_sup).
 -behavior(supervisor).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
