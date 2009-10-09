@@ -15,30 +15,73 @@
 %% limitations under the License.
 
 -module(adtm_family).
+-behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
 -include("adt.hrl").
 
--export([execute/2]).
+%% API exports
+-export([create/1, hibern/1, awake/1, destroy/1, resur/1, purge/1, start_link/0]).
 
-execute(Operation, Name) ->
-	case Operation of
-		create -> create(Name);
-		hibern -> hadr(Operation, Name);
-		awake -> hadr(Operation, Name);
-		destroy -> hadr(Operation, Name);
-		resur -> hadr(Operation, Name);
-		purge -> purge(Name)
-	end.
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+	terminate/2, code_change/3]).
+
+start_link() ->
+	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 create(Name) ->
+	gen_server:call(?MODULE, {create, Name}).
+
+hibern(Name) ->
+	gen_server:call(?MODULE, {hadr, hibern, Name}).
+
+awake(Name) ->
+	gen_server:call(?MODULE, {hadr, awake, Name}).
+
+destroy(Name) ->
+	gen_server:call(?MODULE, {hadr, destroy, Name}).
+
+resur(Name) ->
+	gen_server:call(?MODULE, {hadr, resur, Name}).
+
+purge(Name) ->
+	gen_server:call(?MODULE, {purge, Name}).
+
+init([]) ->
+	process_flag(trap_exit, true),
+	io:format("~p starting~n", [?MODULE]),
+	{ok, []}.
+
+handle_call({create, Name}, _From, State) ->
+	{reply, do_create(Name), State};
+
+handle_call({hadr, Operation, Name}, _From, State) ->
+	{reply, do_hadr(Operation, Name), State};
+
+handle_call({purge, Name}, _From, State) ->
+	{reply, do_purge(Name), State}.
+
+handle_cast(_Msg, State) -> {noreply, State}.
+
+handle_info(_Info, State) -> {noreply, State}.
+
+terminate(_Reason, _State) ->
+	io:format("~p stopping~n", [?MODULE]),
+	ok.
+
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
+
+%% internal API ==============================================================
+
+do_create(Name) ->
 	io:format("Create family ~p~n", [Name]),
 	Adt = adtm_util:new(family, Name),
 	AliveAdt = Adt#adt{state = alive},
 	storage_server:store(family, Name, AliveAdt),
 	ok.
 
-hadr(Operation, Name) ->
+do_hadr(Operation, Name) ->
 	io:format("~p family ~p~n", [Operation, Name]),
 
 	% first grab the adt from the storage
@@ -60,7 +103,7 @@ hadr(Operation, Name) ->
 			end
 	end.
 
-purge(Name) ->
+do_purge(Name) ->
 	io:format("Purge family ~p~n", [Name]),
 	ok.
 
