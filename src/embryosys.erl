@@ -18,7 +18,10 @@
 -behavior(application).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
+%% Application API
 -export([start/2, stop/1]).
+
+%% User API
 -export([start/0]).
 
 %%
