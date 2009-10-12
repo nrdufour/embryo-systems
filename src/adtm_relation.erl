@@ -15,10 +15,59 @@
 %% limitations under the License.
 
 -module(adtm_relation).
+-behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
--export([execute/3]).
+-include("adt.hrl").
 
-execute(Operation, Names, _Extra) ->
-	io:format("Relation Manager: Executing ~p operation on ~p~n", [Operation, Names]).
+%% API exports
+-export([create/3, create/4, hibern/3, awake/3, destroy/3, resur/3, purge/3, start_link/0]).
+
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+	terminate/2, code_change/3]).
+
+start_link() ->
+	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+create(FromFamilyName, ToFamilyName, RelationName) ->
+	gen_server:call(?MODULE, {create, FromFamilyName, ToFamilyName, RelationName}).
+
+create(FromFamilyName, ToFamilyName, RelationName, Extra) ->
+	gen_server:call(?MODULE, {create, FromFamilyName, ToFamilyName, RelationName, Extra}).
+
+hibern(FromFamilyName, ToFamilyName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, hibern, FromFamilyName, ToFamilyName, RelationName}).
+
+awake(FromFamilyName, ToFamilyName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, awake, FromFamilyName, ToFamilyName, RelationName}).
+
+destroy(FromFamilyName, ToFamilyName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, destroy, FromFamilyName, ToFamilyName, RelationName}).
+
+resur(FromFamilyName, ToFamilyName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, resur, FromFamilyName, ToFamilyName, RelationName}).
+
+purge(FromFamilyName, ToFamilyName, RelationName) ->
+	gen_server:call(?MODULE, {purge, FromFamilyName, ToFamilyName, RelationName}).
+
+init([]) ->
+	process_flag(trap_exit, true),
+	io:format("~p starting~n", [?MODULE]),
+	{ok, []}.
+
+handle_call(_, _From, State) ->
+	{reply, not_yet_implemented, State}.
+
+handle_cast(_Msg, State) -> {noreply, State}.
+
+handle_info(_Info, State) -> {noreply, State}.
+
+terminate(_Reason, _State) ->
+	io:format("~p stopping~n", [?MODULE]),
+	ok.
+
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
+
+%% internal API ==============================================================
 
