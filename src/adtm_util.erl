@@ -28,13 +28,13 @@ new(Type, Name) ->
 %% @spec new_id(type()) -> adt()
 new_id(Type) ->
 	Address = case Type of
-		family   -> { 0 };
+		class   -> { 0 };
 		property -> { 0 , 0 };
 		relation -> { 0 , 0 , 0 };
 		entity   -> { 0 , 0 };
 		_        -> { 0 }
 	end,
-	#adt_id{ type = family, address = Address }.
+	#adt_id{ type = Type, address = Address }.
 
 %% State transition grid (strict)
 new_state_after(Operation, State) ->

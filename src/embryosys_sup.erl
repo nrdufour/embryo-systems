@@ -40,11 +40,11 @@ init([]) ->
 	
 	{ok, {{one_for_one, 3, 10},
 		[{tag1,
-			{adtm_family, start_link, []},
+			{adtm_class, start_link, []},
 			permanent,
 			10000,
 			worker,
-			[adtm_family]},
+			[adtm_class]},
 		{tag2,
 			{adtm_property, start_link, []},
 			permanent,

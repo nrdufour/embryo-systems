@@ -30,26 +30,26 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-create(FromFamilyName, ToFamilyName, RelationName) ->
-	gen_server:call(?MODULE, {create, FromFamilyName, ToFamilyName, RelationName}).
+create(FromClassName, ToClassName, RelationName) ->
+	gen_server:call(?MODULE, {create, FromClassName, ToClassName, RelationName}).
 
-create(FromFamilyName, ToFamilyName, RelationName, Extra) ->
-	gen_server:call(?MODULE, {create, FromFamilyName, ToFamilyName, RelationName, Extra}).
+create(FromClassName, ToClassName, RelationName, Extra) ->
+	gen_server:call(?MODULE, {create, FromClassName, ToClassName, RelationName, Extra}).
 
-hibern(FromFamilyName, ToFamilyName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, hibern, FromFamilyName, ToFamilyName, RelationName}).
+hibern(FromClassName, ToClassName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, hibern, FromClassName, ToClassName, RelationName}).
 
-awake(FromFamilyName, ToFamilyName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, awake, FromFamilyName, ToFamilyName, RelationName}).
+awake(FromClassName, ToClassName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, awake, FromClassName, ToClassName, RelationName}).
 
-destroy(FromFamilyName, ToFamilyName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, destroy, FromFamilyName, ToFamilyName, RelationName}).
+destroy(FromClassName, ToClassName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, destroy, FromClassName, ToClassName, RelationName}).
 
-resur(FromFamilyName, ToFamilyName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, resur, FromFamilyName, ToFamilyName, RelationName}).
+resur(FromClassName, ToClassName, RelationName) ->
+	gen_server:call(?MODULE, {hadr, resur, FromClassName, ToClassName, RelationName}).
 
-purge(FromFamilyName, ToFamilyName, RelationName) ->
-	gen_server:call(?MODULE, {purge, FromFamilyName, ToFamilyName, RelationName}).
+purge(FromClassName, ToClassName, RelationName) ->
+	gen_server:call(?MODULE, {purge, FromClassName, ToClassName, RelationName}).
 
 init([]) ->
 	process_flag(trap_exit, true),

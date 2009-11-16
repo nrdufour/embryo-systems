@@ -30,23 +30,23 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-create(FamilyName, EntityName) ->
-	gen_server:call(?MODULE, {create, FamilyName, EntityName}).
+create(ClassName, EntityName) ->
+	gen_server:call(?MODULE, {create, ClassName, EntityName}).
 
-hibern(FamilyName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, hibern, FamilyName, EntityName}).
+hibern(ClassName, EntityName) ->
+	gen_server:call(?MODULE, {hadr, hibern, ClassName, EntityName}).
 
-awake(FamilyName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, awake, FamilyName, EntityName}).
+awake(ClassName, EntityName) ->
+	gen_server:call(?MODULE, {hadr, awake, ClassName, EntityName}).
 
-destroy(FamilyName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, destroy, FamilyName, EntityName}).
+destroy(ClassName, EntityName) ->
+	gen_server:call(?MODULE, {hadr, destroy, ClassName, EntityName}).
 
-resur(FamilyName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, resur, FamilyName, EntityName}).
+resur(ClassName, EntityName) ->
+	gen_server:call(?MODULE, {hadr, resur, ClassName, EntityName}).
 
-purge(FamilyName, EntityName) ->
-	gen_server:call(?MODULE, {purge, FamilyName, EntityName}).
+purge(ClassName, EntityName) ->
+	gen_server:call(?MODULE, {purge, ClassName, EntityName}).
 
 init([]) ->
 	process_flag(trap_exit, true),
