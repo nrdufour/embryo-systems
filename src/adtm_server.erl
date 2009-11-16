@@ -58,8 +58,8 @@ execute_operation(Operation, class, Names, _Extra) ->
 execute_operation(Operation, attribute, Names, Extra) ->
 	adtm_attribute:execute(Operation, Names, Extra);
 
-execute_operation(Operation, relation, Names, Extra) ->
-	adtm_relation:execute(Operation, Names, Extra);
+execute_operation(Operation, link, Names, Extra) ->
+	adtm_link:execute(Operation, Names, Extra);
 
 execute_operation(Operation, entity, Names, Extra) ->
 	adtm_entity:execute(Operation, Names, Extra).

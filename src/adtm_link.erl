@@ -14,7 +14,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(adtm_relation).
+-module(adtm_link).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
@@ -30,26 +30,26 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-create(FromClassName, ToClassName, RelationName) ->
-	gen_server:call(?MODULE, {create, FromClassName, ToClassName, RelationName}).
+create(FromClassName, ToClassName, LinkName) ->
+	gen_server:call(?MODULE, {create, FromClassName, ToClassName, LinkName}).
 
-create(FromClassName, ToClassName, RelationName, Extra) ->
-	gen_server:call(?MODULE, {create, FromClassName, ToClassName, RelationName, Extra}).
+create(FromClassName, ToClassName, LinkName, Extra) ->
+	gen_server:call(?MODULE, {create, FromClassName, ToClassName, LinkName, Extra}).
 
-hibern(FromClassName, ToClassName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, hibern, FromClassName, ToClassName, RelationName}).
+hibern(FromClassName, ToClassName, LinkName) ->
+	gen_server:call(?MODULE, {hadr, hibern, FromClassName, ToClassName, LinkName}).
 
-awake(FromClassName, ToClassName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, awake, FromClassName, ToClassName, RelationName}).
+awake(FromClassName, ToClassName, LinkName) ->
+	gen_server:call(?MODULE, {hadr, awake, FromClassName, ToClassName, LinkName}).
 
-destroy(FromClassName, ToClassName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, destroy, FromClassName, ToClassName, RelationName}).
+destroy(FromClassName, ToClassName, LinkName) ->
+	gen_server:call(?MODULE, {hadr, destroy, FromClassName, ToClassName, LinkName}).
 
-resur(FromClassName, ToClassName, RelationName) ->
-	gen_server:call(?MODULE, {hadr, resur, FromClassName, ToClassName, RelationName}).
+resur(FromClassName, ToClassName, LinkName) ->
+	gen_server:call(?MODULE, {hadr, resur, FromClassName, ToClassName, LinkName}).
 
-purge(FromClassName, ToClassName, RelationName) ->
-	gen_server:call(?MODULE, {purge, FromClassName, ToClassName, RelationName}).
+purge(FromClassName, ToClassName, LinkName) ->
+	gen_server:call(?MODULE, {purge, FromClassName, ToClassName, LinkName}).
 
 init([]) ->
 	process_flag(trap_exit, true),
