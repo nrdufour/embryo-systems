@@ -55,8 +55,8 @@ execute_operation(Operation, class, Names, _Extra) ->
 	[ClassName] = Names,
 	adtm_class:execute(Operation, ClassName);
 
-execute_operation(Operation, property, Names, Extra) ->
-	adtm_property:execute(Operation, Names, Extra);
+execute_operation(Operation, attribute, Names, Extra) ->
+	adtm_attribute:execute(Operation, Names, Extra);
 
 execute_operation(Operation, relation, Names, Extra) ->
 	adtm_relation:execute(Operation, Names, Extra);

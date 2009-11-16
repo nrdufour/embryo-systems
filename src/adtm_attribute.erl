@@ -14,7 +14,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(adtm_property).
+-module(adtm_attribute).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
@@ -30,26 +30,26 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-create(ClassName, PropertyName) ->
-	gen_server:call(?MODULE, {create, ClassName, PropertyName}).
+create(ClassName, AttributeName) ->
+	gen_server:call(?MODULE, {create, ClassName, AttributeName}).
 
-create(ClassName, PropertyName, Extra) ->
-	gen_server:call(?MODULE, {create, ClassName, PropertyName, Extra}).
+create(ClassName, AttributeName, Extra) ->
+	gen_server:call(?MODULE, {create, ClassName, AttributeName, Extra}).
 
-hibern(ClassName, PropertyName) ->
-	gen_server:call(?MODULE, {hadr, hibern, ClassName, PropertyName}).
+hibern(ClassName, AttributeName) ->
+	gen_server:call(?MODULE, {hadr, hibern, ClassName, AttributeName}).
 
-awake(ClassName, PropertyName) ->
-	gen_server:call(?MODULE, {hadr, awake, ClassName, PropertyName}).
+awake(ClassName, AttributeName) ->
+	gen_server:call(?MODULE, {hadr, awake, ClassName, AttributeName}).
 
-destroy(ClassName, PropertyName) ->
-	gen_server:call(?MODULE, {hadr, destroy, ClassName, PropertyName}).
+destroy(ClassName, AttributeName) ->
+	gen_server:call(?MODULE, {hadr, destroy, ClassName, AttributeName}).
 
-resur(ClassName, PropertyName) ->
-	gen_server:call(?MODULE, {hadr, resur, ClassName, PropertyName}).
+resur(ClassName, AttributeName) ->
+	gen_server:call(?MODULE, {hadr, resur, ClassName, AttributeName}).
 
-purge(ClassName, PropertyName) ->
-	gen_server:call(?MODULE, {purge, ClassName, PropertyName}).
+purge(ClassName, AttributeName) ->
+	gen_server:call(?MODULE, {purge, ClassName, AttributeName}).
 
 init([]) ->
 	process_flag(trap_exit, true),

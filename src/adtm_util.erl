@@ -28,11 +28,11 @@ new(Type, Name) ->
 %% @spec new_id(type()) -> adt()
 new_id(Type) ->
 	Address = case Type of
-		class   -> { 0 };
-		property -> { 0 , 0 };
-		relation -> { 0 , 0 , 0 };
-		entity   -> { 0 , 0 };
-		_        -> { 0 }
+		class     -> { 0 };
+		attribute -> { 0 , 0 };
+		relation  -> { 0 , 0 , 0 };
+		entity    -> { 0 , 0 };
+		_         -> { 0 }
 	end,
 	#adt_id{ type = Type, address = Address }.
 
