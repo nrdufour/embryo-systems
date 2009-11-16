@@ -61,6 +61,6 @@ execute_operation(Operation, attribute, Names, Extra) ->
 execute_operation(Operation, link, Names, Extra) ->
 	adtm_link:execute(Operation, Names, Extra);
 
-execute_operation(Operation, entity, Names, Extra) ->
-	adtm_entity:execute(Operation, Names, Extra).
+execute_operation(Operation, object, Names, Extra) ->
+	adtm_object:execute(Operation, Names, Extra).
 

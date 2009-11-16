@@ -14,7 +14,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(adtm_entity).
+-module(adtm_object).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
@@ -30,23 +30,23 @@
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-create(ClassName, EntityName) ->
-	gen_server:call(?MODULE, {create, ClassName, EntityName}).
+create(ClassName, ObjectName) ->
+	gen_server:call(?MODULE, {create, ClassName, ObjectName}).
 
-hibern(ClassName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, hibern, ClassName, EntityName}).
+hibern(ClassName, ObjectName) ->
+	gen_server:call(?MODULE, {hadr, hibern, ClassName, ObjectName}).
 
-awake(ClassName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, awake, ClassName, EntityName}).
+awake(ClassName, ObjectName) ->
+	gen_server:call(?MODULE, {hadr, awake, ClassName, ObjectName}).
 
-destroy(ClassName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, destroy, ClassName, EntityName}).
+destroy(ClassName, ObjectName) ->
+	gen_server:call(?MODULE, {hadr, destroy, ClassName, ObjectName}).
 
-resur(ClassName, EntityName) ->
-	gen_server:call(?MODULE, {hadr, resur, ClassName, EntityName}).
+resur(ClassName, ObjectName) ->
+	gen_server:call(?MODULE, {hadr, resur, ClassName, ObjectName}).
 
-purge(ClassName, EntityName) ->
-	gen_server:call(?MODULE, {purge, ClassName, EntityName}).
+purge(ClassName, ObjectName) ->
+	gen_server:call(?MODULE, {purge, ClassName, ObjectName}).
 
 init([]) ->
 	process_flag(trap_exit, true),

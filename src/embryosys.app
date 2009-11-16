@@ -4,9 +4,9 @@
 	[{description, "Embryo Systems"},
 	 {vsn, "0.1"},
 	 {modules, [embryosys, embryosys_sup,
-		    adtm_class, adtm_attribute, adtm_link, adtm_entity,
+		    adtm_class, adtm_attribute, adtm_link, adtm_object,
 		    storage_server]},
-	 {registered, [adtm_class, adtm_attribute, adtm_link, adtm_entity, storage_server, embryosys_sup]},
+	 {registered, [adtm_class, adtm_attribute, adtm_link, adtm_object, storage_server, embryosys_sup]},
 	 {applications, [kernel,stdlib]},
 	 {mod, {embryosys, []}},
 	 {start_phases, []}

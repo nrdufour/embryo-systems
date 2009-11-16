@@ -31,7 +31,7 @@ new_id(Type) ->
 		class     -> { 0 };
 		attribute -> { 0 , 0 };
 		link      -> { 0 , 0 , 0 };
-		entity    -> { 0 , 0 };
+		object    -> { 0 , 0 };
 		_         -> { 0 }
 	end,
 	#adt_id{ type = Type, address = Address }.
