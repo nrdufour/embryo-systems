@@ -16,11 +16,9 @@ test_matrix([]) ->
 	ok.
 
 main(_) ->
-    etap:plan(unknown),
+	etap:plan(unknown),
 
-    etap_can:loaded_ok(adtm_util, "Module 'adtm_util' loaded"),
-
-    Base = [
+	Base = [
     	{none,      [   {create, alive}, {hibern, wrong_state}, {awake, wrong_state},
 			{destroy, wrong_state}, {resur, wrong_state}, {purge, wrong_state} ]},
     	{alive,     [   {create, wrong_state}, {hibern, frozen}, {awake, wrong_state},
@@ -29,11 +27,10 @@ main(_) ->
 			{destroy, wrong_state}, {resur, wrong_state}, {purge, wrong_state} ]},
     	{destroyed, [   {create, wrong_state}, {hibern, wrong_state}, {awake, wrong_state},
 			{destroy, wrong_state}, {resur, alive}, {purge, none} ]}
-    ],
+	],
 
-    test_matrix(Base),
+	test_matrix(Base),
 
-    %%etap:is(adtm_util:new_state_after(destroy, alive), destroyed, "Destroy/Alive -> Destroyed"),
+	etap:end_tests(),
+	ok.
 
-    etap:end_tests(),
-    ok.
