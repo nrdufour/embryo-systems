@@ -15,9 +15,7 @@ test_matrix([Element|Rest]) ->
 test_matrix([]) ->
 	ok.
 
-main(_) ->
-	etap:plan(unknown),
-
+test_new_state_after() ->
 	Base = [
     	{none,      [   {create, alive}, {hibern, wrong_state}, {awake, wrong_state},
 			{destroy, wrong_state}, {resur, wrong_state}, {purge, wrong_state} ]},
@@ -29,7 +27,21 @@ main(_) ->
 			{destroy, wrong_state}, {resur, alive}, {purge, none} ]}
 	],
 
-	test_matrix(Base),
+	test_matrix(Base).
+
+%% ---------------------------------------------------------------------------
+
+main(_) ->
+	etap:plan(unknown),
+	
+	etap_can:loaded_ok(adtm_util, "Module 'adtm_util' loaded"),
+
+	etap_can:can_ok(adtm_util, new, 2),
+	etap_can:can_ok(adtm_util, new_id, 1),
+	etap_can:can_ok(adtm_util, new_state_after, 2),
+	etap_can:can_ok(adtm_util, is_ready_for, 2),
+	
+	test_new_state_after(),
 
 	etap:end_tests(),
 	ok.
