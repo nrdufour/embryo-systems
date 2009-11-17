@@ -27,6 +27,7 @@ test_new_state_after() ->
 			{destroy, wrong_state}, {resur, alive}, {purge, none} ]}
 	],
 
+	etap:diag("Testing adtm_util:new_state_after."),
 	test_matrix(Base).
 
 %% ---------------------------------------------------------------------------
