@@ -77,7 +77,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 do_create(Name) ->
 	case storage_server:load(class, Name) of
 		not_found ->
-			Adt = adtm_util:new(class, Name),
+			Adt = adtm_util:new_adt(class, Name),
 			AliveAdt = Adt#adt{state = alive},
 			storage_server:store(class, Name, AliveAdt),
 			ok;
@@ -105,6 +105,6 @@ do_hadr(Operation, Name) ->
 			end
 	end.
 
-do_purge(Name) ->
+do_purge(_Name) ->
 	not_yet_implemented.
 

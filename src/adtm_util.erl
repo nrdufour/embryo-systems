@@ -17,12 +17,12 @@
 -module(adtm_util).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
--export([new/2, new_id/1, new_state_after/2, is_ready_for/2]).
+-export([new_adt/2, new_id/1, new_state_after/2, is_ready_for/2]).
 
 -include("adt.hrl").
 
 %% create a brand new adt (blank)
-new(Type, Name) ->
+new_adt(Type, Name) ->
 	#adt{id = new_id(Type), fname = Name, state = none}.
 
 %% @spec new_id(type()) -> adt()
