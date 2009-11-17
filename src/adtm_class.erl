@@ -75,15 +75,17 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% internal API ==============================================================
 
 do_create(Name) ->
-	io:format("Create class ~p~n", [Name]),
-	Adt = adtm_util:new(class, Name),
-	AliveAdt = Adt#adt{state = alive},
-	storage_server:store(class, Name, AliveAdt),
-	ok.
+	case storage_server:load(class, Name) of
+		not_found ->
+			Adt = adtm_util:new(class, Name),
+			AliveAdt = Adt#adt{state = alive},
+			storage_server:store(class, Name, AliveAdt),
+			ok;
+		_ ->
+			already_created
+	end.
 
 do_hadr(Operation, Name) ->
-	io:format("~p class ~p~n", [Operation, Name]),
-
 	% first grab the adt from the storage
 	Previous = storage_server:load(class, Name),
 	case Previous of
@@ -104,6 +106,5 @@ do_hadr(Operation, Name) ->
 	end.
 
 do_purge(Name) ->
-	io:format("Purge class ~p~n", [Name]),
-	ok.
+	not_yet_implemented.
 
