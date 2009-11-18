@@ -27,7 +27,12 @@
 %%
 
 start(_Type, StartArgs) ->
-	embryosys_sup:start_link(StartArgs).
+	case start_apps([crypto]) of
+		ok ->
+			embryosys_sup:start_link(StartArgs);
+		{error, Reason} ->
+			{error, Reason}
+	end.
 
 stop(_State) ->
 	ok.
@@ -36,5 +41,22 @@ stop(_State) ->
 
 start() ->
 	application:start(embryosys).
+
+%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Piece of code written by Benoît Chesneau <benoitc@e-engura.org>
+start_apps([]) ->
+    ok;
+start_apps([App|Rest]) ->
+    case application:start(App) of
+    ok ->
+       start_apps(Rest);
+    {error, {already_started, App}} ->
+       start_apps(Rest);
+    {error, _Reason} ->
+       {error, {app_would_not_start, App}}
+    end.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%

@@ -17,7 +17,7 @@
 -module(adtm_util).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
--export([new_adt/2, new_id/1, new_state_after/2, is_ready_for/2]).
+-export([new_adt/2, new_id/1, new_state_after/2, is_ready_for/2, new_uuid/0]).
 
 -include("adt.hrl").
 
@@ -51,5 +51,22 @@ new_state_after(Operation, State) ->
 
 is_ready_for(Operation, State) ->
 	new_state_after(Operation, State) /= wrong_state.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Piece of code from couch_util.erl in Apache CouchDB project.
+new_uuid() ->
+    list_to_binary(to_hex(crypto:rand_bytes(16))).
+
+to_hex([]) ->
+    [];
+to_hex(Bin) when is_binary(Bin) ->
+    to_hex(binary_to_list(Bin));
+to_hex([H|T]) ->
+    [to_digit(H div 16), to_digit(H rem 16) | to_hex(T)].
+
+to_digit(N) when N < 10 -> $0 + N;
+to_digit(N)             -> $a + N-10.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%
