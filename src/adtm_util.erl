@@ -23,7 +23,8 @@
 
 %% create a brand new adt (blank)
 new_adt(Type, Name) ->
-	#adt{id = new_id(Type), fname = Name, state = none}.
+	AdtID = new_id(Type),
+	#adt{id = AdtID, fname = Name, state = none}.
 
 %% @spec new_id(type()) -> adt()
 new_id(Type) ->
@@ -32,7 +33,7 @@ new_id(Type) ->
 		attribute -> { 0 , 0 };
 		link      -> { 0 , 0 , 0 };
 		object    -> { 0 , 0 };
-		_         -> { 0 }
+		_         -> throw(unknown)
 	end,
 	#adt_id{ type = Type, address = Address }.
 
