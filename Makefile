@@ -14,7 +14,7 @@ docs:
 	@$(ERL) -noshell -run edoc_run application '$(APP)' '"."' '[{preprocess, true},{includes, ["."]}]'
 
 test: all
-	prove -v t/*.t
+	prove t/*.t
 
 cover: all
 	COVER=1 prove t/*.t
