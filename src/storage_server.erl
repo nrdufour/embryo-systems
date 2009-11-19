@@ -17,7 +17,7 @@
 -module(storage_server).
 -behavior(gen_server).
 
--export([store/3, load/2, init_storage/0, start_link/0]).
+-export([store/3, load/2, clear/2, init_storage/0, start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -31,6 +31,9 @@ store(Type, Id, Data) ->
 
 load(Type, Id) ->
 	gen_server:call(?MODULE, {load, {Type, Id}}).
+
+clear(Type, Id) ->
+	gen_server:call(?MODULE, {clear, {Type, Id}}).
 
 init_storage() ->
 	gen_server:call(?MODULE, {init_storage}).
@@ -55,6 +58,13 @@ handle_call({store, {Header, Data}}, _From, State) ->
 handle_call({load, Header}, _From, State) ->
 	Reply = case dets:lookup(embryosys.dets, Header) of
 		[{_ReturnedHeader, Data}] -> Data;
+		_ -> not_found
+	end,
+	{reply, Reply, State};
+
+handle_call({clear, Header}, _From, State) ->
+	Reply = case dets:lookup(embryosys.dets, Header) of
+		[{_ReturnedHeader, _Data}] -> dets:delete(embryosys.dets, Header);
 		_ -> not_found
 	end,
 	{reply, Reply, State};
