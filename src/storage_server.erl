@@ -70,11 +70,8 @@ handle_call({clear, Header}, _From, State) ->
 	{reply, Reply, State};
 
 handle_call({init_storage}, _From, State) ->
-	Reply = case dets:delete_all_objects(embryosys.dets) of
-		{error, Reason} -> Reason;
-		ok -> ok
-	end,
-	{ok, Reply, State}.
+	Reply = dets:delete_all_objects(embryosys.dets),
+	{reply, Reply, State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
 
