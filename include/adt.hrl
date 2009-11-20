@@ -16,18 +16,14 @@
 
 %% @type type() = family | property | relation | entity.
 %% @type state() = none | alive | frozen | destroyed.
-%% @type address() = { int() } | { int(), int() } | { int(), int(), int() }.
+%% @type uuid() = binary().
 
-%% @type adt_id() = {adt_id, type(), address()}.
+%% @type adt_id() = {adt_id, type(), uuid()}.
 -record(adt_id, {
 		%% type: family / property / relation / entity (for now).
 		type,
-		%% address: tuple containing n uuid according to the type.
-		%% 	family:   { x }
-		%%	property: { x, y }
-		%%	relation: { x, y, z }
-		%%	entity:   { x, y }
-		address
+		%% uuid
+		uuid
 	}).
 
 %% @type adt() = {adt, adt_id(), string(), state()}.

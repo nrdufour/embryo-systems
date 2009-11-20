@@ -28,14 +28,8 @@ new_adt(Type, Name) ->
 
 %% @spec new_id(type()) -> adt()
 new_id(Type) ->
-	Address = case Type of
-		class     -> { 0 };
-		attribute -> { 0 , 0 };
-		link      -> { 0 , 0 , 0 };
-		object    -> { 0 , 0 };
-		_         -> throw(unknown)
-	end,
-	#adt_id{ type = Type, address = Address }.
+	UUID = new_uuid(),
+	#adt_id{ type = Type, uuid = UUID }.
 
 %% State transition grid (strict)
 new_state_after(Operation, State) ->
