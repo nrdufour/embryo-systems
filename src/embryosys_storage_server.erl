@@ -14,7 +14,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(storage_server).
+-module(embryosys_storage_server).
 -behavior(gen_server).
 
 -export([store/3, load/2, clear/2, init_storage/0, start_link/0]).

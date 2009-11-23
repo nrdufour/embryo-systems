@@ -15,7 +15,7 @@ main(_) ->
 	etap_can:can_ok(embryosys_adtm_class, purge, 1),
 
 	application:start(embryosys),
-	storage_server:init_storage(),
+	embryosys_storage_server:init_storage(),
 	etap:is(embryosys_adtm_class:create("Bridge"), ok, "Creating Class Bridge"),
 	etap:is(embryosys_adtm_class:create("Bridge"), already_created, "Try to create Class Bridge again"),
 	etap:is(embryosys_adtm_class:create("River"), ok, "Creating Class River"),

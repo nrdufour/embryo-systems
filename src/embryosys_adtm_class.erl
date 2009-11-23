@@ -75,11 +75,11 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% internal API ==============================================================
 
 do_create(Name) ->
-	case storage_server:load(class, Name) of
+	case embryosys_storage_server:load(class, Name) of
 		not_found ->
 			Adt = embryosys_util:new_adt(class, Name),
 			AliveAdt = Adt#adt{state = alive},
-			storage_server:store(class, Name, AliveAdt),
+			embryosys_storage_server:store(class, Name, AliveAdt),
 			ok;
 		_ ->
 			already_created
@@ -87,7 +87,7 @@ do_create(Name) ->
 
 do_hadr(Operation, Name) ->
 	% first grab the adt from the storage
-	Previous = storage_server:load(class, Name),
+	Previous = embryosys_storage_server:load(class, Name),
 	case Previous of
 		not_found ->
 			not_found;
@@ -100,7 +100,7 @@ do_hadr(Operation, Name) ->
 				_ ->
 					% and store it
 					UpdatedAdt = Previous#adt{state = NewState},
-					storage_server:store(class, Name, UpdatedAdt),
+					embryosys_storage_server:store(class, Name, UpdatedAdt),
 					ok
 			end
 	end.

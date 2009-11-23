@@ -64,10 +64,10 @@ init([]) ->
 			worker,
 			[adtm_object]},
 		{tag5,
-			{storage_server, start_link, []},
+			{embryosys_storage_server, start_link, []},
 			permanent,
 			10000,
 			worker,
-			[storage_server]}
+			[embryosys_storage_server]}
 	]}}.
 
