@@ -4,7 +4,7 @@
 
 main(_) ->
 	etap:plan(unknown),
-	etap_can:loaded_ok(adtm_class, "Module 'adtm_class' loaded"),
+	etap_can:loaded_ok(embryosys_adtm_class, "Module 'embryosys_adtm_class' loaded"),
 	etap_can:loaded_ok(adtm_attribute, "Module 'adtm_attribute' loaded"),
 	etap_can:loaded_ok(adtm_link, "Module 'adtm_link' loaded"),
 	etap_can:loaded_ok(adtm_object, "Module 'adtm_object' loaded"),

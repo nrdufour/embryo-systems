@@ -14,7 +14,7 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--module(adtm_class).
+-module(embryosys_adtm_class).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 

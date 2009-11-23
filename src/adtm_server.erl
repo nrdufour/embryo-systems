@@ -53,7 +53,7 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
 execute_operation(Operation, class, Names, _Extra) ->
 	[ClassName] = Names,
-	adtm_class:execute(Operation, ClassName);
+	embryosys_adtm_class:execute(Operation, ClassName);
 
 execute_operation(Operation, attribute, Names, Extra) ->
 	adtm_attribute:execute(Operation, Names, Extra);

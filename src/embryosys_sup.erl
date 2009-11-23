@@ -40,11 +40,11 @@ init([]) ->
 	
 	{ok, {{one_for_one, 3, 10},
 		[{tag1,
-			{adtm_class, start_link, []},
+			{embryosys_adtm_class, start_link, []},
 			permanent,
 			10000,
 			worker,
-			[adtm_class]},
+			[embryosys_adtm_class]},
 		{tag2,
 			{adtm_attribute, start_link, []},
 			permanent,
