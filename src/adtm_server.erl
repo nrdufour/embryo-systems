@@ -56,7 +56,7 @@ execute_operation(Operation, class, Names, _Extra) ->
 	embryosys_adtm_class:execute(Operation, ClassName);
 
 execute_operation(Operation, attribute, Names, Extra) ->
-	adtm_attribute:execute(Operation, Names, Extra);
+	embryosys_adtm_attribute:execute(Operation, Names, Extra);
 
 execute_operation(Operation, link, Names, Extra) ->
 	adtm_link:execute(Operation, Names, Extra);
