@@ -17,19 +17,9 @@
 -module(embryosys_util).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
--export([new_adt/2, new_id/1, new_state_after/2, is_ready_for/2, new_uuid/0]).
+-export([new_state_after/2, is_ready_for/2, new_uuid/0]).
 
 -include("adt.hrl").
-
-%% create a brand new adt (blank)
-new_adt(Type, Name) ->
-	AdtID = new_id(Type),
-	#adt{id = AdtID, fname = Name, state = none}.
-
-%% @spec new_id(type()) -> adt()
-new_id(Type) ->
-	UUID = new_uuid(),
-	#adt_id{ type = Type, uuid = UUID }.
 
 %% State transition grid (strict)
 new_state_after(Operation, State) ->

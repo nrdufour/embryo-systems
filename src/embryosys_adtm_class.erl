@@ -77,9 +77,8 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 do_create(Name) ->
 	case embryosys_storage_server:load(class, Name) of
 		not_found ->
-			Adt = embryosys_util:new_adt(class, Name),
-			AliveAdt = Adt#adt{state = alive},
-			embryosys_storage_server:store(class, Name, AliveAdt),
+			AliveClass = #class{ name = Name, state = alive },
+			embryosys_storage_server:store(class, Name, AliveClass),
 			ok;
 		_ ->
 			already_created
@@ -93,13 +92,13 @@ do_hadr(Operation, Name) ->
 			not_found;
 		_ ->
 			% compute its new state
-			NewState = embryosys_util:new_state_after(Operation, Previous#adt.state),
+			NewState = embryosys_util:new_state_after(Operation, Previous#class.state),
 			case NewState of
 				wrong_state ->
 					wrong_state;
 				_ ->
 					% and store it
-					UpdatedAdt = Previous#adt{state = NewState},
+					UpdatedAdt = Previous#class{state = NewState},
 					embryosys_storage_server:store(class, Name, UpdatedAdt),
 					ok
 			end

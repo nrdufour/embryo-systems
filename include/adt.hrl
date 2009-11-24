@@ -14,27 +14,28 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
-%% @type type() = family | property | relation | entity.
-%% @type state() = none | alive | frozen | destroyed.
-%% @type uuid() = binary().
 
-%% @type adt_id() = {adt_id, type(), uuid()}.
--record(adt_id, {
-		%% type: family / property / relation / entity (for now).
-		type,
-		%% uuid
-		uuid
+-record(class, {
+	name = "unknown",
+	state = none
 	}).
 
-%% @type adt() = {adt, adt_id(), string(), state()}.
--record(adt, {
-		%% id: adt_id record
-		id,
-		%% fname: friendly name.
-		fname,
-		%% state: none / alive / frozen / destroyed.
-		state = none
+-record(attribute, {
+	name = "unknown",
+	state = none,
+	class
+	}).
 
-		%% TODO probably need to add more fields here ...
+-record(link, {
+	name = "unknown",
+	state = none,
+	from,
+	to
+	}).
+
+-record(object, {
+	name = "unknown",
+	state = none,
+	class
 	}).
 
