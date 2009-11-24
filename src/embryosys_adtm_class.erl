@@ -79,9 +79,9 @@ do_create(Name) ->
 		not_found ->
 			AliveClass = #class{ name = Name, state = alive },
 			embryosys_storage_server:store(class, Name, AliveClass),
-			ok;
+			{ok, AliveClass};
 		_ ->
-			already_created
+			{already_created, []}
 	end.
 
 do_hadr(Operation, Name) ->
@@ -89,21 +89,21 @@ do_hadr(Operation, Name) ->
 	Previous = embryosys_storage_server:load(class, Name),
 	case Previous of
 		not_found ->
-			not_found;
+			{not_found, []};
 		_ ->
 			% compute its new state
 			NewState = embryosys_util:new_state_after(Operation, Previous#class.state),
 			case NewState of
 				wrong_state ->
-					wrong_state;
+					{wrong_state, []};
 				_ ->
 					% and store it
 					UpdatedAdt = Previous#class{state = NewState},
 					embryosys_storage_server:store(class, Name, UpdatedAdt),
-					ok
+					{ok, UpdatedAdt}
 			end
 	end.
 
 do_purge(_Name) ->
-	not_yet_implemented.
+	{not_yet_implemented, []}.
 

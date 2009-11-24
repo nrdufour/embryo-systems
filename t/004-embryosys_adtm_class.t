@@ -16,13 +16,14 @@ main(_) ->
 
 	application:start(embryosys),
 	embryosys_storage_server:init_storage(),
-	etap:is(embryosys_adtm_class:create("Bridge"), ok, "Creating Class Bridge"),
-	etap:is(embryosys_adtm_class:create("Bridge"), already_created, "Try to create Class Bridge again"),
-	etap:is(embryosys_adtm_class:create("River"), ok, "Creating Class River"),
-	etap:is(embryosys_adtm_class:create("River"), already_created, "Try to create Class River again"),
+	etap:is(embryosys_adtm_class:create("Bridge"), {ok, {class, "Bridge", alive}}, "Creating Class Bridge"),
+	etap:is(embryosys_adtm_class:create("Bridge"), {already_created, []}, "Try to create Class Bridge again"),
+	etap:is(embryosys_adtm_class:create("River"), {ok, {class, "River", alive}}, "Creating Class River"),
+	etap:is(embryosys_adtm_class:create("River"), {already_created, []}, "Try to create Class River again"),
 
-	etap:is(embryosys_adtm_class:hibern("River"), ok, "Hibernate Class River"),
-	etap:is(embryosys_adtm_class:hibern("Car"), not_found, "Try to hibernate a class which doesn't exist"),
+	etap:is(embryosys_adtm_class:hibern("River"), {ok, {class, "River", frozen}}, "Hibernate Class River"),
+	etap:is(embryosys_adtm_class:hibern("River"), {wrong_state, []}, "Try to hibernate again Class River"),
+	etap:is(embryosys_adtm_class:hibern("Car"), {not_found, []}, "Try to hibernate a class which doesn't exist"),
 	application:stop(embryosys),
 
 	etap:end_tests(),
