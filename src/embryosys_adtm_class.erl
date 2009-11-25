@@ -54,13 +54,13 @@ init([]) ->
 	{ok, []}.
 
 handle_call({create, Name}, _From, State) ->
-	{reply, do_create(Name), State};
+	{reply, embryosys_adtm:do_create(class, [Name]), State};
 
 handle_call({hadr, Operation, Name}, _From, State) ->
-	{reply, do_hadr(Operation, Name), State};
+	{reply, embryosys_adtm:do_hadr(Operation, class, [Name]), State};
 
 handle_call({purge, Name}, _From, State) ->
-	{reply, do_purge(Name), State}.
+	{reply, embryosys_adtm:do_purge(class, [Name]), State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
 
@@ -71,39 +71,4 @@ terminate(_Reason, _State) ->
 	ok.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
-
-%% internal API ==============================================================
-
-do_create(Name) ->
-	case embryosys_storage_server:load(class, Name) of
-		not_found ->
-			AliveClass = #class{ name = Name, state = alive },
-			embryosys_storage_server:store(class, Name, AliveClass),
-			{ok, AliveClass};
-		_ ->
-			{already_created, []}
-	end.
-
-do_hadr(Operation, Name) ->
-	% first grab the adt from the storage
-	Previous = embryosys_storage_server:load(class, Name),
-	case Previous of
-		not_found ->
-			{not_found, []};
-		_ ->
-			% compute its new state
-			NewState = embryosys_util:new_state_after(Operation, Previous#class.state),
-			case NewState of
-				wrong_state ->
-					{wrong_state, []};
-				_ ->
-					% and store it
-					UpdatedAdt = Previous#class{state = NewState},
-					embryosys_storage_server:store(class, Name, UpdatedAdt),
-					{ok, UpdatedAdt}
-			end
-	end.
-
-do_purge(_Name) ->
-	{not_yet_implemented, []}.
 
