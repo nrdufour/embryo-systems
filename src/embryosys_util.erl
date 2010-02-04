@@ -17,7 +17,7 @@
 -module(embryosys_util).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
--export([new_state_after/2, is_ready_for/2, new_uuid/0]).
+-export([new_state_after/2, is_ready_for/2, new_uuid/0, get_adt_state/2, set_adt_state/3]).
 
 -include("adt.hrl").
 
@@ -35,6 +35,28 @@ new_state_after(Operation, State) ->
 
 is_ready_for(Operation, State) ->
 	new_state_after(Operation, State) /= wrong_state.
+
+get_adt_state(class, Adt) ->
+	Adt#class.state;
+get_adt_state(attribute, Adt) ->
+	Adt#attribute.state;
+get_adt_state(link, Adt) ->
+	Adt#link.state;
+get_adt_state(object, Adt) ->
+	Adt#object.state;
+get_adt_state(_, _) ->
+	throw(invalid_type).
+
+set_adt_state(class, Adt, NewState) ->
+	Adt#class{state = NewState};
+set_adt_state(attribute, Adt, NewState) ->
+	Adt#attribute{state = NewState};
+set_adt_state(link, Adt, NewState) ->
+	Adt#link{state = NewState};
+set_adt_state(object, Adt, NewState) ->
+	Adt#object{state = NewState};
+set_adt_state(_, _, _) ->
+	throw(invalid_type).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

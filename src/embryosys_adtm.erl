@@ -22,6 +22,28 @@
 %% API exports
 -export([do_create/2, do_hadr/3, do_purge/2]).
 
+is_parent_classes_alive(Parents) ->
+	lists:foldl(
+		fun(ClassName, Previous) ->
+			ClassAdt = embryosys_storage_server:load(class, ClassName),
+			ClassIsValid = ClassAdt#class.state =:= alive,
+			Previous and ClassIsValid
+		end, true, Parents).
+
+is_adt_valid_for_operation(Operation, Type, ElementName) ->
+	Adt = embryosys_storage_server:load(Type, ElementName),
+
+	CurrentState = case Operation of
+		create -> none;
+		_      -> embryosys_utils:get_adt_state(Type, Adt)   
+	end,
+
+	NextState = embryosys_utils:new_state_after(Operation, CurrentState),
+
+	IsValid = NextState =/= wrong_state,
+
+	{IsValid, Adt, NextState}.
+
 do_create(Type, Names) ->
 	ElementName = lists:last(Names),
 
@@ -40,24 +62,15 @@ do_create(Type, Names) ->
 do_hadr(Operation, Type, Names) ->
 	ElementName = lists:last(Names),
 
-	% first grab the adt from the storage
-	Previous = embryosys_storage_server:load(Type, ElementName),
+	{IsValid, Adt, NextState} = is_adt_valid_for_operation(Operation, Type, ElementName),
 
-	case Previous of
-		not_found ->
-			{not_found, []};
-		_ ->
-			% compute its new state
-			NewState = embryosys_util:new_state_after(Operation, Previous#class.state),
-			case NewState of
-				wrong_state ->
-					{wrong_state, []};
-				_ ->
-					% and store it
-					UpdatedAdt = Previous#class{state = NewState},
-					embryosys_storage_server:store(class, ElementName, UpdatedAdt),
-					{ok, UpdatedAdt}
-			end
+	if
+		IsValid == true ->
+			{wrong_state, []};
+		true ->
+			UpdatedAdt = embryosys_utils:set_adt_state(Type, Adt, NextState),
+			embryosys_storage_server:store(class, ElementName, UpdatedAdt),
+			{ok, UpdatedAdt}
 	end.
 
 do_purge(_Type, _Names) ->
