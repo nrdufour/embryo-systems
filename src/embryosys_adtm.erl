@@ -35,10 +35,10 @@ is_adt_valid_for_operation(Operation, Type, ElementName) ->
 
 	CurrentState = if
 		Adt =:= not_found -> none;
-		true              -> embryosys_util:get_adt_state(Type, Adt)
+		true              -> embryosys_adt:get_adt_state(Type, Adt)
 	end,
 		
-	NextState = embryosys_util:new_state_after(Operation, CurrentState),
+	NextState = embryosys_adt:new_state_after(Operation, CurrentState),
 
 	{Adt, NextState}.
 
@@ -51,7 +51,7 @@ execute(Operation, Type, Names) when Operation =/= purge ->
 		NextState =/= wrong_state ->
 			UpdatedAdt = case Operation of
 				create -> #class{ name = ElementName, state = alive };
-				_      -> embryosys_util:set_adt_state(Type, Adt, NextState)
+				_      -> embryosys_adt:set_adt_state(Type, Adt, NextState)
 			end,
 			embryosys_storage_server:store(class, ElementName, UpdatedAdt),
 			{ok, UpdatedAdt};
