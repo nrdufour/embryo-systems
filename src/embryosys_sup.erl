@@ -1,5 +1,5 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
-%% @copyright 2009 Nicolas R Dufour.
+%% @copyright 2009-2010 Nicolas R Dufour.
 %%
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
