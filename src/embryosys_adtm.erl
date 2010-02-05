@@ -42,33 +42,28 @@ is_adt_valid_for_operation(Operation, Type, ElementName) ->
 
 	{Adt, NextState}.
 
-do_create(Type, Names) ->
-	ElementName = lists:last(Names),
-
-	{_Adt, NextState} = is_adt_valid_for_operation(create, Type, ElementName),
-
-	if
-		NextState =/= wrong_state ->
-			AliveClass = #class{ name = ElementName, state = alive },
-			embryosys_storage_server:store(class, ElementName, AliveClass),
-			{ok, AliveClass};
-		true ->
-			{already_created, []}
-	end.
-
-do_hadr(Operation, Type, Names) ->
+execute(Operation, Type, Names) when Operation =/= purge ->
 	ElementName = lists:last(Names),
 
 	{Adt, NextState} = is_adt_valid_for_operation(Operation, Type, ElementName),
 
 	if
 		NextState =/= wrong_state ->
-			UpdatedAdt = embryosys_util:set_adt_state(Type, Adt, NextState),
+			UpdatedAdt = case Operation of
+				create -> #class{ name = ElementName, state = alive };
+				_      -> embryosys_util:set_adt_state(Type, Adt, NextState)
+			end,
 			embryosys_storage_server:store(class, ElementName, UpdatedAdt),
 			{ok, UpdatedAdt};
 		true ->
 			{wrong_state, []}
 	end.
+
+do_create(Type, Names) ->
+	execute(create, Type, Names).
+
+do_hadr(Operation, Type, Names) ->
+	execute(Operation, Type, Names).
 
 do_purge(_Type, _Names) ->
 	{not_yet_implemented, []}.
