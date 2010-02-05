@@ -33,12 +33,12 @@ is_parent_classes_alive(Parents) ->
 is_adt_valid_for_operation(Operation, Type, ElementName) ->
 	Adt = embryosys_storage_server:load(Type, ElementName),
 
-	CurrentState = case Operation of
-		create -> none;
-		_      -> embryosys_utils:get_adt_state(Type, Adt)   
+	CurrentState = if
+		Adt =:= not_found -> none;
+		true              -> embryosys_util:get_adt_state(Type, Adt)
 	end,
-
-	NextState = embryosys_utils:new_state_after(Operation, CurrentState),
+		
+	NextState = embryosys_util:new_state_after(Operation, CurrentState),
 
 	IsValid = NextState =/= wrong_state,
 
@@ -66,11 +66,11 @@ do_hadr(Operation, Type, Names) ->
 
 	if
 		IsValid == true ->
-			{wrong_state, []};
-		true ->
-			UpdatedAdt = embryosys_utils:set_adt_state(Type, Adt, NextState),
+			UpdatedAdt = embryosys_util:set_adt_state(Type, Adt, NextState),
 			embryosys_storage_server:store(class, ElementName, UpdatedAdt),
-			{ok, UpdatedAdt}
+			{ok, UpdatedAdt};
+		true ->
+			{wrong_state, []}
 	end.
 
 do_purge(_Type, _Names) ->

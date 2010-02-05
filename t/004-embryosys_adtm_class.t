@@ -23,7 +23,7 @@ main(_) ->
 
 	etap:is(embryosys_adtm_class:hibern("River"), {ok, {class, "River", frozen}}, "Hibernate Class River"),
 	etap:is(embryosys_adtm_class:hibern("River"), {wrong_state, []}, "Try to hibernate again Class River"),
-	etap:is(embryosys_adtm_class:hibern("Car"), {not_found, []}, "Try to hibernate a class which doesn't exist"),
+	etap:is(embryosys_adtm_class:hibern("Car"), {wrong_state, []}, "Try to hibernate a class which doesn't exist"),
 	application:stop(embryosys),
 
 	etap:end_tests(),
