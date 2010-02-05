@@ -40,9 +40,7 @@ is_adt_valid_for_operation(Operation, Type, ElementName) ->
 		
 	NextState = embryosys_util:new_state_after(Operation, CurrentState),
 
-	IsValid = NextState =/= wrong_state,
-
-	{IsValid, Adt, NextState}.
+	{Adt, NextState}.
 
 do_create(Type, Names) ->
 	ElementName = lists:last(Names),
@@ -62,10 +60,10 @@ do_create(Type, Names) ->
 do_hadr(Operation, Type, Names) ->
 	ElementName = lists:last(Names),
 
-	{IsValid, Adt, NextState} = is_adt_valid_for_operation(Operation, Type, ElementName),
+	{Adt, NextState} = is_adt_valid_for_operation(Operation, Type, ElementName),
 
 	if
-		IsValid == true ->
+		NextState =/= wrong_state ->
 			UpdatedAdt = embryosys_util:set_adt_state(Type, Adt, NextState),
 			embryosys_storage_server:store(class, ElementName, UpdatedAdt),
 			{ok, UpdatedAdt};
