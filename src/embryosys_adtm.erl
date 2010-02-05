@@ -45,15 +45,14 @@ is_adt_valid_for_operation(Operation, Type, ElementName) ->
 do_create(Type, Names) ->
 	ElementName = lists:last(Names),
 
-	Adt = embryosys_storage_server:load(Type, ElementName),
+	{_Adt, NextState} = is_adt_valid_for_operation(create, Type, ElementName),
 
-	%% TODO needs to take care of the other types obviously
-	case Adt of
-		not_found ->
+	if
+		NextState =/= wrong_state ->
 			AliveClass = #class{ name = ElementName, state = alive },
 			embryosys_storage_server:store(class, ElementName, AliveClass),
 			{ok, AliveClass};
-		_ ->
+		true ->
 			{already_created, []}
 	end.
 
