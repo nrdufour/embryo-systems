@@ -1,6 +1,4 @@
-%% @author Nicolas R Dufour <nrdufour@gmail.com>
-%% @copyright 2009-2010 Nicolas R Dufour.
-%%
+%% Copyright 2009-2010 Nicolas R Dufour.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -13,13 +11,15 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
+%%
+%% @author Nicolas R Dufour <nrdufour@gmail.com>
+%% @copyright 2009-2010 Nicolas R Dufour.
 
 -module(embryosys_util).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
+-include("adt.hrl").
 
 -export([new_uuid/0]).
-
--include("adt.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Piece of code from couch_util.erl in Apache CouchDB project.
