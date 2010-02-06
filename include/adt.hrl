@@ -13,26 +13,26 @@
 %% limitations under the License.
 
 -record(class, {
-	name = "unknown",
-	state = none
-	}).
+    name = "unknown",
+    state = none
+ }).
 
 -record(attribute, {
-	name = "unknown",
-	state = none,
-	class
-	}).
+    name = "unknown",
+    state = none,
+    class
+ }).
 
 -record(link, {
-	name = "unknown",
-	state = none,
-	from,
-	to
-	}).
+    name = "unknown",
+    state = none,
+    from,
+    to
+ }).
 
 -record(object, {
-	name = "unknown",
-	state = none,
-	class
-	}).
+    name = "unknown",
+    state = none,
+    class
+ }).
 

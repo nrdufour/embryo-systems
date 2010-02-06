@@ -25,50 +25,50 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	terminate/2, code_change/3]).
+    terminate/2, code_change/3]).
 
 start_link() ->
-	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 create(Name) ->
-	gen_server:call(?MODULE, {create, Name}).
+    gen_server:call(?MODULE, {create, Name}).
 
 hibern(Name) ->
-	gen_server:call(?MODULE, {hadr, hibern, Name}).
+    gen_server:call(?MODULE, {hadr, hibern, Name}).
 
 awake(Name) ->
-	gen_server:call(?MODULE, {hadr, awake, Name}).
+    gen_server:call(?MODULE, {hadr, awake, Name}).
 
 destroy(Name) ->
-	gen_server:call(?MODULE, {hadr, destroy, Name}).
+    gen_server:call(?MODULE, {hadr, destroy, Name}).
 
 resur(Name) ->
-	gen_server:call(?MODULE, {hadr, resur, Name}).
+    gen_server:call(?MODULE, {hadr, resur, Name}).
 
 purge(Name) ->
-	gen_server:call(?MODULE, {purge, Name}).
+    gen_server:call(?MODULE, {purge, Name}).
 
 init([]) ->
-	process_flag(trap_exit, true),
-	io:format("~p starting~n", [?MODULE]),
-	{ok, []}.
+    process_flag(trap_exit, true),
+    io:format("~p starting~n", [?MODULE]),
+    {ok, []}.
 
 handle_call({create, Name}, _From, State) ->
-	{reply, embryosys_adtm:do_create(class, [Name]), State};
+    {reply, embryosys_adtm:do_create(class, [Name]), State};
 
 handle_call({hadr, Operation, Name}, _From, State) ->
-	{reply, embryosys_adtm:do_hadr(Operation, class, [Name]), State};
+    {reply, embryosys_adtm:do_hadr(Operation, class, [Name]), State};
 
 handle_call({purge, Name}, _From, State) ->
-	{reply, embryosys_adtm:do_purge(class, [Name]), State}.
+    {reply, embryosys_adtm:do_purge(class, [Name]), State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
 
 handle_info(_Info, State) -> {noreply, State}.
 
 terminate(_Reason, _State) ->
-	io:format("~p stopping~n", [?MODULE]),
-	ok.
+    io:format("~p stopping~n", [?MODULE]),
+    ok.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 

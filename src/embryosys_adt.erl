@@ -27,42 +27,42 @@
 %% @spec new_state_after(adtOperation(), adtState()) -> adtState()
 %% @doc returns the ADT state following a given operation.
 new_state_after(Operation, State) ->
-	case {Operation, State} of
-		{create, none}   -> alive;
-		{hibern, alive}    -> frozen;
-		{awake, frozen}    -> alive;
-		{destroy, alive}   -> destroyed;
-		{resur, destroyed} -> alive;
-		{purge, destroyed} -> none;
-		{_, _}             -> wrong_state
-	end.
+    case {Operation, State} of
+        {create, none}   -> alive;
+        {hibern, alive}    -> frozen;
+        {awake, frozen}    -> alive;
+        {destroy, alive}   -> destroyed;
+        {resur, destroyed} -> alive;
+        {purge, destroyed} -> none;
+        {_, _}             -> wrong_state
+    end.
 
 %% @spec is_ready_for(adtOperation(), adtState()) -> boolean()
 %% @doc returns true if you can perform a given operation on an Adt
 %% with the given state.
 is_ready_for(Operation, State) ->
-	new_state_after(Operation, State) /= wrong_state.
+    new_state_after(Operation, State) /= wrong_state.
 
 %% @spec get_adt_state(adtType(), adt()) -> adt()
 %% @doc returns the current state of a given Adt.
 get_adt_state(Type, Adt) ->
-	case Type of
-		class     -> Adt#class.state;
-		attribute -> Adt#attribute.state;
-		link      -> Adt#link.state;
-		object    -> Adt#object.state;
-		_         ->throw(invalid_type)
-	end.
+    case Type of
+        class     -> Adt#class.state;
+        attribute -> Adt#attribute.state;
+        link      -> Adt#link.state;
+        object    -> Adt#object.state;
+        _         ->throw(invalid_type)
+    end.
 
 %% @spec set_adt_state(adtType(), adt(), adtState()) -> adt()
 %% @doc set the Adt state.
 set_adt_state(Type, Adt, NewState) ->
-	case Type of
-		class     -> Adt#class{state = NewState};
-		attribute -> Adt#attribute{state = NewState};
-		link      -> Adt#link{state = NewState};
-		object    -> Adt#object{state = NewState};
-		_         -> throw(invalid_type)
-	end.
+    case Type of
+        class     -> Adt#class{state = NewState};
+        attribute -> Adt#attribute{state = NewState};
+        link      -> Adt#link{state = NewState};
+        object    -> Adt#object{state = NewState};
+        _         -> throw(invalid_type)
+    end.
 
 %%

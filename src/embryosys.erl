@@ -28,20 +28,20 @@
 %%
 
 start(_Type, StartArgs) ->
-	case start_apps([crypto]) of
-		ok ->
-			embryosys_sup:start_link(StartArgs);
-		{error, Reason} ->
-			{error, Reason}
-	end.
+    case start_apps([crypto]) of
+        ok ->
+            embryosys_sup:start_link(StartArgs);
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 stop(_State) ->
-	ok.
+    ok.
 
 %%
 
 start() ->
-	application:start(embryosys).
+    application:start(embryosys).
 
 %%
 

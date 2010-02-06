@@ -22,53 +22,53 @@
 -export([start/0, start_in_shell_for_testing/0, start_link/1, init/1]).
 
 start() ->
-	spawn(fun() ->
-		supervisor:start_link({local, ?MODULE}, ?MODULE, _Arg = [])
-	end).
+    spawn(fun() ->
+        supervisor:start_link({local, ?MODULE}, ?MODULE, _Arg = [])
+    end).
 
 start_in_shell_for_testing() ->
-	{ok, Pid} = supervisor:start_link({local, ?MODULE}, ?MODULE, _Arg = []),
-	unlink(Pid).
+    {ok, Pid} = supervisor:start_link({local, ?MODULE}, ?MODULE, _Arg = []),
+    unlink(Pid).
 
 start_link(Args) ->
-	supervisor:start_link({local, ?MODULE}, ?MODULE, Args).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, Args).
 
 init([]) ->
-	%% Install my personal error handler
-	%%gen_event:swap_handler(alarm_handler,
-	%%			{alarm_handler, swap},
-	%%			{my_alarm_handler, xyz}),
-	
-	{ok, {{one_for_one, 3, 10},
-		[{tag1,
-			{embryosys_adtm_class, start_link, []},
-			permanent,
-			10000,
-			worker,
-			[embryosys_adtm_class]},
-		{tag2,
-			{embryosys_adtm_attribute, start_link, []},
-			permanent,
-			10000,
-			worker,
-			[embryosys_adtm_attribute]},
-		{tag3,
-			{embryosys_adtm_link, start_link, []},
-			permanent,
-			10000,
-			worker,
-			[embryosys_adtm_link]},
-		{tag4,
-			{embryosys_adtm_object, start_link, []},
-			permanent,
-			10000,
-			worker,
-			[embryosys_adtm_object]},
-		{tag5,
-			{embryosys_storage_server, start_link, []},
-			permanent,
-			10000,
-			worker,
-			[embryosys_storage_server]}
-	]}}.
+    %% Install my personal error handler
+    %%gen_event:swap_handler(alarm_handler,
+    %%            {alarm_handler, swap},
+    %%            {my_alarm_handler, xyz}),
+    
+    {ok, {{one_for_one, 3, 10},
+        [{tag1,
+            {embryosys_adtm_class, start_link, []},
+            permanent,
+            10000,
+            worker,
+            [embryosys_adtm_class]},
+        {tag2,
+            {embryosys_adtm_attribute, start_link, []},
+            permanent,
+            10000,
+            worker,
+            [embryosys_adtm_attribute]},
+        {tag3,
+            {embryosys_adtm_link, start_link, []},
+            permanent,
+            10000,
+            worker,
+            [embryosys_adtm_link]},
+        {tag4,
+            {embryosys_adtm_object, start_link, []},
+            permanent,
+            10000,
+            worker,
+            [embryosys_adtm_object]},
+        {tag5,
+            {embryosys_storage_server, start_link, []},
+            permanent,
+            10000,
+            worker,
+            [embryosys_storage_server]}
+    ]}}.
 

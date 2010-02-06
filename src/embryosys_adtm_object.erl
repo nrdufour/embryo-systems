@@ -25,44 +25,44 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	terminate/2, code_change/3]).
+    terminate/2, code_change/3]).
 
 start_link() ->
-	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 create(ClassName, ObjectName) ->
-	gen_server:call(?MODULE, {create, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {create, ClassName, ObjectName}).
 
 hibern(ClassName, ObjectName) ->
-	gen_server:call(?MODULE, {hadr, hibern, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {hadr, hibern, ClassName, ObjectName}).
 
 awake(ClassName, ObjectName) ->
-	gen_server:call(?MODULE, {hadr, awake, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {hadr, awake, ClassName, ObjectName}).
 
 destroy(ClassName, ObjectName) ->
-	gen_server:call(?MODULE, {hadr, destroy, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {hadr, destroy, ClassName, ObjectName}).
 
 resur(ClassName, ObjectName) ->
-	gen_server:call(?MODULE, {hadr, resur, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {hadr, resur, ClassName, ObjectName}).
 
 purge(ClassName, ObjectName) ->
-	gen_server:call(?MODULE, {purge, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {purge, ClassName, ObjectName}).
 
 init([]) ->
-	process_flag(trap_exit, true),
-	io:format("~p starting~n", [?MODULE]),
-	{ok, []}.
+    process_flag(trap_exit, true),
+    io:format("~p starting~n", [?MODULE]),
+    {ok, []}.
 
 handle_call(_, _From, State) ->
-	{reply, not_yet_implemented, State}.
+    {reply, not_yet_implemented, State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
 
 handle_info(_Info, State) -> {noreply, State}.
 
 terminate(_Reason, _State) ->
-	io:format("~p stopping~n", [?MODULE]),
-	ok.
+    io:format("~p stopping~n", [?MODULE]),
+    ok.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
