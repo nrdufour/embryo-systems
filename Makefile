@@ -1,30 +1,30 @@
-ERL          ?= erl
+LIBDIR=$(shell erl -eval 'io:format("~s~n", [code:lib_dir()])' -s init stop -noshell)
+.PHONY: doc
+VERSION=0.0.1
 
-EBIN_DIRS    := $(wildcard deps/*/ebin)
-ERLC_FLAGS   := -W $(INCLUDE_DIRS:%=-I %) $(EBIN_DIRS:%=-pa %)
-APP          := embryosys
+all:
+	mkdir -p ebin
+	(cd src;$(MAKE))
 
-all: erl ebin/$(APP).app
+doc:
+	(cd src; $(MAKE) doc)
 
-erl:
-	@$(ERL) -pa $(EBIN_DIRS) -noinput +B \
-	  -eval 'case make:all() of up_to_date -> halt(0); error -> halt(1) end.'
-
-docs:
-	@$(ERL) -noshell -run edoc_run application '$(APP)' '"."' '[{preprocess, true},{includes, ["."]}]'
-
-test: all
+test: all 
 	prove t/*.t
 
-cover: all
+cover: all 
 	COVER=1 prove t/*.t
-	erl -detached -noshell -eval 'etap_report:create()' -s init stop
+	erl -noshell -eval 'etap_report:create()' -s init stop
 
-clean: 
-	@echo "removing:"
-	@rm -fv ebin/*.beam ebin/*.app
+clean:
+	(cd src;$(MAKE) clean)
+	rm -rf cover/
 
-ebin/$(APP).app: src/$(APP).app
-	@cp -v src/$(APP).app $@
+package: clean
+	@mkdir embryosys-$(VERSION)/ && cp -rf Makefile README src support t embryosys-$(VERSION)
+	@COPYFILE_DISABLE=true tar zcf embryosys-$(VERSION).tgz embryosys-$(VERSION)
+	@rm -rf embryosys-$(VERSION)/
 
-
+install:
+	mkdir -p $(prefix)/$(LIBDIR)/embryosys-$(VERSION)/ebin
+	for i in ebin/*.beam; do install $$i $(prefix)/$(LIBDIR)/embryosys-$(VERSION)/$$i ; done
