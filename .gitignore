@@ -4,3 +4,4 @@ ebin/
 *.dump
 cover
 edoc-info
+embryosys.dets
