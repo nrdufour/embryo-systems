@@ -13,8 +13,12 @@ test: all
 	prove t/*.t
 
 cover: all 
-	COVER=1 prove t/*.t
-	erl -noshell -eval 'etap_report:create()' -s init stop
+	rm -f cover/*.coverdata
+	COVER=1 COVER_BIN=./ebin prove t/*.t
+	SRC=./src/ \
+		erl -noshell \
+		-eval 'etap_report:create()' \
+		-s init stop  > /dev/null 2>&1
 
 clean:
 	(cd src;$(MAKE) clean)
