@@ -20,7 +20,27 @@
 -include("adt.hrl").
 
 %% API exports
--export([do_create/2, do_hadr/3, do_purge/2]).
+-export([do_create/2, do_hibern/2, do_awake/2, do_destroy/2, do_resur/2, do_purge/2]).
+
+do_create(Type, Names) ->
+    do_it(create, Type, Names).
+
+do_hibern(Type, Names) ->
+    do_it(hibern, Type, Names).
+
+do_awake(Type, Names) ->
+    do_it(awake, Type, Names).
+
+do_destroy(Type, Names) ->
+    do_it(destroy, Type, Names).
+
+do_resur(Type, Names) ->
+    do_it(resur, Type, Names).
+
+do_purge(Type, Names) ->
+    {not_yet_implemented, []}.
+
+%%% --------------------------------------------------------------------------
 
 is_parent_classes_alive(Parents) ->
     lists:foldl(
@@ -42,7 +62,7 @@ is_adt_valid_for_operation(Operation, Type, ElementName) ->
 
     {Adt, NextState}.
 
-execute(Operation, Type, Names) when Operation =/= purge ->
+do_it(Operation, Type, Names) ->
     ElementName = lists:last(Names),
 
     {Adt, NextState} = is_adt_valid_for_operation(Operation, Type, ElementName),
@@ -59,12 +79,5 @@ execute(Operation, Type, Names) when Operation =/= purge ->
             {wrong_state, []}
     end.
 
-do_create(Type, Names) ->
-    execute(create, Type, Names).
-
-do_hadr(Operation, Type, Names) ->
-    execute(Operation, Type, Names).
-
-do_purge(_Type, _Names) ->
-    {not_yet_implemented, []}.
+%%
 

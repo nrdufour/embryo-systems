@@ -34,16 +34,16 @@ create(ClassName, ObjectName) ->
     gen_server:call(?MODULE, {create, ClassName, ObjectName}).
 
 hibern(ClassName, ObjectName) ->
-    gen_server:call(?MODULE, {hadr, hibern, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {hibern, ClassName, ObjectName}).
 
 awake(ClassName, ObjectName) ->
-    gen_server:call(?MODULE, {hadr, awake, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {awake, ClassName, ObjectName}).
 
 destroy(ClassName, ObjectName) ->
-    gen_server:call(?MODULE, {hadr, destroy, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {destroy, ClassName, ObjectName}).
 
 resur(ClassName, ObjectName) ->
-    gen_server:call(?MODULE, {hadr, resur, ClassName, ObjectName}).
+    gen_server:call(?MODULE, {resur, ClassName, ObjectName}).
 
 purge(ClassName, ObjectName) ->
     gen_server:call(?MODULE, {purge, ClassName, ObjectName}).

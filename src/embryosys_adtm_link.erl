@@ -37,16 +37,16 @@ create(FromClassName, ToClassName, LinkName, Extra) ->
     gen_server:call(?MODULE, {create, FromClassName, ToClassName, LinkName, Extra}).
 
 hibern(FromClassName, ToClassName, LinkName) ->
-    gen_server:call(?MODULE, {hadr, hibern, FromClassName, ToClassName, LinkName}).
+    gen_server:call(?MODULE, {hibern, FromClassName, ToClassName, LinkName}).
 
 awake(FromClassName, ToClassName, LinkName) ->
-    gen_server:call(?MODULE, {hadr, awake, FromClassName, ToClassName, LinkName}).
+    gen_server:call(?MODULE, {awake, FromClassName, ToClassName, LinkName}).
 
 destroy(FromClassName, ToClassName, LinkName) ->
-    gen_server:call(?MODULE, {hadr, destroy, FromClassName, ToClassName, LinkName}).
+    gen_server:call(?MODULE, {destroy, FromClassName, ToClassName, LinkName}).
 
 resur(FromClassName, ToClassName, LinkName) ->
-    gen_server:call(?MODULE, {hadr, resur, FromClassName, ToClassName, LinkName}).
+    gen_server:call(?MODULE, {resur, FromClassName, ToClassName, LinkName}).
 
 purge(FromClassName, ToClassName, LinkName) ->
     gen_server:call(?MODULE, {purge, FromClassName, ToClassName, LinkName}).

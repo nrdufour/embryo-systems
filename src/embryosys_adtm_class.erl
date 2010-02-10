@@ -34,16 +34,16 @@ create(Name) ->
     gen_server:call(?MODULE, {create, Name}).
 
 hibern(Name) ->
-    gen_server:call(?MODULE, {hadr, hibern, Name}).
+    gen_server:call(?MODULE, {hibern, Name}).
 
 awake(Name) ->
-    gen_server:call(?MODULE, {hadr, awake, Name}).
+    gen_server:call(?MODULE, {awake, Name}).
 
 destroy(Name) ->
-    gen_server:call(?MODULE, {hadr, destroy, Name}).
+    gen_server:call(?MODULE, {destroy, Name}).
 
 resur(Name) ->
-    gen_server:call(?MODULE, {hadr, resur, Name}).
+    gen_server:call(?MODULE, {resur, Name}).
 
 purge(Name) ->
     gen_server:call(?MODULE, {purge, Name}).
@@ -56,8 +56,17 @@ init([]) ->
 handle_call({create, Name}, _From, State) ->
     {reply, embryosys_adtm:do_create(class, [Name]), State};
 
-handle_call({hadr, Operation, Name}, _From, State) ->
-    {reply, embryosys_adtm:do_hadr(Operation, class, [Name]), State};
+handle_call({hibern, Name}, _From, State) ->
+    {reply, embryosys_adtm:do_hibern(class, [Name]), State};
+
+handle_call({awake, Name}, _From, State) ->
+    {reply, embryosys_adtm:do_awake(class, [Name]), State};
+
+handle_call({destroy, Name}, _From, State) ->
+    {reply, embryosys_adtm:do_destroy(class, [Name]), State};
+
+handle_call({resur, Name}, _From, State) ->
+    {reply, embryosys_adtm:do_resur(class, [Name]), State};
 
 handle_call({purge, Name}, _From, State) ->
     {reply, embryosys_adtm:do_purge(class, [Name]), State}.
