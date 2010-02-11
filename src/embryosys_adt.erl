@@ -22,7 +22,24 @@
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
 
--export([new_state_after/2, is_ready_for/2, get_adt_state/2, set_adt_state/3]).
+-export([new_adt/2, new_state_after/2, is_ready_for/2, get_adt_state/2, set_adt_state/3]).
+
+new_adt(Type, Names) ->
+    case Type of
+        class     ->
+            [ClassName] = Names,
+            #class{ name = ClassName, state = alive };
+        attribute ->
+            [ClassName, AttributeName] = Names,
+            #attribute{ name = AttributeName, state = alive, class = ClassName };
+        link      ->
+            [From,To,LinkName] = Names,
+            #link{ name = LinkName, state = alive, from = From, to = To };
+        object    ->
+            [ClassName, ObjectName] = Names,
+            #object{ name = ObjectName, state = alive, class = ClassName };
+        _         -> throw(invalid_type)
+    end.
 
 %% @spec new_state_after(adtOperation(), adtState()) -> adtState()
 %% @doc returns the ADT state following a given operation.

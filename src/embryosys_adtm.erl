@@ -37,7 +37,7 @@ do_destroy(Type, Names) ->
 do_resur(Type, Names) ->
     do_it(resur, Type, Names).
 
-do_purge(Type, Names) ->
+do_purge(_Type, _Names) ->
     {not_yet_implemented, []}.
 
 %%% --------------------------------------------------------------------------
@@ -70,7 +70,7 @@ do_it(Operation, Type, Names) ->
     if
         NextState =/= wrong_state ->
             UpdatedAdt = case Operation of
-                create -> #class{ name = ElementName, state = alive };
+                create -> embryosys_adt:new_adt(Type, Names);
                 _      -> embryosys_adt:set_adt_state(Type, Adt, NextState)
             end,
             embryosys_storage_server:store(class, ElementName, UpdatedAdt),
