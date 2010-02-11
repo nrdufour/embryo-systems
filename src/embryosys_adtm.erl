@@ -42,30 +42,46 @@ do_purge(_Type, _Names) ->
 
 %%% --------------------------------------------------------------------------
 
-is_parent_classes_alive(Parents) ->
-    lists:foldl(
-        fun(ClassName, Previous) ->
-            ClassAdt = embryosys_storage_server:load(class, ClassName),
-            ClassIsValid = ClassAdt#class.state =:= alive,
-            Previous and ClassIsValid
-        end, true, Parents).
+is_class_alive(ClassName) ->
+    ClassAdt = embryosys_storage_server:load(class, ClassName),
+    case ClassAdt of
+        not_found -> false;
+        _         -> ClassAdt#class.state =:= alive
+    end.
 
-is_adt_valid_for_operation(Operation, Type, ElementName) ->
-    Adt = embryosys_storage_server:load(Type, ElementName),
+are_adt_parents_valid(class, _Names) ->
+    true;
+are_adt_parents_valid(Type, Names) when Type == attribute; Type == object ->
+    [ClassName, _Name] = Names,
+    is_class_alive(ClassName);
+are_adt_parents_valid(link, Names) ->
+    [FromClassName, ToClassName, _LinkName] = Names,
+    is_class_alive(FromClassName) and is_class_alive(ToClassName);
+are_adt_parents_valid(_Type, _Names) ->
+    throw(invalid_type).
 
-    CurrentState = if
-        Adt =:= not_found -> none;
-        true              -> embryosys_adt:get_adt_state(Type, Adt)
-    end,
+is_adt_valid_for_operation(Operation, Type, Names) ->
+    AreParentsValid = are_adt_parents_valid(Type, Names),
+    if AreParentsValid =:= true ->
+        ElementName = lists:last(Names),
+        Adt = embryosys_storage_server:load(Type, ElementName),
+
+        CurrentState = if
+            Adt =:= not_found -> none;
+            true              -> embryosys_adt:get_adt_state(Type, Adt)
+        end,
         
-    NextState = embryosys_adt:new_state_after(Operation, CurrentState),
+        NextState = embryosys_adt:new_state_after(Operation, CurrentState),
 
-    {Adt, NextState}.
+        {Adt, NextState};
+       true ->
+        {none, wrong_state}
+    end.
 
 do_it(Operation, Type, Names) ->
     ElementName = lists:last(Names),
 
-    {Adt, NextState} = is_adt_valid_for_operation(Operation, Type, ElementName),
+    {Adt, NextState} = is_adt_valid_for_operation(Operation, Type, Names),
 
     if
         NextState =/= wrong_state ->
