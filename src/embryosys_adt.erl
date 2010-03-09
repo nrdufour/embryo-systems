@@ -22,24 +22,22 @@
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
 
--export([new_adt/2, new_state_after/2, is_ready_for/2, get_adt_state/2, set_adt_state/3]).
+-export([new_adt/2, new_state_after/2, is_ready_for/2]).
 
-new_adt(Type, Names) ->
-    case Type of
-        class     ->
-            [ClassName] = Names,
-            #class{ name = ClassName, state = alive };
-        attribute ->
-            [ClassName, AttributeName] = Names,
-            #attribute{ name = AttributeName, state = alive, class = ClassName };
-        link      ->
-            [From,To,LinkName] = Names,
-            #link{ name = LinkName, state = alive, from = From, to = To };
-        object    ->
-            [ClassName, ObjectName] = Names,
-            #object{ name = ObjectName, state = alive, class = ClassName };
-        _         -> throw(invalid_type)
-    end.
+new_adt(class, [ClassName]) ->
+    Meta = #meta{type = class, names = [ClassName], state = alive},
+    #adt{meta = Meta, data = []};
+new_adt(attribute, [ClassName, AttributeName]) ->
+    Meta = #meta{type = attribute, names = [ClassName, AttributeName], state = alive},
+    #adt{meta = Meta, data = []};
+new_adt(link, [FromClassName, ToClassName, LinkName]) ->
+    Meta = #meta{type = link, names = [FromClassName, ToClassName, LinkName], state = alive},
+    #adt{meta = Meta, data = []};
+new_adt(object, [ClassName, ObjectName]) ->
+    Meta = #meta{type = object, names = [ClassName, ObjectName], state = alive},
+    #adt{meta = Meta, data = []};
+new_adt(_,_) ->
+    throw(not_supported_type).
 
 %% @spec new_state_after(adtOperation(), adtState()) -> adtState()
 %% @doc returns the ADT state following a given operation.
@@ -59,27 +57,5 @@ new_state_after(Operation, State) ->
 %% with the given state.
 is_ready_for(Operation, State) ->
     new_state_after(Operation, State) /= wrong_state.
-
-%% @spec get_adt_state(adtType(), adt()) -> adt()
-%% @doc returns the current state of a given Adt.
-get_adt_state(Type, Adt) ->
-    case Type of
-        class     -> Adt#class.state;
-        attribute -> Adt#attribute.state;
-        link      -> Adt#link.state;
-        object    -> Adt#object.state;
-        _         ->throw(invalid_type)
-    end.
-
-%% @spec set_adt_state(adtType(), adt(), adtState()) -> adt()
-%% @doc set the Adt state.
-set_adt_state(Type, Adt, NewState) ->
-    case Type of
-        class     -> Adt#class{state = NewState};
-        attribute -> Adt#attribute{state = NewState};
-        link      -> Adt#link{state = NewState};
-        object    -> Adt#object{state = NewState};
-        _         -> throw(invalid_type)
-    end.
 
 %%

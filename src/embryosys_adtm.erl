@@ -46,7 +46,8 @@ is_class_alive(ClassName) ->
     ClassAdt = embryosys_storage_server:load(class, ClassName),
     case ClassAdt of
         not_found -> false;
-        _         -> ClassAdt#class.state =:= alive
+        _         -> Meta = ClassAdt#adt.meta,
+		     (Meta#meta.type =:= class) and (Meta#meta.state =:= alive)
     end.
 
 are_adt_parents_valid(class, _Names) ->
@@ -68,7 +69,8 @@ is_adt_valid_for_operation(Operation, Type, Names) ->
 
         CurrentState = if
             Adt =:= not_found -> none;
-            true              -> embryosys_adt:get_adt_state(Type, Adt)
+            true              -> Meta = Adt#adt.meta,
+                                 Meta#meta.state
         end,
         
         NextState = embryosys_adt:new_state_after(Operation, CurrentState),
@@ -87,7 +89,9 @@ do_it(Operation, Type, Names) ->
         NextState =/= wrong_state ->
             UpdatedAdt = case Operation of
                 create -> embryosys_adt:new_adt(Type, Names);
-                _      -> embryosys_adt:set_adt_state(Type, Adt, NextState)
+                _      -> Meta = Adt#adt.meta,
+                          UpdatedMeta = Meta#meta{state = NextState},
+			  Adt#adt{meta = UpdatedMeta}
             end,
             embryosys_storage_server:store(class, ElementName, UpdatedAdt),
             {ok, UpdatedAdt};

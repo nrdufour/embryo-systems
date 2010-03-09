@@ -12,27 +12,14 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 
--record(class, {
-    name = "unknown",
+-record(meta, {
+    type = unknown,
+    names = [],
     state = none
- }).
+}).
 
--record(attribute, {
-    name = "unknown",
-    state = none,
-    class
- }).
-
--record(link, {
-    name = "unknown",
-    state = none,
-    from,
-    to
- }).
-
--record(object, {
-    name = "unknown",
-    state = none,
-    class
- }).
+-record(adt, {
+    meta,
+    data
+}).
 
