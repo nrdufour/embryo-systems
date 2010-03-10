@@ -56,6 +56,16 @@ init([]) ->
     io:format("~p starting~n", [?MODULE]),
     {ok, []}.
 
+handle_call({create, FromClassName, ToClassName, LinkName}, _From, State) ->
+    {reply, embryosys_adtm:do_create(link, [FromClassName, ToClassName, LinkName]), State};
+handle_call({hibern, FromClassName, ToClassName, LinkName}, _From, State) ->
+    {reply, embryosys_adtm:do_hibern(link, [FromClassName, ToClassName, LinkName]), State};
+handle_call({awake, FromClassName, ToClassName, LinkName}, _From, State) ->
+    {reply, embryosys_adtm:do_awake(link, [FromClassName, ToClassName, LinkName]), State};
+handle_call({destroy, FromClassName, ToClassName, LinkName}, _From, State) ->
+    {reply, embryosys_adtm:do_destroy(link, [FromClassName, ToClassName, LinkName]), State};
+handle_call({resur, FromClassName, ToClassName, LinkName}, _From, State) ->
+    {reply, embryosys_adtm:do_resur(link, [FromClassName, ToClassName, LinkName]), State};
 handle_call(_, _From, State) ->
     {reply, not_yet_implemented, State}.
 
