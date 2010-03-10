@@ -43,7 +43,7 @@ do_purge(_Type, _Names) ->
 %%% --------------------------------------------------------------------------
 
 is_class_alive(ClassName) ->
-    ClassAdt = embryosys_storage_server:load(class, ClassName),
+    ClassAdt = embryosys_storage_server:load(class, [ClassName]),
     case ClassAdt of
         not_found -> false;
         _         -> Meta = ClassAdt#adt.meta,
@@ -64,8 +64,7 @@ are_adt_parents_valid(_Type, _Names) ->
 is_adt_valid_for_operation(Operation, Type, Names) ->
     AreParentsValid = are_adt_parents_valid(Type, Names),
     if AreParentsValid =:= true ->
-        ElementName = lists:last(Names),
-        Adt = embryosys_storage_server:load(Type, ElementName),
+        Adt = embryosys_storage_server:load(Type, Names),
 
         CurrentState = if
             Adt =:= not_found -> none;
@@ -81,9 +80,9 @@ is_adt_valid_for_operation(Operation, Type, Names) ->
     end.
 
 do_it(Operation, Type, Names) ->
-    ElementName = lists:last(Names),
-
     {Adt, NextState} = is_adt_valid_for_operation(Operation, Type, Names),
+
+    io:format("NextState for ~p is ~p~n", [Adt, NextState]),
 
     if
         NextState =/= wrong_state ->
@@ -93,7 +92,7 @@ do_it(Operation, Type, Names) ->
                           UpdatedMeta = Meta#meta{state = NextState},
 			  Adt#adt{meta = UpdatedMeta}
             end,
-            embryosys_storage_server:store(class, ElementName, UpdatedAdt),
+            embryosys_storage_server:store(Type, Names, UpdatedAdt),
             {ok, UpdatedAdt};
         true ->
             {wrong_state, []}
