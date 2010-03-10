@@ -53,6 +53,16 @@ init([]) ->
     io:format("~p starting~n", [?MODULE]),
     {ok, []}.
 
+handle_call({create, ClassName, ObjectName}, _From, State) ->
+    {reply, embryosys_adtm:do_create(object, [ClassName, ObjectName]), State};
+handle_call({hibern, ClassName, ObjectName}, _From, State) ->
+    {reply, embryosys_adtm:do_hibern(object, [ClassName, ObjectName]), State};
+handle_call({awake, ClassName, ObjectName}, _From, State) ->
+    {reply, embryosys_adtm:do_awake(object, [ClassName, ObjectName]), State};
+handle_call({destroy, ClassName, ObjectName}, _From, State) ->
+    {reply, embryosys_adtm:do_destroy(object, [ClassName, ObjectName]), State};
+handle_call({resur, ClassName, ObjectName}, _From, State) ->
+    {reply, embryosys_adtm:do_resur(object, [ClassName, ObjectName]), State};
 handle_call(_, _From, State) ->
     {reply, not_yet_implemented, State}.
 
