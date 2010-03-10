@@ -82,8 +82,6 @@ is_adt_valid_for_operation(Operation, Type, Names) ->
 do_it(Operation, Type, Names) ->
     {Adt, NextState} = is_adt_valid_for_operation(Operation, Type, Names),
 
-    io:format("NextState for ~p is ~p~n", [Adt, NextState]),
-
     if
         NextState =/= wrong_state ->
             UpdatedAdt = case Operation of
