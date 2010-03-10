@@ -35,12 +35,14 @@ test_new_state_after() ->
 main(_) ->
     etap:plan(unknown),
     
-    etap_can:loaded_ok(embryosys_util, "Module 'embryosys_util' loaded"),
+    etap_can:loaded_ok(embryosys_adt, "Module 'embryosys_adt' loaded"),
 
-    etap_can:can_ok(embryosys_util, new, 2),
-    etap_can:can_ok(embryosys_util, new_id, 1),
-    etap_can:can_ok(embryosys_util, new_state_after, 2),
-    etap_can:can_ok(embryosys_util, is_ready_for, 2),
+    etap_can:can_ok(embryosys_adt, new_adt),
+    etap_can:can_ok(embryosys_adt, new_adt, 2),
+    etap_can:can_ok(embryosys_adt, new_state_after),
+    etap_can:can_ok(embryosys_adt, new_state_after, 2),
+    etap_can:can_ok(embryosys_adt, is_ready_for),
+    etap_can:can_ok(embryosys_adt, is_ready_for, 2),
 
     %%ClassID = { adt_id, class, { 0 } },
     %%ClassName = "Bridge",
