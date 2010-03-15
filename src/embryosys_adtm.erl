@@ -37,8 +37,8 @@ do_destroy(Type, Names) ->
 do_resur(Type, Names) ->
     do_it(resur, Type, Names).
 
-do_purge(_Type, _Names) ->
-    {not_yet_implemented, []}.
+do_purge(Type, Names) ->
+    do_it(purge, Type, Names).
 
 %%% --------------------------------------------------------------------------
 
@@ -61,39 +61,72 @@ are_adt_parents_valid(link, Names) ->
 are_adt_parents_valid(_Type, _Names) ->
     throw(invalid_type).
 
-is_adt_valid_for_operation(Operation, Type, Names) ->
+check_adt_state(Type, Names, Operation) ->
     AreParentsValid = are_adt_parents_valid(Type, Names),
-    if AreParentsValid =:= true ->
-        Adt = embryosys_storage_server:load(Type, Names),
-
-        CurrentState = if
-            Adt =:= not_found -> none;
-            true              -> Meta = Adt#adt.meta,
-                                 Meta#meta.state
-        end,
-        
-        NextState = embryosys_adt:new_state_after(Operation, CurrentState),
-
-        {Adt, NextState};
-       true ->
-        {none, wrong_state}
+    case AreParentsValid of
+        false ->
+            {error, invalid_parents};
+	_     ->
+            Adt = embryosys_storage_server:load(Type, Names),
+            case Operation of
+                create ->
+                    case Adt of
+                        not_found -> {adt, not_found, alive};
+                        _         -> {error, already_exists}
+                    end;
+                _      ->
+                    case Adt of
+                        not_found -> {error, not_found};
+                        _         -> 
+                            Meta = Adt#adt.meta,
+                            NextState = embryosys_adt:new_state_after(Operation, Meta#meta.state),
+                            case NextState of
+                                wrong_state -> {error, wrong_state};
+                                _           -> {adt, Adt, NextState}
+                            end
+                    end
+            end
     end.
 
 do_it(Operation, Type, Names) ->
-    {Adt, NextState} = is_adt_valid_for_operation(Operation, Type, Names),
-
-    if
-        NextState =/= wrong_state ->
-            UpdatedAdt = case Operation of
-                create -> embryosys_adt:new_adt(Type, Names);
-                _      -> Meta = Adt#adt.meta,
-                          UpdatedMeta = Meta#meta{state = NextState},
-			  Adt#adt{meta = UpdatedMeta}
-            end,
-            embryosys_storage_server:store(Type, Names, UpdatedAdt),
-            {ok, UpdatedAdt};
-        true ->
-            {wrong_state, []}
+    Check = check_adt_state(Type, Names, Operation),
+    case Check of
+        {error, _Reason} -> Check;
+	{adt, Adt, NextState} ->
+            case Operation of
+                create  ->
+                    NewAdt = embryosys_adt:new_adt(Type, Names),
+                    embryosys_storage_server:store(Type, Names, NewAdt),
+		    {ok, alive};
+                hibern ->
+                    Meta = Adt#adt.meta,
+		    UpdatedMeta = Meta#meta{state = NextState},
+		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
+		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    {ok, frozen};
+                awake   ->
+                    Meta = Adt#adt.meta,
+		    UpdatedMeta = Meta#meta{state = NextState},
+		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
+		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    {ok, alive};
+                destroy ->
+                    Meta = Adt#adt.meta,
+		    UpdatedMeta = Meta#meta{state = NextState},
+		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
+		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    {ok, destroyed};
+                resur   ->
+                    Meta = Adt#adt.meta,
+		    UpdatedMeta = Meta#meta{state = NextState},
+		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
+		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    {ok, alive};
+                purge   ->
+		    {error, not_yet_implemented};
+                _       ->
+		    {error, wrong_operation}
+            end
     end.
 
 %%

@@ -27,19 +27,19 @@ main(_) ->
     embryosys_adtm_class:create("Bridge"),
 
     % Try to create an object
-    etap:is(embryosys_adtm_object:create("Bridge", "Alma"), {ok, {adt, {meta, object, ["Bridge", "Alma"], alive},[]}}, "Creating Attribute Bridge.Alma"),
+    etap:is(embryosys_adtm_object:create("Bridge", "Alma"), {ok, alive}, "Creating Attribute Bridge.Alma"),
 
     % Changing the adt state
-    etap:is(embryosys_adtm_object:hibern("Bridge", "Alma"), {ok, {adt, {meta, object, ["Bridge", "Alma"], frozen},[]}}, "Freezing Attribute Bridge.Alma"),
-    etap:is(embryosys_adtm_object:awake("Bridge", "Alma"), {ok, {adt, {meta, object, ["Bridge", "Alma"], alive},[]}}, "Unfreezing Attribute Bridge.Alma"),
-    etap:is(embryosys_adtm_object:destroy("Bridge", "Alma"), {ok, {adt, {meta, object, ["Bridge", "Alma"], destroyed},[]}}, "Destroying Attribute Bridge.Alma"),
-    etap:is(embryosys_adtm_object:resur("Bridge", "Alma"), {ok, {adt, {meta, object, ["Bridge", "Alma"], alive},[]}}, "Resurecting Attribute Bridge.Alma"),
+    etap:is(embryosys_adtm_object:hibern("Bridge", "Alma"), {ok, frozen}, "Freezing Attribute Bridge.Alma"),
+    etap:is(embryosys_adtm_object:awake("Bridge", "Alma"), {ok, alive}, "Unfreezing Attribute Bridge.Alma"),
+    etap:is(embryosys_adtm_object:destroy("Bridge", "Alma"), {ok, destroyed}, "Destroying Attribute Bridge.Alma"),
+    etap:is(embryosys_adtm_object:resur("Bridge", "Alma"), {ok, alive}, "Resurecting Attribute Bridge.Alma"),
 
     % Try to create an object in a class that doesnt exist
-    etap:is(embryosys_adtm_object:create("Nope", "Alma"), {wrong_state, []}, "Can't create Nope.Alma"),
+    etap:is(embryosys_adtm_object:create("Nope", "Alma"), {error, invalid_parents}, "Can't create Nope.Alma"),
 
     % Try to recreate the same object in the same class
-    etap:is(embryosys_adtm_object:create("Bridge", "Alma"), {wrong_state, []}, "Can't create the same object twice"),
+    etap:is(embryosys_adtm_object:create("Bridge", "Alma"), {error, already_exists}, "Can't create the same object twice"),
 
     application:stop(embryosys),
 

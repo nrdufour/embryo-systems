@@ -28,19 +28,19 @@ main(_) ->
     embryosys_adtm_class:create("Bridge"),
 
     % Try to create an attribute
-    etap:is(embryosys_adtm_attribute:create("Bridge", "height"), {ok, {adt, {meta, attribute, ["Bridge", "height"], alive},[]}}, "Creating Attribute Bridge.height"),
+    etap:is(embryosys_adtm_attribute:create("Bridge", "height"), {ok, alive}, "Creating Attribute Bridge.height"),
 
     % Changing the adt state
-    etap:is(embryosys_adtm_attribute:hibern("Bridge", "height"), {ok, {adt, {meta, attribute, ["Bridge", "height"], frozen},[]}}, "Freezing Attribute Bridge.height"),
-    etap:is(embryosys_adtm_attribute:awake("Bridge", "height"), {ok, {adt, {meta, attribute, ["Bridge", "height"], alive},[]}}, "Unfreezing Attribute Bridge.height"),
-    etap:is(embryosys_adtm_attribute:destroy("Bridge", "height"), {ok, {adt, {meta, attribute, ["Bridge", "height"], destroyed},[]}}, "Destroying Attribute Bridge.height"),
-    etap:is(embryosys_adtm_attribute:resur("Bridge", "height"), {ok, {adt, {meta, attribute, ["Bridge", "height"], alive},[]}}, "Resurecting Attribute Bridge.height"),
+    etap:is(embryosys_adtm_attribute:hibern("Bridge", "height"), {ok, frozen}, "Freezing Attribute Bridge.height"),
+    etap:is(embryosys_adtm_attribute:awake("Bridge", "height"), {ok, alive}, "Unfreezing Attribute Bridge.height"),
+    etap:is(embryosys_adtm_attribute:destroy("Bridge", "height"), {ok, destroyed}, "Destroying Attribute Bridge.height"),
+    etap:is(embryosys_adtm_attribute:resur("Bridge", "height"), {ok, alive}, "Resurecting Attribute Bridge.height"),
 
     % Try to create an attribute in a class that doesnt exist
-    etap:is(embryosys_adtm_attribute:create("Nope", "height"), {wrong_state, []}, "Can't create Nope.height"),
+    etap:is(embryosys_adtm_attribute:create("Nope", "height"), {error, invalid_parents}, "Can't create Nope.height"),
 
     % Try to recreate the same attribute in the same class
-    etap:is(embryosys_adtm_attribute:create("Bridge", "height"), {wrong_state, []}, "Can't create the same attribute twice"),
+    etap:is(embryosys_adtm_attribute:create("Bridge", "height"), {error, already_exists}, "Can't create the same attribute twice"),
 
     application:stop(embryosys),
 
