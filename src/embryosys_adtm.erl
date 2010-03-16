@@ -45,7 +45,7 @@ find_related(class, [ClassName]) ->
     Attributes = embryosys_query:find_all_attributes(ClassName),
     Objects    = embryosys_query:find_all_objects(ClassName),
     Links      = embryosys_query:find_all_links(ClassName),
-    not_yet_implemented;
+    lists:append([Attributes, Objects, Links]);
 find_related(attribute, [_ClassName, _AttributeName]) ->
     %% should return object attributes later on
     [];
