@@ -42,6 +42,9 @@ do_purge(Type, Names) ->
 
 find_related(class, [ClassName]) ->
     %% must return attributes, objects and links!
+    Attributes = embryosys_query:find_all_attributes(ClassName),
+    Objects    = embryosys_query:find_all_objects(ClassName),
+    Links      = embryosys_query:find_all_links(ClassName),
     not_yet_implemented;
 find_related(attribute, [_ClassName, _AttributeName]) ->
     %% should return object attributes later on
