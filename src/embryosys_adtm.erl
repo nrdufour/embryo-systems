@@ -20,7 +20,7 @@
 -include("adt.hrl").
 
 %% API exports
--export([do_create/2, do_hibern/2, do_awake/2, do_destroy/2, do_resur/2, do_purge/2]).
+-export([do_create/2, do_hibern/2, do_awake/2, do_destroy/2, do_resur/2, do_purge/2, find_related/2]).
 
 do_create(Type, Names) ->
     do_it(create, Type, Names).
@@ -39,6 +39,21 @@ do_resur(Type, Names) ->
 
 do_purge(Type, Names) ->
     do_it(purge, Type, Names).
+
+find_related(class, [ClassName]) ->
+    %% must return attributes, objects and links!
+    not_yet_implemented;
+find_related(attribute, [ClassName, AttributeName]) ->
+    %% should return object attributes later on
+    [];
+find_related(link, [FromClassName, ToClassName, LinkName]) ->
+    %% should return object links later on
+    [];
+find_related(object, [ClassName, ObjectName]) ->
+    %% should return both object attributes and links later on
+    [];
+find_related(_, _) ->
+    throw(wrong_type).
 
 %%% --------------------------------------------------------------------------
 

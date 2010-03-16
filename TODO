@@ -1,6 +1,7 @@
 TODO List
 ---------
 
+* add find_related first in order to propagate state change to related adts
 * make a difference between 'store' and 'restore' in the storage server
 * find a new way to have different backends for the storage server
 * implements a couchdb backend
