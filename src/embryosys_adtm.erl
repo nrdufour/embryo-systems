@@ -43,13 +43,13 @@ do_purge(Type, Names) ->
 find_related(class, [ClassName]) ->
     %% must return attributes, objects and links!
     not_yet_implemented;
-find_related(attribute, [ClassName, AttributeName]) ->
+find_related(attribute, [_ClassName, _AttributeName]) ->
     %% should return object attributes later on
     [];
-find_related(link, [FromClassName, ToClassName, LinkName]) ->
+find_related(link, [_FromClassName, _ToClassName, _LinkName]) ->
     %% should return object links later on
     [];
-find_related(object, [ClassName, ObjectName]) ->
+find_related(object, [_ClassName, _ObjectName]) ->
     %% should return both object attributes and links later on
     [];
 find_related(_, _) ->
