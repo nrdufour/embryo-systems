@@ -2,10 +2,10 @@
 * README FILE                *
 ******************************
 
-Embryo Systems is a server allowing you to create entities that follow
-*or* not a given "family" (or sometimes called model, or class).
+Embryo Systems is a simulation engine using persistent ADTs 
+and a discrete even engine to simulate a great variety of phenomena.
 
-Those entities are always persisted and can be redefined at any moment.
+See http://www.embryo-systems.info/ for more details
 
-Nicolas Dufour
+Nicolas R Dufour
 
