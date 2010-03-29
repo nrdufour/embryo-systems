@@ -26,6 +26,6 @@ clean:
 	rm -rf ebin/
 
 install: all
-	mkdir -p $(prefix)/$(LIBDIR)/embryosys-$(VERSION)/ebin
-	for i in ebin/*.beam; do install $$i $(prefix)/$(LIBDIR)/embryosys-$(VERSION)/$$i ; done
+	mkdir -p $(prefix)/$(LIBDIR)/similar-$(VERSION)/ebin
+	for i in ebin/*.beam; do install $$i $(prefix)/$(LIBDIR)/similar-$(VERSION)/$$i ; done
 
