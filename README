@@ -1,11 +1,13 @@
-******************************
-* README FILE                *
-******************************
+README FILE
+-----------
 
-Embryo Systems is a simulation engine using persistent ADTs 
-and a discrete even engine to simulate a great variety of phenomena.
+Embryo Systems is a software framework providing:
+ - an abstract data type repository (Embryosys)
+ - a discrete event simulation engine (Similar)
+
+It allows you to simulate a wide variety of phenomena.
 
 See http://www.embryo-systems.info/ for more details
 
-Nicolas R Dufour <nrdufour@gmail.com>
+--Nicolas R Dufour <nrdufour@gmail.com>
 
