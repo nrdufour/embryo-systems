@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(embryosys).
+-module(adtm).
 -behavior(application).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
@@ -30,7 +30,7 @@
 start(_Type, StartArgs) ->
     case start_apps([crypto]) of
         ok ->
-            embryosys_sup:start_link(StartArgs);
+            adtm_sup:start_link(StartArgs);
         {error, Reason} ->
             {error, Reason}
     end.
@@ -41,7 +41,7 @@ stop(_State) ->
 %%
 
 start() ->
-    application:start(embryosys).
+    application:start(adtm).
 
 %%
 

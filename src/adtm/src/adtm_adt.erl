@@ -18,7 +18,7 @@
 %% @type adtOperation() = create | hibern | awake | destroy | resur | purge
 %% @type adtState() = alive | frozen | destroyed | none
 
--module(embryosys_adt).
+-module(adtm_adt).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
 

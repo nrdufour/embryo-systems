@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(embryosys_adtm_object).
+-module(adtm_object).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
@@ -54,15 +54,15 @@ init([]) ->
     {ok, []}.
 
 handle_call({create, ClassName, ObjectName}, _From, State) ->
-    {reply, embryosys_adtm:do_create(object, [ClassName, ObjectName]), State};
+    {reply, adtm_executor:do_create(object, [ClassName, ObjectName]), State};
 handle_call({hibern, ClassName, ObjectName}, _From, State) ->
-    {reply, embryosys_adtm:do_hibern(object, [ClassName, ObjectName]), State};
+    {reply, adtm_executor:do_hibern(object, [ClassName, ObjectName]), State};
 handle_call({awake, ClassName, ObjectName}, _From, State) ->
-    {reply, embryosys_adtm:do_awake(object, [ClassName, ObjectName]), State};
+    {reply, adtm_executor:do_awake(object, [ClassName, ObjectName]), State};
 handle_call({destroy, ClassName, ObjectName}, _From, State) ->
-    {reply, embryosys_adtm:do_destroy(object, [ClassName, ObjectName]), State};
+    {reply, adtm_executor:do_destroy(object, [ClassName, ObjectName]), State};
 handle_call({resur, ClassName, ObjectName}, _From, State) ->
-    {reply, embryosys_adtm:do_resur(object, [ClassName, ObjectName]), State};
+    {reply, adtm_executor:do_resur(object, [ClassName, ObjectName]), State};
 handle_call(_, _From, State) ->
     {reply, not_yet_implemented, State}.
 

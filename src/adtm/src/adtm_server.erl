@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(embryosys_adtm_server).
+-module(adtm_server).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
@@ -54,14 +54,14 @@ code_change(_OldVsn, N, _Extra) -> {ok, N}.
 
 execute_operation(Operation, class, Names, _Extra) ->
     [ClassName] = Names,
-    embryosys_adtm_class:execute(Operation, ClassName);
+    adtm_class:execute(Operation, ClassName);
 
 execute_operation(Operation, attribute, Names, Extra) ->
-    embryosys_adtm_attribute:execute(Operation, Names, Extra);
+    adtm_attribute:execute(Operation, Names, Extra);
 
 execute_operation(Operation, link, Names, Extra) ->
-    embryosys_adtm_link:execute(Operation, Names, Extra);
+    adtm_link:execute(Operation, Names, Extra);
 
 execute_operation(Operation, object, Names, Extra) ->
-    embryosys_adtm_object:execute(Operation, Names, Extra).
+    adtm_object:execute(Operation, Names, Extra).
 

@@ -4,7 +4,7 @@
 
 test_matrix_element({FromState, [{Operation, ToState}|Rest]}) ->
     Message = io_lib:format("\t~-8s[~-10s] -> ~p", [Operation, FromState, ToState]),
-    etap:is(embryosys_adt:new_state_after(Operation, FromState), ToState, Message),
+    etap:is(adtm_adt:new_state_after(Operation, FromState), ToState, Message),
     test_matrix_element({FromState, Rest});
 test_matrix_element({_FromState, []}) ->
     ok.
@@ -27,7 +27,7 @@ test_new_state_after() ->
             {destroy, wrong_state}, {resur, alive}, {purge, none} ]}
     ],
 
-    etap:diag("Testing embryosys_adt:new_state_after."),
+    etap:diag("Testing adtm_adt:new_state_after."),
     test_matrix(Base).
 
 %% ---------------------------------------------------------------------------
@@ -35,38 +35,38 @@ test_new_state_after() ->
 main(_) ->
     etap:plan(unknown),
     
-    etap_can:loaded_ok(embryosys_adt, "Module 'embryosys_adt' loaded"),
+    etap_can:loaded_ok(adtm_adt, "Module 'adtm_adt' loaded"),
 
-    etap_can:can_ok(embryosys_adt, new_adt),
-    etap_can:can_ok(embryosys_adt, new_adt, 2),
-    etap_can:can_ok(embryosys_adt, new_state_after),
-    etap_can:can_ok(embryosys_adt, new_state_after, 2),
-    etap_can:can_ok(embryosys_adt, is_ready_for),
-    etap_can:can_ok(embryosys_adt, is_ready_for, 2),
+    etap_can:can_ok(adtm_adt, new_adt),
+    etap_can:can_ok(adtm_adt, new_adt, 2),
+    etap_can:can_ok(adtm_adt, new_state_after),
+    etap_can:can_ok(adtm_adt, new_state_after, 2),
+    etap_can:can_ok(adtm_adt, is_ready_for),
+    etap_can:can_ok(adtm_adt, is_ready_for, 2),
 
     %%ClassID = { adt_id, class, { 0 } },
     %%ClassName = "Bridge",
     %%ClassADT = { adt, ClassID, ClassName, none },
-    %%etap:is( ClassID, embryosys_adt:new_id(class), "New ID for class" ),
-    %%etap:is( ClassADT, embryosys_adt:new_adt(class, ClassName), "New class ADT"),
+    %%etap:is( ClassID, adtm_adt:new_id(class), "New ID for class" ),
+    %%etap:is( ClassADT, adtm_adt:new_adt(class, ClassName), "New class ADT"),
 
     %%AttributeID = { adt_id, attribute, { 0, 0 } },
     %%AttributeName = "height",
     %%AttributeADT = { adt, AttributeID, AttributeName, none },
-    %%etap:is( AttributeID, embryosys_adt:new_id(attribute), "New ID for attribute" ),
-    %%etap:is( AttributeADT, embryosys_adt:new_adt(attribute, AttributeName), "New attribute ADT"),
+    %%etap:is( AttributeID, adtm_adt:new_id(attribute), "New ID for attribute" ),
+    %%etap:is( AttributeADT, adtm_adt:new_adt(attribute, AttributeName), "New attribute ADT"),
 
     %%LinkID = { adt_id, link, { 0, 0, 0 } },
     %%LinkName = "cross",
     %%LinkADT = { adt, LinkID, LinkName, none },
-    %%etap:is( LinkID, embryosys_adt:new_id(link), "New ID for link" ),
-    %%etap:is( LinkADT, embryosys_adt:new_adt(link, LinkName), "New link ADT"),
+    %%etap:is( LinkID, adtm_adt:new_id(link), "New ID for link" ),
+    %%etap:is( LinkADT, adtm_adt:new_adt(link, LinkName), "New link ADT"),
 
     %%ObjectID = { adt_id, object, { 0, 0 } },
     %%ObjectName = "Alma",
     %%ObjectADT = { adt, ObjectID, ObjectName, none },
-    %%etap:is( ObjectID, embryosys_adt:new_id(object), "New ID for object" ),
-    %%etap:is( ObjectADT, embryosys_adt:new_adt(object, ObjectName), "New object ADT"),
+    %%etap:is( ObjectID, adtm_adt:new_id(object), "New ID for object" ),
+    %%etap:is( ObjectADT, adtm_adt:new_adt(object, ObjectName), "New object ADT"),
     
     test_new_state_after(),
 

@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(embryosys_adtm).
+-module(adtm_executor).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
 
@@ -42,9 +42,9 @@ do_purge(Type, Names) ->
 
 find_related(class, [ClassName]) ->
     %% must return attributes, objects and links!
-    Attributes = embryosys_query:find_all_attributes(ClassName),
-    Objects    = embryosys_query:find_all_objects(ClassName),
-    Links      = embryosys_query:find_all_links(ClassName),
+    Attributes = adtm_query:find_all_attributes(ClassName),
+    Objects    = adtm_query:find_all_objects(ClassName),
+    Links      = adtm_query:find_all_links(ClassName),
     lists:append([Attributes, Objects, Links]);
 find_related(attribute, [_ClassName, _AttributeName]) ->
     %% should return object attributes later on
@@ -61,7 +61,7 @@ find_related(_, _) ->
 %%% --------------------------------------------------------------------------
 
 is_class_alive(ClassName) ->
-    ClassAdt = embryosys_storage_server:load(class, [ClassName]),
+    ClassAdt = adtm_storage_server:load(class, [ClassName]),
     case ClassAdt of
         not_found -> false;
         _         -> Meta = ClassAdt#adt.meta,
@@ -85,7 +85,7 @@ check_adt_state(Type, Names, Operation) ->
         false ->
             {error, invalid_parents};
 	_     ->
-            Adt = embryosys_storage_server:load(Type, Names),
+            Adt = adtm_storage_server:load(Type, Names),
             case Operation of
                 create ->
                     case Adt of
@@ -97,7 +97,7 @@ check_adt_state(Type, Names, Operation) ->
                         not_found -> {error, not_found};
                         _         -> 
                             Meta = Adt#adt.meta,
-                            NextState = embryosys_adt:new_state_after(Operation, Meta#meta.state),
+                            NextState = adtm_adt:new_state_after(Operation, Meta#meta.state),
                             case NextState of
                                 wrong_state -> {error, wrong_state};
                                 _           -> {adt, Adt, NextState}
@@ -113,32 +113,32 @@ do_it(Operation, Type, Names) ->
 	{adt, Adt, NextState} ->
             case Operation of
                 create  ->
-                    NewAdt = embryosys_adt:new_adt(Type, Names),
-                    embryosys_storage_server:store(Type, Names, NewAdt),
+                    NewAdt = adtm_adt:new_adt(Type, Names),
+                    adtm_storage_server:store(Type, Names, NewAdt),
 		    {ok, alive};
                 hibern ->
                     Meta = Adt#adt.meta,
 		    UpdatedMeta = Meta#meta{state = NextState},
 		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
-		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    adtm_storage_server:store(Type, Names, UpdatedAdt),
 		    {ok, frozen};
                 awake   ->
                     Meta = Adt#adt.meta,
 		    UpdatedMeta = Meta#meta{state = NextState},
 		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
-		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    adtm_storage_server:store(Type, Names, UpdatedAdt),
 		    {ok, alive};
                 destroy ->
                     Meta = Adt#adt.meta,
 		    UpdatedMeta = Meta#meta{state = NextState},
 		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
-		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    adtm_storage_server:store(Type, Names, UpdatedAdt),
 		    {ok, destroyed};
                 resur   ->
                     Meta = Adt#adt.meta,
 		    UpdatedMeta = Meta#meta{state = NextState},
 		    UpdatedAdt = Adt#adt{meta = UpdatedMeta},
-		    embryosys_storage_server:store(Type, Names, UpdatedAdt),
+		    adtm_storage_server:store(Type, Names, UpdatedAdt),
 		    {ok, alive};
                 purge   ->
 		    {error, not_yet_implemented};

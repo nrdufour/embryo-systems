@@ -5,23 +5,23 @@
 VERSION=0.0.1
 
 all:
-	(cd src/embryosys; $(MAKE))
+	(cd src/adtm; $(MAKE))
 	(cd src/similar; $(MAKE))
 
 doc:
-	(cd src/embryosys; $(MAKE) doc)
+	(cd src/adtm; $(MAKE) doc)
 	(cd src/similar; $(MAKE) doc)
 
 test: all 
-	(cd src/embryosys; $(MAKE) test)
+	(cd src/adtm; $(MAKE) test)
 	(cd src/similar; $(MAKE) test)
 
 cover: all 
-	(cd src/embryosys; $(MAKE) cover)
+	(cd src/adtm; $(MAKE) cover)
 	(cd src/similar; $(MAKE) cover)
 
 clean:
-	(cd src/embryosys; $(MAKE) clean)
+	(cd src/adtm; $(MAKE) clean)
 	(cd src/similar; $(MAKE) clean)
 
 package: clean
@@ -30,7 +30,7 @@ package: clean
 	@rm -rf embryosys-$(VERSION)/
 
 install: all
-	(cd src/embryosys; $(MAKE) install)
+	(cd src/adtm; $(MAKE) install)
 	(cd src/similar; $(MAKE) install)
 	# FIXME Need to deploy the common files too here
 

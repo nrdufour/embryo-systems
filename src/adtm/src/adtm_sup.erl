@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(embryosys_sup).
+-module(adtm_sup).
 -behavior(supervisor).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
@@ -41,34 +41,34 @@ init([]) ->
     
     {ok, {{one_for_one, 3, 10},
         [{tag1,
-            {embryosys_adtm_class, start_link, []},
+            {adtm_class, start_link, []},
             permanent,
             10000,
             worker,
-            [embryosys_adtm_class]},
+            [adtm_class]},
         {tag2,
-            {embryosys_adtm_attribute, start_link, []},
+            {adtm_attribute, start_link, []},
             permanent,
             10000,
             worker,
-            [embryosys_adtm_attribute]},
+            [adtm_attribute]},
         {tag3,
-            {embryosys_adtm_link, start_link, []},
+            {adtm_link, start_link, []},
             permanent,
             10000,
             worker,
-            [embryosys_adtm_link]},
+            [adtm_link]},
         {tag4,
-            {embryosys_adtm_object, start_link, []},
+            {adtm_object, start_link, []},
             permanent,
             10000,
             worker,
-            [embryosys_adtm_object]},
+            [adtm_object]},
         {tag5,
-            {embryosys_storage_server, start_link, []},
+            {adtm_storage_server, start_link, []},
             permanent,
             10000,
             worker,
-            [embryosys_storage_server]}
+            [adtm_storage_server]}
     ]}}.
 

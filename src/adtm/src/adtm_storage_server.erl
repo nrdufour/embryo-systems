@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(embryosys_storage_server).
+-module(adtm_storage_server).
 -behavior(gen_server).
 
 -export([store/3, load/2, clear/2, init_storage/0, start_link/0]).
@@ -45,33 +45,33 @@ init([]) ->
 
     %% opening dets files
     %% FIXME need a nice way to configure the path of those files
-    dets:open_file(embryosys.dets, [{type, set}]),
+    dets:open_file(adtm.dets, [{type, set}]),
 
     {ok, []}.
 
 handle_call({store, {Header, Data}}, _From, State) ->
-    Reply = case dets:insert(embryosys.dets, {Header, Data}) of
+    Reply = case dets:insert(adtm.dets, {Header, Data}) of
         {error, Reason} -> Reason;
         ok -> ok
     end,
     {reply, Reply, State};
 
 handle_call({load, Header}, _From, State) ->
-    Reply = case dets:lookup(embryosys.dets, Header) of
+    Reply = case dets:lookup(adtm.dets, Header) of
         [{_ReturnedHeader, Data}] -> Data;
         _ -> not_found
     end,
     {reply, Reply, State};
 
 handle_call({clear, Header}, _From, State) ->
-    Reply = case dets:lookup(embryosys.dets, Header) of
-        [{_ReturnedHeader, _Data}] -> dets:delete(embryosys.dets, Header);
+    Reply = case dets:lookup(adtm.dets, Header) of
+        [{_ReturnedHeader, _Data}] -> dets:delete(adtm.dets, Header);
         _ -> not_found
     end,
     {reply, Reply, State};
 
 handle_call({init_storage}, _From, State) ->
-    Reply = dets:delete_all_objects(embryosys.dets),
+    Reply = dets:delete_all_objects(adtm.dets),
     {reply, Reply, State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
@@ -83,7 +83,7 @@ terminate(_Reason, _State) ->
 
     %% closing the files
     %% FIXME still need a way to configure the path
-    dets:close(embryosys.dets),
+    dets:close(adtm.dets),
 
     ok.
 
