@@ -2,7 +2,7 @@ README FILE
 -----------
 
 Embryo Systems is a software framework providing:
- - an abstract data type repository (Embryosys)
+ - an abstract data type repository (ADTM)
  - a discrete event simulation engine (Similar)
 
 It allows you to simulate a wide variety of phenomena.
