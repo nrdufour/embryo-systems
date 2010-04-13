@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(adtm_sup).
+-module(orange_sup).
 -behavior(supervisor).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 
@@ -41,34 +41,34 @@ init([]) ->
     
     {ok, {{one_for_one, 3, 10},
         [{tag1,
-            {adtm_class, start_link, []},
+            {orange_class, start_link, []},
             permanent,
             10000,
             worker,
-            [adtm_class]},
+            [orange_class]},
         {tag2,
-            {adtm_attribute, start_link, []},
+            {orange_attribute, start_link, []},
             permanent,
             10000,
             worker,
-            [adtm_attribute]},
+            [orange_attribute]},
         {tag3,
-            {adtm_link, start_link, []},
+            {orange_link, start_link, []},
             permanent,
             10000,
             worker,
-            [adtm_link]},
+            [orange_link]},
         {tag4,
-            {adtm_object, start_link, []},
+            {orange_object, start_link, []},
             permanent,
             10000,
             worker,
-            [adtm_object]},
+            [orange_object]},
         {tag5,
-            {adtm_storage_server, start_link, []},
+            {orange_storage_server, start_link, []},
             permanent,
             10000,
             worker,
-            [adtm_storage_server]}
+            [orange_storage_server]}
     ]}}.
 

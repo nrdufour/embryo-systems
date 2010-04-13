@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(adtm_attribute).
+-module(orange_attribute).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
@@ -57,15 +57,15 @@ init([]) ->
     {ok, []}.
 
 handle_call({create, ClassName, AttributeName}, _From, State) ->
-    {reply, adtm_executor:do_create(attribute, [ClassName, AttributeName]), State};
+    {reply, orange_executor:do_create(attribute, [ClassName, AttributeName]), State};
 handle_call({hibern, ClassName, AttributeName}, _From, State) ->
-    {reply, adtm_executor:do_hibern(attribute, [ClassName, AttributeName]), State};
+    {reply, orange_executor:do_hibern(attribute, [ClassName, AttributeName]), State};
 handle_call({awake, ClassName, AttributeName}, _From, State) ->
-    {reply, adtm_executor:do_awake(attribute, [ClassName, AttributeName]), State};
+    {reply, orange_executor:do_awake(attribute, [ClassName, AttributeName]), State};
 handle_call({destroy, ClassName, AttributeName}, _From, State) ->
-    {reply, adtm_executor:do_destroy(attribute, [ClassName, AttributeName]), State};
+    {reply, orange_executor:do_destroy(attribute, [ClassName, AttributeName]), State};
 handle_call({resur, ClassName, AttributeName}, _From, State) ->
-    {reply, adtm_executor:do_resur(attribute, [ClassName, AttributeName]), State};
+    {reply, orange_executor:do_resur(attribute, [ClassName, AttributeName]), State};
 handle_call(_, _From, State) ->
     {reply, not_yet_implemented, State}.
 

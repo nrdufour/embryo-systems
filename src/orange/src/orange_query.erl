@@ -15,26 +15,18 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(adtm_util).
+-module(orange_query).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
--include("adt.hrl").
 
--export([new_uuid/0]).
+-export([find_all_attributes/1, find_all_objects/1, find_all_links/1]).
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Piece of code from couch_util.erl in Apache CouchDB project.
-new_uuid() ->
-    list_to_binary(to_hex(crypto:rand_bytes(16))).
+find_all_attributes(ClassName) ->
+    [].
 
-to_hex([]) ->
-    [];
-to_hex(Bin) when is_binary(Bin) ->
-    to_hex(binary_to_list(Bin));
-to_hex([H|T]) ->
-    [to_digit(H div 16), to_digit(H rem 16) | to_hex(T)].
+find_all_objects(ClassName) ->
+    [].
 
-to_digit(N) when N < 10 -> $0 + N;
-to_digit(N)             -> $a + N-10.
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+find_all_links(ClassName) ->
+    [].
 
 %%

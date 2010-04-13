@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(adtm_class).
+-module(orange_class).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
@@ -54,22 +54,22 @@ init([]) ->
     {ok, []}.
 
 handle_call({create, Name}, _From, State) ->
-    {reply, adtm_executor:do_create(class, [Name]), State};
+    {reply, orange_executor:do_create(class, [Name]), State};
 
 handle_call({hibern, Name}, _From, State) ->
-    {reply, adtm_executor:do_hibern(class, [Name]), State};
+    {reply, orange_executor:do_hibern(class, [Name]), State};
 
 handle_call({awake, Name}, _From, State) ->
-    {reply, adtm_executor:do_awake(class, [Name]), State};
+    {reply, orange_executor:do_awake(class, [Name]), State};
 
 handle_call({destroy, Name}, _From, State) ->
-    {reply, adtm_executor:do_destroy(class, [Name]), State};
+    {reply, orange_executor:do_destroy(class, [Name]), State};
 
 handle_call({resur, Name}, _From, State) ->
-    {reply, adtm_executor:do_resur(class, [Name]), State};
+    {reply, orange_executor:do_resur(class, [Name]), State};
 
 handle_call({purge, Name}, _From, State) ->
-    {reply, adtm_executor:do_purge(class, [Name]), State}.
+    {reply, orange_executor:do_purge(class, [Name]), State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
 

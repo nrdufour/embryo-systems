@@ -15,7 +15,7 @@
 %% @author Nicolas R Dufour <nrdufour@gmail.com>
 %% @copyright 2009-2010 Nicolas R Dufour.
 
--module(adtm_link).
+-module(orange_link).
 -behavior(gen_server).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
@@ -57,15 +57,15 @@ init([]) ->
     {ok, []}.
 
 handle_call({create, FromClassName, ToClassName, LinkName}, _From, State) ->
-    {reply, adtm_executor:do_create(link, [FromClassName, ToClassName, LinkName]), State};
+    {reply, orange_executor:do_create(link, [FromClassName, ToClassName, LinkName]), State};
 handle_call({hibern, FromClassName, ToClassName, LinkName}, _From, State) ->
-    {reply, adtm_executor:do_hibern(link, [FromClassName, ToClassName, LinkName]), State};
+    {reply, orange_executor:do_hibern(link, [FromClassName, ToClassName, LinkName]), State};
 handle_call({awake, FromClassName, ToClassName, LinkName}, _From, State) ->
-    {reply, adtm_executor:do_awake(link, [FromClassName, ToClassName, LinkName]), State};
+    {reply, orange_executor:do_awake(link, [FromClassName, ToClassName, LinkName]), State};
 handle_call({destroy, FromClassName, ToClassName, LinkName}, _From, State) ->
-    {reply, adtm_executor:do_destroy(link, [FromClassName, ToClassName, LinkName]), State};
+    {reply, orange_executor:do_destroy(link, [FromClassName, ToClassName, LinkName]), State};
 handle_call({resur, FromClassName, ToClassName, LinkName}, _From, State) ->
-    {reply, adtm_executor:do_resur(link, [FromClassName, ToClassName, LinkName]), State};
+    {reply, orange_executor:do_resur(link, [FromClassName, ToClassName, LinkName]), State};
 handle_call(_, _From, State) ->
     {reply, not_yet_implemented, State}.
 

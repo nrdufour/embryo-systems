@@ -18,7 +18,7 @@
 %% @type adtOperation() = create | hibern | awake | destroy | resur | purge
 %% @type adtState() = alive | frozen | destroyed | none
 
--module(adtm_adt).
+-module(orange_adt).
 -author('Nicolas R Dufour <nrdufour@gmail.com>').
 -include("adt.hrl").
 
