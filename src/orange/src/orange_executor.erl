@@ -22,24 +22,31 @@
 %% API exports
 -export([do_create/2, do_hibern/2, do_awake/2, do_destroy/2, do_resur/2, do_purge/2, find_related/2]).
 
+%% @doc creates an new ADT of type Type w/ the names Names.
 do_create(Type, Names) ->
     do_it(create, Type, Names).
 
+%% @doc hibernates an ADT (frozen state).
 do_hibern(Type, Names) ->
     do_it(hibern, Type, Names).
 
+%% @doc awakes a previously frozen ADT.
 do_awake(Type, Names) ->
     do_it(awake, Type, Names).
 
+%% @doc destroys an alive ADT.
 do_destroy(Type, Names) ->
     do_it(destroy, Type, Names).
 
+%% @doc resurects a previously destroyed ADT.
 do_resur(Type, Names) ->
     do_it(resur, Type, Names).
 
+%% @doc definitely remove a destroyed ADT from the repository.
 do_purge(Type, Names) ->
     do_it(purge, Type, Names).
 
+%% @doc find any related ADTs according to its type.
 find_related(class, [ClassName]) ->
     %% must return attributes, objects and links!
     Attributes = orange_query:find_all_attributes(ClassName),
@@ -60,6 +67,7 @@ find_related(_, _) ->
 
 %%% --------------------------------------------------------------------------
 
+%% @doc returns true if the 'Class' ADT state is 'alive'. 
 is_class_alive(ClassName) ->
     ClassAdt = orange_storage_server:load(class, [ClassName]),
     case ClassAdt of
@@ -68,6 +76,7 @@ is_class_alive(ClassName) ->
 		     (Meta#meta.type =:= class) and (Meta#meta.state =:= alive)
     end.
 
+%% @doc returns true if all parents exist and are alive (according to the type).
 are_adt_parents_valid(class, _Names) ->
     true;
 are_adt_parents_valid(Type, Names) when Type == attribute; Type == object ->
@@ -79,6 +88,7 @@ are_adt_parents_valid(link, Names) ->
 are_adt_parents_valid(_Type, _Names) ->
     throw(invalid_type).
 
+%% @doc check if the given adt is ready for the Operation.
 check_adt_state(Type, Names, Operation) ->
     AreParentsValid = are_adt_parents_valid(Type, Names),
     case AreParentsValid of
@@ -106,6 +116,7 @@ check_adt_state(Type, Names, Operation) ->
             end
     end.
 
+%% @doc performs an operation on an Adt.
 do_it(Operation, Type, Names) ->
     Check = check_adt_state(Type, Names, Operation),
     case Check of

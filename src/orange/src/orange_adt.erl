@@ -24,6 +24,8 @@
 
 -export([new_adt/2, new_state_after/2, is_ready_for/2]).
 
+%% @spec new_adt(adt_type(), names()) -> adt()
+%% @doc create a branch adt stucture w/ state = alive.
 new_adt(class, [ClassName]) ->
     Meta = #meta{type = class, names = [ClassName], state = alive},
     #adt{meta = Meta, data = []};

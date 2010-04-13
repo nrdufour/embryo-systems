@@ -20,12 +20,15 @@
 
 -export([find_all_attributes/1, find_all_objects/1, find_all_links/1]).
 
+%% @doc returns all attributes belonging to the given class.
 find_all_attributes(ClassName) ->
     [].
 
+%% @doc returns all objects belonging to the given class.
 find_all_objects(ClassName) ->
     [].
 
+%% @doc returns all links originating/targeting from/to the given class.
 find_all_links(ClassName) ->
     [].
 

@@ -27,6 +27,7 @@
 
 %%
 
+%% @doc starts the application w/ crypto.
 start(_Type, StartArgs) ->
     case start_apps([crypto]) of
         ok ->
@@ -35,11 +36,13 @@ start(_Type, StartArgs) ->
             {error, Reason}
     end.
 
+%% @doc stops the application.
 stop(_State) ->
     ok.
 
 %%
 
+%% @doc starts the application using the framework
 start() ->
     application:start(orange).
 
@@ -47,6 +50,7 @@ start() ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Piece of code written by Benoît Chesneau <benoitc@e-engura.org>
+%% @doc starts any dependencies.
 start_apps([]) ->
     ok;
 start_apps([App|Rest]) ->

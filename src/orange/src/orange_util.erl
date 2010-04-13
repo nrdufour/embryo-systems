@@ -23,6 +23,7 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Piece of code from couch_util.erl in Apache CouchDB project.
+%% @doc returns a new UUID.
 new_uuid() ->
     list_to_binary(to_hex(crypto:rand_bytes(16))).
 

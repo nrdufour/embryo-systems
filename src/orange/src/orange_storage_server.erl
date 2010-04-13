@@ -27,15 +27,19 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc create/update a new entry.
 store(Type, Id, Data) ->
     gen_server:call(?MODULE, {store, {{Type, Id}, Data}}).
 
+%% @doc read an entry.
 load(Type, Id) ->
     gen_server:call(?MODULE, {load, {Type, Id}}).
 
+%% @doc delete an entry.
 clear(Type, Id) ->
     gen_server:call(?MODULE, {clear, {Type, Id}}).
 
+%% @doc create a brand new repository.
 init_storage() ->
     gen_server:call(?MODULE, {init_storage}).
 
