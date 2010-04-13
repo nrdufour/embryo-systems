@@ -27,5 +27,5 @@ clean:
 
 install: all
 	mkdir -p $(prefix)/$(LIBDIR)/similar-$(VERSION)/ebin
-	for i in ebin/*.beam; do install $$i $(prefix)/$(LIBDIR)/similar-$(VERSION)/$$i ; done
+	for i in ebin/*; do install $$i $(prefix)/$(LIBDIR)/similar-$(VERSION)/$$i ; done
 

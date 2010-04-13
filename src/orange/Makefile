@@ -27,5 +27,5 @@ clean:
 
 install: all
 	mkdir -p $(prefix)/$(LIBDIR)/orange-$(VERSION)/ebin
-	for i in ebin/*.beam; do install $$i $(prefix)/$(LIBDIR)/orange-$(VERSION)/$$i ; done
+	for i in ebin/*; do install $$i $(prefix)/$(LIBDIR)/orange-$(VERSION)/$$i ; done
 
