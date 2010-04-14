@@ -18,7 +18,7 @@
 -module(orange_storage_server).
 -behavior(gen_server).
 
--export([store/3, load/2, clear/2, init_storage/0, start_link/0]).
+-export([store/3, load/2, clear/2, init_storage/0, start_link/0, dump/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -42,6 +42,10 @@ clear(Type, Id) ->
 %% @doc create a brand new repository.
 init_storage() ->
     gen_server:call(?MODULE, {init_storage}).
+
+%% @doc dumps the actual content.
+dump() ->
+    gen_server:call(?MODULE, {dump}).
 
 init([]) ->
     process_flag(trap_exit, true),
@@ -76,7 +80,13 @@ handle_call({clear, Header}, _From, State) ->
 
 handle_call({init_storage}, _From, State) ->
     Reply = dets:delete_all_objects(orange.dets),
-    {reply, Reply, State}.
+    {reply, Reply, State};
+
+handle_call({dump}, _From, State) ->
+    dets:traverse(
+        orange.dets,
+        fun(X) -> io:format("~p~n", [X]), continue end),
+    {reply, ok, State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
 
