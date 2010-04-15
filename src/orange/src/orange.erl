@@ -29,7 +29,7 @@
 
 %% @doc starts the application w/ crypto.
 start(_Type, StartArgs) ->
-    case start_apps([crypto]) of
+    case start_apps([crypto, sasl]) of
         ok ->
             orange_sup:start_link(StartArgs);
         {error, Reason} ->
