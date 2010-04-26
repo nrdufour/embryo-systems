@@ -5,3 +5,4 @@ ebin/
 cover
 edoc-info
 orange.dets
+deps/
