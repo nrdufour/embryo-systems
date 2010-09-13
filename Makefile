@@ -1,30 +1,15 @@
-ERL          ?= erl
+all:  compile
 
-EBIN_DIRS    := $(wildcard deps/*/ebin)
-ERLC_FLAGS   := -W $(INCLUDE_DIRS:%=-I %) $(EBIN_DIRS:%=-pa %)
-APP          := embryosys
+compile:
+	@./rebar compile
 
-all:
-	./rebar compile
+clean:
+	@./rebar clean
 
-doc: all
-	##@mkdir -p doc
-	##@$(ERL) -noshell -run edoc_run application '$(APP)' '"."' '[{preprocess, true},{includes, ["."]}]'
-	(cd deps/orange; make doc)
-	(cd deps/similar; make doc)
+dist: compile
+	@rm -rf rel/embryosys
+	@./rebar generate
 
-test: all
-	#prove t/*.t
-	(cd deps/orange; make test)
-	(cd deps/similar; make test)
-
-cover: all
-	##COVER=1 prove t/*.t
-	##erl -detached -noshell -eval 'etap_report:create()' -s init stop
-	(cd deps/orange; make cover)
-	(cd deps/similar; make cover)
-
-clean: 
-	./rebar clean
-
+distclean: clean
+	@rm -rf rel/embryosys
 
