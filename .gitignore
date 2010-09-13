@@ -6,3 +6,5 @@ cover
 edoc-info
 orange.dets
 deps/
+install.mk
+embryosys.config
