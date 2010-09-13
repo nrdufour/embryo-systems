@@ -1,4 +1,5 @@
-all:  compile
+all:  deps compile
+	@./rebar get-deps
 
 compile:
 	@./rebar compile
