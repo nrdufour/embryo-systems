@@ -28,3 +28,13 @@ dist: compile
 distclean: clean
 	@rm -rf rel/embryosys
 
+include install.mk
+install: dist
+	@mkdir -p $(prefix)
+	@cp -R rel/embryosys/* $(prefix)
+	@mkdir -p $(data_dir)
+	@chown $(user) $(data_dir)
+	@touch $(prefix)/var/log/embryosys.log
+	@chown $(user) $(prefix)/var/log/embryosys.log
+
+# THE END
