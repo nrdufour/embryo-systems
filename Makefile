@@ -12,11 +12,11 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-all:  deps compile
-	@./rebar get-deps
-
-compile:
+all:  deps
 	@./rebar compile
+
+deps:
+	@./rebar get-deps
 
 clean:
 	@./rebar clean
