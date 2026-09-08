@@ -1,0 +1,15 @@
+name: Renovate automerge gate
+
+# The shared preset sets platformAutomerge, and Forgejo only automerges once a
+# status check has reported. ci.yaml runs on pull_request and provides the real
+# one; this guarantees a check exists even for a PR ci.yaml's triggers miss.
+on:
+  push:
+    branches:
+      - renovate/**
+
+jobs:
+  gate:
+    runs-on: native
+    steps:
+      - run: echo "ok"

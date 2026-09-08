@@ -1,0 +1,35 @@
+name: ci
+
+# Runs on pull_request as well as push to main: gates that only run after the
+# merge are not gates. The toolchain comes from the flake, so this workflow
+# never names a version; `just check` is the single definition of what passes.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  check:
+    runs-on: native
+    env:
+      # The native runner's HOME is not writable, so every cache a tool reaches
+      # for is redirected into the workspace. XDG_CACHE_HOME covers nix's own
+      # eval cache and anything using os.UserCacheDir(); language-specific
+      # caches are added below per kind.
+      XDG_CACHE_HOME: ${{ github.workspace }}/.cache
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check
+        run: nix develop --command just check
+
+      # Some tools create their caches read-only (Go's module cache does), which
+      # leaves the runner unable to delete the workspace at teardown. Hand write
+      # permission back so it can.
+      - name: Make caches removable
+        if: always()
+        shell: bash
+        run: chmod -R u+w .cache .cargo-home 2>/dev/null || true

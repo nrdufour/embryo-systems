@@ -1,0 +1,9 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'local>nemo/renovate-config//default.json5', // shared defaults
+  ],
+  // Repo-specific packageRules go here. Do not restate the preset: minor/patch
+  // automerge, 3-day docker cooling-off and manual majors already come from it.
+  packageRules: [],
+}

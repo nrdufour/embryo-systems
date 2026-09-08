@@ -1,0 +1,32 @@
+name: style
+
+# The gate that applies to every file, prose included. No paths filter on
+# purpose: Markdown is where a smart quote is most likely to arrive. Keep it
+# cheap - checkout and grep, no toolchain.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  style:
+    runs-on: native
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Characters that render like ASCII, or render as nothing at all, but
+      # compare unequal. Visually distinct symbols are fine and deliberately
+      # allowed: degrees, arrows, >=, UI glyphs.
+      - name: Confusable characters
+        shell: bash
+        run: |
+          pattern='[\x{2010}-\x{2015}\x{2212}\x{2018}\x{2019}\x{201A}\x{201C}\x{201D}\x{201E}\x{2032}\x{2033}\x{00B7}\x{2026}\x{00D7}\x{00A0}\x{200B}-\x{200D}\x{2060}\x{FEFF}]'
+          if hits=$(git ls-files | xargs grep -nIP "$pattern" 2>/dev/null); then
+            echo "characters confusable with ASCII, or invisible:"
+            echo "$hits"
+            echo
+            echo "Use - . ... x and a plain space instead."
+            exit 1
+          fi

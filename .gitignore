@@ -1,0 +1,14 @@
+# Nix / direnv
+/.direnv/
+result
+result-*
+
+# CI redirects every tool cache into the workspace, because the native runner's
+# home directory is not writable.
+/.cache/
+
+# Build output
+/target/
+
+# CI cache redirect (see .forgejo/workflows/ci.yaml)
+/.cargo-home/
