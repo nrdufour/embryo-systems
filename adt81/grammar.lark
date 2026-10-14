@@ -36,19 +36,19 @@ fragment: fragment_item (";" fragment_item)*
 
 ?fragment_item: local_declaration | parameter_specification | statement
 
-main_program: "PROGRAM" module_name ";" locals externals body
+main_program: "PROGRAM"i module_name ";" locals externals body
 
-procedure: "SUBROUTINE" module_name formal_parameters ";" parameter_specifications locals externals body
+procedure: "SUBROUTINE"i module_name formal_parameters ";" parameter_specifications locals externals body
 
 // listing: pages 49-50 and 127-128 name the algorithm of a computed
 // attribute after the attribute, FUNCTION "ARC"."LENGTH".
-function: "FUNCTION" (module_name | class_attribute) formal_parameters "RETURNS" type fuzziness ";" parameter_specifications locals externals body
+function: "FUNCTION"i (module_name | class_attribute) formal_parameters "RETURNS"i type fuzziness ";" parameter_specifications locals externals body
 
-coroutine: "COROUTINE" module_name formal_parameters ";" parameter_specifications locals externals body
+coroutine: "COROUTINE"i module_name formal_parameters ";" parameter_specifications locals externals body
 
 // listing: page 76 names the prefix the functor applies to,
 // FUNCTOR C'COUPLE(D).
-functor: "FUNCTOR" (name "'")? module_name formal_parameters "RETURNS" functor_result ";" parameter_specifications locals externals body
+functor: "FUNCTOR"i (name "'")? module_name formal_parameters "RETURNS"i functor_result ";" parameter_specifications locals externals body
 
 module_name: name
 
@@ -64,38 +64,38 @@ parameter_type: scalar_type | array_type | list_type | compound_type
 
 scalar_type: type fuzziness
 
-array_type: "SPARSE"? shape "OF" type fuzziness
+array_type: "SPARSE"i? shape "OF"i type fuzziness
 
 // fix: page 20 lacks the | after MATRIX and a closing bracket in TENSOR; a
 // handwritten note on the page adds both.
-shape: "VECTOR" ("[" bounds "]")?
-    | "MATRIX" ("[" bounds "," bounds "]")?
-    | "TENSOR" ("[" bounds "," bounds "," bounds ("," bounds)* "]")?
+shape: "VECTOR"i ("[" bounds "]")?
+    | "MATRIX"i ("[" bounds "," bounds "]")?
+    | "TENSOR"i ("[" bounds "," bounds "," bounds ("," bounds)* "]")?
 
 bounds: bound ":" bound
 
 bound: integer_constant | name
 
-list_type: "LIST" ("OF" type fuzziness)?
+list_type: "LIST"i ("OF"i type fuzziness)?
 
-compound_type: "COMPOUND"
+compound_type: "COMPOUND"i
 
-type: numeric_type | "BOOLEAN" | "CHARACTER" | "STRING" | adt_type
+type: numeric_type | "BOOLEAN"i | "CHARACTER"i | "STRING"i | adt_type
 
-numeric_type: "LONG"? ("INTEGER" | "FLOAT" | "COMPLEX" | "GAUSS" | "QUATERNION" | "RATIONAL")
+numeric_type: "LONG"i? ("INTEGER"i | "FLOAT"i | "COMPLEX"i | "GAUSS"i | "QUATERNION"i | "RATIONAL"i)
 
-adt_type: "CLASS" | "CATTRIBUTE" | "CLINK"
-    | "OBJECT" | "OATTRIBUTE" | "OLINK"
-    | "HCLASS" | "HATTRIBUTE" | "HLINK"
-    | "EMBRYO" | "PROTOTYPE" | "STRUCTURE"
+adt_type: "CLASS"i | "CATTRIBUTE"i | "CLINK"i
+    | "OBJECT"i | "OATTRIBUTE"i | "OLINK"i
+    | "HCLASS"i | "HATTRIBUTE"i | "HLINK"i
+    | "EMBRYO"i | "PROTOTYPE"i | "STRUCTURE"i
 
-mode: "IN" | "INOUT" | "OUT"
+mode: "IN"i | "INOUT"i | "OUT"i
 
-fuzziness: "APPR"? "PROB"? "SUBJ"? "MULT"? | "FUZZY"
+fuzziness: "APPR"i? "PROB"i? "SUBJ"i? "MULT"i? | "FUZZY"i
 
 // Declarations, page 20
 
-locals: ("LOCAL" (local_declaration ";")*)?
+locals: ("LOCAL"i (local_declaration ";")*)?
 
 local_declaration: name ("," name)* ":" declared_type
 
@@ -106,26 +106,26 @@ declared_type: scalar_type (initial_value | constant_value)?
     | list_type
     | compound_type
 
-initial_value: "INIT" constant
+initial_value: "INIT"i constant
 
-constant_value: "CONSTANTE" "=" constant
+constant_value: "CONSTANTE"i "=" constant
 
-externals: ("EXTERNAL" (external ";")*)?
+externals: ("EXTERNAL"i (external ";")*)?
 
 external: module_name ("," module_name)* ":" module_kind
 
-module_kind: "PROGRAM" | "SUBROUTINE" | "COROUTINE"
-    | "FUNCTION" "RETURNS" type fuzziness
-    | "FUNCTOR" "RETURNS" functor_result
+module_kind: "PROGRAM"i | "SUBROUTINE"i | "COROUTINE"i
+    | "FUNCTION"i "RETURNS"i type fuzziness
+    | "FUNCTOR"i "RETURNS"i functor_result
 
 functor_result: type fuzziness
-    | "SPARSE"? ("VECTOR" | "MATRIX" | "TENSOR") "OF" type fuzziness
+    | "SPARSE"i? ("VECTOR"i | "MATRIX"i | "TENSOR"i) "OF"i type fuzziness
     | list_type
     | compound_type
 
 // Statements, pages 21 to 25
 
-body: "BEGIN" statements "END" ";"
+body: "BEGIN"i statements "END"i ";"
 
 statements: statement (";" statement)*
 
@@ -135,61 +135,61 @@ statements: statement (";" statement)*
 control: loop | each_loop | vector_loop | parallel | if_statement
     | case_statement | loop_exit | module_exit | halt
 
-loop: "LOOP" ("FOR" name ":" expression "TO" expression ("STEP" expression)?)? ("WHILE" expression)? "DO" statements ("UNTIL" expression)? "ENDLOOP"
+loop: "LOOP"i ("FOR"i name ":" expression "TO"i expression ("STEP"i expression)?)? ("WHILE"i expression)? "DO"i statements ("UNTIL"i expression)? "ENDLOOP"i
 
 // fix: what follows OF is a list expression (page 28's form), so that the /
 // introducing the filter is never read as a division.
-each_loop: "EACH" name ("OF" list_expression)? ("/" expression)? "DO" statements "ENDEACH"
+each_loop: "EACH"i name ("OF"i list_expression)? ("/" expression)? "DO"i statements "ENDEACH"i
 
-vector_loop: "VECT" "FOR" name ":" expression "TO" expression ("STEP" expression)? "DO" statements "ENDVECT"
+vector_loop: "VECT"i "FOR"i name ":" expression "TO"i expression ("STEP"i expression)? "DO"i statements "ENDVECT"i
 
-parallel: "PARBEGIN" statements ("PAR" statements)+ "ENDPAR"
+parallel: "PARBEGIN"i statements ("PAR"i statements)+ "ENDPAR"i
 
-if_statement: "IF" expression "THEN" statements ("ELSE" statements)? "ENDIF"
+if_statement: "IF"i expression "THEN"i statements ("ELSE"i statements)? "ENDIF"i
 
-case_statement: "CASE" expression ("WHEN" expression_list "DO" statements)+ ("OTHERS" statements)? "ENDCASE"
+case_statement: "CASE"i expression ("WHEN"i expression_list "DO"i statements)+ ("OTHERS"i statements)? "ENDCASE"i
 
 // decision: the number of loops to leave is optional, one by default; page
 // 22 always writes it.
-loop_exit: ("EXIT" | "NEXT" | "RELOOP") expression?
+loop_exit: ("EXIT"i | "NEXT"i | "RELOOP"i) expression?
 
-module_exit: "RETURN" | "REPROC"
+module_exit: "RETURN"i | "REPROC"i
 
-halt: "PAUSE" | "STOP" | "RESTART"
+halt: "PAUSE"i | "STOP"i | "RESTART"i
 
 empty_statement:
 
 assignment: variable ":=" expression
 
-reset: "RESET" variable ("," variable)*
+reset: "RESET"i variable ("," variable)*
 
-result: "RESULT" expression
+result: "RESULT"i expression
 
 // fix: page 22 makes the position a "one of"; optional is meant.
-list_statement: "INSERT" list_expression ("," list_expression)* "INTO" name (("AFTER" | "BEFORE") expression)?
-    | "EXTRACT" list_expression ("," list_expression)* "OUTOF" name
-    | "EMPTY" name
-    | ("LINEAR" | "CIRCULAR") name ("," name)*
-    | ("SINGLE" | "TUPLE") name ("," name)*
+list_statement: "INSERT"i list_expression ("," list_expression)* "INTO"i name (("AFTER"i | "BEFORE"i) expression)?
+    | "EXTRACT"i list_expression ("," list_expression)* "OUTOF"i name
+    | "EMPTY"i name
+    | ("LINEAR"i | "CIRCULAR"i) name ("," name)*
+    | ("SINGLE"i | "TUPLE"i) name ("," name)*
 
 adt_statement: create | state_change | adt_assignment | assertion | specify
     | include | exclude | associate | dissociate | design | compose | build
 
 // Classes and objects share one list: with bare names they read alike, and
 // the checker keeps the list homogeneous.
-create: "CREATE" (designation_list | class_attribute_list | class_link_declarations)
+create: "CREATE"i (designation_list | class_attribute_list | class_link_declarations)
 
 // fix: page 23 places the operand list twice, after the operation and
 // inside it; once is meant.
-state_change: ("HIBERN" | "AWAKE" | "DESTROY" | "RESUR" | "PURGE") (designation_list | class_attribute_list | class_link_list)
+state_change: ("HIBERN"i | "AWAKE"i | "DESTROY"i | "RESUR"i | "PURGE"i) (designation_list | class_attribute_list | class_link_list)
 
 // listing: pages 49 and 51 design attributes and links of embryos as well
 // as the embryos themselves.
-design: "DESIGN" (class_list | class_attribute_list | class_link_declarations)
+design: "DESIGN"i (class_list | class_attribute_list | class_link_declarations)
 
 class_link_declarations: class_link_declaration ("," class_link_declaration)*
 
-class_link_declaration: class_link ("REVERSE" string_expression | "REFLEXIVE")?
+class_link_declaration: class_link ("REVERSE"i string_expression | "REFLEXIVE"i)?
 
 designation_list: designation ("," designation)*
 
@@ -202,55 +202,55 @@ class_link_list: class_link ("," class_link)*
 // decision: a property of an a.d.t. is set with LET only (page 23, page
 // 156); page 158 drops the LET.
 // listing: page 156 sets properties such as COND and ACTION, A'COND := ...
-adt_assignment: "LET" (object_attribute | property) ":=" expression
+adt_assignment: "LET"i (object_attribute | property) ":=" expression
 
 property: adt "'" name
 
 // fix: page 23's object link ends in an object name, which a handwritten
 // note corrects to a link name. decision: the relationship is a string
 // literal. listing: page 154 gives it a probability, % 0.80.
-assertion: "ASSERT" (object "NOT"? STRING ("%" real)? object | name)
+assertion: "ASSERT"i (object "NOT"i? STRING ("%" real)? object | name)
 
 // fix: page 24 gives this rule the name of page 19's parameter
 // specification. listing: page 49 writes a colon and COMPUTED, page 154
 // specifies classes and links and fuzziness alone, page 158 adds a UNIT.
-specify: "SPECIFY" specified ("," specified)* ":"? specification ("UNIT" "(" name ")")? "COMPUTED"?
+specify: "SPECIFY"i specified ("," specified)* ":"? specification ("UNIT"i "(" name ")")? "COMPUTED"i?
 
 ?specified: class | class_attribute | class_link
 
 specification: type fuzziness
-    | ("VECTOR" | "MATRIX" | "TENSOR") ("OF" type fuzziness)?
+    | ("VECTOR"i | "MATRIX"i | "TENSOR"i) ("OF"i type fuzziness)?
     | list_type
     | compound_type
     | fuzziness
 
-include: "INCLUDE" class_list "INTO" class_list
+include: "INCLUDE"i class_list "INTO"i class_list
 
-exclude: "EXCLUDE" class_list "OUTOF" class_list
+exclude: "EXCLUDE"i class_list "OUTOF"i class_list
 
 // Page 24 pairs class parts with classes, object parts with objects, and
 // objects with classes; with bare names the pairs read alike, so one rule
 // per shape, and the pairing is the checker's.
-associate: "ASSOC" adt "WITH" designation ("," adt "WITH" designation)*
+associate: "ASSOC"i adt "WITH"i designation ("," adt "WITH"i designation)*
 
-dissociate: "DISSOC" adt "FROM" designation ("," adt "FROM" designation)*
+dissociate: "DISSOC"i adt "FROM"i designation ("," adt "FROM"i designation)*
 
-compose: "COMPOSE" class "WITH" class_list
+compose: "COMPOSE"i class "WITH"i class_list
 
-build: "BUILD" class_list "AS" class
+build: "BUILD"i class_list "AS"i class
 
 // fix: page 25 has a stray bracket after AT, marked "pb" by hand.
-process_statement: "ACTIVATE" object
-    | "REACTIVATE" object ("AT" expression | "BEFORE" object | "AFTER" object)?
-    | "CANCEL" object | "KILL" object
-    | "DELAY" object "FOR" expression | "HOLD" object "FOR" expression
-    | "PASSIVATE" | "TERMINATE"
+process_statement: "ACTIVATE"i object
+    | "REACTIVATE"i object ("AT"i expression | "BEFORE"i object | "AFTER"i object)?
+    | "CANCEL"i object | "KILL"i object
+    | "DELAY"i object "FOR"i expression | "HOLD"i object "FOR"i expression
+    | "PASSIVATE"i | "TERMINATE"i
 
-call: "CHAIN" module_name | "CALL" invocation | "RESUME" invocation
+call: "CHAIN"i module_name | "CALL"i invocation | "RESUME"i invocation
 
 invocation: module_name ("(" expression_list ")")?
 
-io: "READ" variable ("," variable)* | "PRINT" expression_list
+io: "READ"i variable ("," variable)* | "PRINT"i expression_list
 
 // A.d.t. designations, pages 23 and 24
 
@@ -265,13 +265,13 @@ class_link: class STRING class
 
 // fix: the brackets around an object's class are literal, as the code
 // writes them, "P" [ "POINT" ].
-object: name | string_expression "[" class "]" | "THIS"
+object: name | string_expression "[" class "]" | "THIS"i
 
 object_attribute: name | object "." string_expression
 
 // An a.d.t. by its shape: whether a designation is a class or an object is
 // the checker's.
-designation: class | string_expression "[" class "]" | "THIS"
+designation: class | string_expression "[" class "]" | "THIS"i
 
 // gap: page 27 uses an a.d.t. operand it never defines; page 29 expands
 // the abbreviation as "abstract data type".
@@ -301,7 +301,7 @@ rational_constant: sign? INTEGER "//" INTEGER
 
 sign: "+" | "-"
 
-boolean_constant: "TRUE" | "FALSE"
+boolean_constant: "TRUE"i | "FALSE"i
 
 // Expressions, pages 26 to 28, loosest operator first
 
@@ -309,28 +309,28 @@ boolean_constant: "TRUE" | "FALSE"
 
 expression_list: expression ("," expression)*
 
-?disjunction: conjunction (("OR" | "NOR" | "XOR") conjunction)*
+?disjunction: conjunction (("OR"i | "NOR"i | "XOR"i) conjunction)*
 
 // fix: page 27 joins exactly two terms with AND; any number is meant.
-?conjunction: negation (("AND" | "NAND") negation)*
+?conjunction: negation (("AND"i | "NAND"i) negation)*
 
-?negation: "NOT" negation | relation
+?negation: "NOT"i negation | relation
 
 // The object link of page 27 is a boolean: THIS "retro" a.
 ?relation: union
     | union comparator union
-    | union ("IN" | "NOTIN") union
+    | union ("IN"i | "NOTIN"i) union
     | object STRING object
 
 // gap: page 27 uses a comparator it never lists.
 comparator: "=" | "/=" | "<" | "<=" | ">" | ">="
 
-?union: intersection ("UNION" intersection)*
+?union: intersection ("UNION"i intersection)*
 
-?intersection: complement ("INTER" complement)*
+?intersection: complement ("INTER"i complement)*
 
 // gap: page 28 leaves the right operand of COMPL undefined; a list term.
-?complement: concatenation ("COMPL" concatenation)?
+?complement: concatenation ("COMPL"i concatenation)?
 
 ?concatenation: sum ("&" sum)*
 
@@ -339,7 +339,7 @@ comparator: "=" | "/=" | "<" | "<=" | ">" | ">="
 
 // fix: page 26 has a - where / is meant among the float operators.
 // decision: % is not an operator; integer division is /.
-?product: power (("*" | "/" | "MOD" | "//" | "[*]" | "[.]" | "[^]") power)*
+?product: power (("*" | "/" | "MOD"i | "//" | "[*]" | "[.]" | "[^]") power)*
 
 ?power: operand ("^" operand)?
 
@@ -376,11 +376,11 @@ functor_expression: adt ("'" invocation)+
 
 list_expression: list_union
 
-list_union: list_intersection ("UNION" list_intersection)*
+list_union: list_intersection ("UNION"i list_intersection)*
 
-list_intersection: list_complement ("INTER" list_complement)*
+list_intersection: list_complement ("INTER"i list_complement)*
 
-list_complement: list_term ("COMPL" list_term)?
+list_complement: list_term ("COMPL"i list_term)?
 
 list_term: variable | functor_expression | "(" expression ")"
 
@@ -395,8 +395,14 @@ variable: name ("[" expression_list "]")?
 
 name: IDENT
 
-// Lexical. Keywords are upper case, the words the print underlines.
+// Lexical. Keywords are the words the print underlines, in any case.
 
+// decision: the language is case-insensitive, names and keywords alike:
+// opscrc and OPSCRC are one name (pages 50 and 127 write the same functor
+// both ways), loop and LOOP the same keyword. For keywords this deviates
+// from the print, which writes them in upper case only; deliberately, see
+// docs/adt81.md. Keyword literals carry Lark's
+// i flag; the lexer folds names, see fold_name.
 IDENT: /[A-Za-z][A-Za-z0-9_]*/
 
 INTEGER: /[0-9]+/

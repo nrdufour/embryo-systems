@@ -3,13 +3,14 @@
 //!
 //! Matches what Lark's basic lexer does with that grammar, so that the Rust
 //! parser and the grammar gate see the same tokens: the longest symbol wins,
-//! an upper case word in [`KEYWORDS`] is a keyword, a number glued to `i`,
+//! a word in [`KEYWORDS`], in any case, is a keyword, a number glued to `i`,
 //! `j` or `k` is imaginary, and `--` opens a comment only if another `--`
 //! closes it on the same line (otherwise it is two minus signs).
 
 use std::fmt;
 
-/// Every keyword of the grammar: its upper case string literals.
+/// Every keyword of the grammar, as its string literals write them; a word
+/// is looked up upper-cased.
 pub const KEYWORDS: &[&str] = &[
     "ACTIVATE",
     "AFTER",
@@ -195,6 +196,19 @@ pub struct Token<'a> {
     pub column: usize,
 }
 
+impl Token<'_> {
+    /// The name an identifier stands for; see [`fold_name`].
+    pub fn name(&self) -> Option<String> {
+        (self.kind == Kind::Ident).then(|| fold_name(self.text))
+    }
+}
+
+/// ADT'81 is case-insensitive: `opscrc`, `Opscrc` and `OPSCRC` are one
+/// name, and compare equal once folded; `loop` is the keyword `LOOP`.
+pub fn fold_name(text: &str) -> String {
+    text.to_ascii_uppercase()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     pub message: String,
@@ -273,7 +287,7 @@ impl<'a> Lexer<'a> {
         let (kind, len) = if c.is_ascii_alphabetic() {
             let len = self.ident_len();
             let word = &self.rest()[..len];
-            let kind = if KEYWORDS.binary_search(&word).is_ok() {
+            let kind = if KEYWORDS.binary_search(&fold_name(word).as_str()).is_ok() {
                 Kind::Keyword
             } else {
                 Kind::Ident
@@ -419,9 +433,20 @@ mod tests {
             [
                 (Kind::Keyword, "LOOP"),
                 (Kind::Ident, "x_1"),
-                (Kind::Ident, "Loop")
+                (Kind::Keyword, "Loop")
             ]
         );
+    }
+
+    #[test]
+    fn case_insensitive() {
+        let tokens = tokenize("opscrc OPSCRC Opscrc loop Loop LOOP looping \"Arc\"").unwrap();
+        let names: Vec<_> = tokens.iter().map(Token::name).collect();
+        let opscrc = Some("OPSCRC".to_string());
+        assert_eq!(names[..3], [opscrc.clone(), opscrc.clone(), opscrc]);
+        assert!(tokens[3..6].iter().all(|t| t.kind == Kind::Keyword));
+        assert_eq!(names[6], Some("LOOPING".to_string()));
+        assert_eq!(names[7], None);
     }
 
     #[test]

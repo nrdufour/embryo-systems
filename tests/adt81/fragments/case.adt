@@ -1,0 +1,4 @@
+-- The language is case-insensitive: keywords in any case, names folded. --
+Loop For i : 1 To N Do Total := total + V[I] EndLoop ;
+if total > 0 then print "positive" endif ;
+x := Opscrc ;
