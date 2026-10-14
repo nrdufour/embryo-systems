@@ -48,6 +48,7 @@
             tea # forge.internal PRs and issues (see the create-pr skill)
             forgejo-cli # `fj`: same forge, the other CLI
             nixfmt
+            (python3.withPackages (ps: [ ps.lark ])) # tools/check_grammar.py
           ];
 
           env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";

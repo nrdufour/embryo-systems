@@ -1,0 +1,24 @@
+# Statements the grammar must refuse, one per line, parsed as fragments.
+# A grammar that accepts everything would pass every program.
+x := ;
+IF a THEN b := 1 ;
+x := (a + b ;
+EACH p OF L DO x := 1 ENDLOOP ;
+CREATE ;
+x := a +* b ;
+LET := 3 ;
+x : FLOAT BANANA ;
+END := 1 ;
+SPECIFY "A"."B" FLOAT APPR FUZZY ;
+# decision: fuzziness on number literals only
+x := y +- 0.1 ;
+x := 2.0 @ s ;
+# decision: % is not an operator
+x := a % b ;
+# decision: a link's relationship is a string literal
+b := a r c ;
+ASSERT o r p ;
+# decision: LET is required to set a property
+"A" . "x" ' COND := 1 ;
+# decision: imaginary units are suffixes
+z : COMPLEX INIT 1.0 + i 2.0 ;

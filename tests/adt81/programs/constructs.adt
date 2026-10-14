@@ -1,0 +1,90 @@
+-- One of each construct of ADT'81, written for the grammar's tests. --
+
+PROGRAM P ;
+LOCAL
+        v : VECTOR [1:10] OF FLOAT ;
+        m : SPARSE MATRIX [1:n, 0:9] OF LONG INTEGER ;
+        t : TENSOR [1:2, 1:2, 1:2, 1:2] OF COMPLEX APPR ;
+        x : INTEGER INIT -3 ;
+        y : FLOAT CONSTANTE = 2.5 ;
+        z : COMPLEX INIT 1.0 + 2.0i ;
+        g : GAUSS INIT 1 - 2i ;
+        w : QUATERNION INIT 1.0 + 2.0i - 3.0j + 4.0k ;
+        q : RATIONAL INIT 3 // 4 ;
+        f : FLOAT FUZZY ;
+        L, M : LIST OF OBJECT ;
+        o : OBJECT ;
+        c : COMPOUND ;
+        i, j, k : INTEGER ;
+EXTERNAL
+        F, G : FUNCTION RETURNS FLOAT ;
+        H : FUNCTOR RETURNS LIST OF OBJECT ;
+        S : SUBROUTINE ;
+BEGIN
+        LOOP FOR i : 1 TO n STEP 2 DO s := s + v[i] ENDLOOP ;
+        LOOP WHILE x < 10 DO x := x + 1 UNTIL x = 5 ENDLOOP ;
+        EACH o OF L / o . "X" > 0 DO PRINT o ENDEACH ;
+        VECT FOR j : 1 TO 10 DO v[j] := 0 ENDVECT ;
+        PARBEGIN a := 1 PAR b := 2 PAR c := 3 ENDPAR ;
+        IF a AND b OR NOT c THEN x := 1 ELSE x := 2 ENDIF ;
+        CASE x WHEN 1, 2 DO y := 1 WHEN 3 DO y := 2 OTHERS y := 0 ENDCASE ;
+        LOOP DO EXIT ; NEXT 2 ; RELOOP ENDLOOP ;
+        RESET a, v[1] ;
+        INSERT A, B INTO L AFTER e ; INSERT C INTO L ;
+        EXTRACT A OUTOF L ; EMPTY L ; CIRCULAR L, M ; TUPLE L ;
+        L := A UNION B INTER C COMPL D ; b := e IN L ; b := e NOTIN L ;
+        CREATE "A", "B" ; CREATE "A" . "x" ; CREATE "o" [ "A" ] ;
+        CREATE "A" "r" "B" REVERSE "s", "A" "n" "A" REFLEXIVE ;
+        HIBERN "A", "B" ; AWAKE "A" ; DESTROY "o" [ "C" ] ;
+        RESUR "A" . "x" ; PURGE "A" "r" "B" ;
+        LET o . "X" := 1.5 +- 0.1 % 0.9 @"measured" ;
+        LET "A" . "x" ' COND := "x > 0" ;
+        LET (o ' OBJOF) . "x" ' COND := "x > 0" ;
+        ASSERT "o" [ "C" ] NOT "r" "p" [ "D" ] ;
+        ASSERT "o" [ "C" ] "r" % 0.5 "p" [ "D" ] ;
+        SPECIFY "A" . "v" VECTOR OF FLOAT ; SPECIFY "A" . "l" LIST OF OBJECT ;
+        SPECIFY "A" . "c" COMPOUND ; SPECIFY "A" PROB SUBJ ;
+        SPECIFY "A" . "t" : FLOAT UNIT (celsius) COMPUTED ;
+        INCLUDE "A" INTO "H" ; EXCLUDE "A", "B" OUTOF "H" ;
+        ASSOC "A" . "x" WITH "B", "o" [ "A" ] WITH "B" ;
+        DISSOC "A" "r" "B" FROM "C" ;
+        CREATE x, y ; DESTROY x ; ASSOC x WITH y ; DISSOC x . "a" FROM y ;
+        ASSERT a "r" b ; ASSERT r ; LET x := 1 ;
+        DESIGN "E" ; DESIGN "E" . "a" ; DESIGN "E" "r" "E" REFLEXIVE ;
+        COMPOSE "G" WITH "E", "F" ; BUILD "R1", "R2" AS "G" ;
+        ACTIVATE p ; REACTIVATE p AT t + 1 ; REACTIVATE p BEFORE q ;
+        REACTIVATE p ; CANCEL p ; KILL p ; DELAY p FOR 5 ; HOLD p FOR 2 ;
+        CALL S (a, 1, b + 2) ; RESUME K ;
+        READ a, v[2] ; PRINT a, "x" & s, 3.5 ;
+        s := "ab" & c & ("d") ; b := TRUE NAND FALSE XOR x NOR y ;
+        x := 1 -- a comment -- ; y := 2 ;
+        n := (A UNION B) ' CARD ; b := x <= y ; b := "a" /= "b" ;
+        z := 2.3 +- 0.02 + 3.4i +- 0.01 ; x := 7 / 2 MOD 3 ^ 2 ;
+        f := { 25.3 +- 0.37 % 0.73 , -25.7 } ;
+        y := F(a) + G ;
+        CHAIN Q ;
+        PASSIVATE ; TERMINATE ; RETURN ; REPROC ; PAUSE ; STOP ; RESTART
+END ;
+
+SUBROUTINE S (a, b) ;
+        a, b : INTEGER IN ;
+BEGIN
+        RETURN
+END ;
+
+FUNCTION F (u) RETURNS FLOAT APPR ;
+        u : VECTOR OF FLOAT APPR IN ;
+BEGIN
+        RESULT u [.] u
+END ;
+
+COROUTINE K (x) ;
+        x : FLOAT INOUT ;
+BEGIN
+        PAUSE
+END ;
+
+FUNCTOR C ' SIBLINGS RETURNS LIST OF CLASS ;
+BEGIN
+        SIBLINGS := C ' CONTOF ' CONT
+END ;
