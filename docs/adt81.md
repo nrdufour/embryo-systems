@@ -136,6 +136,20 @@ The print leaves these open; they were decided on 2026-10-14.
   makes three juxtaposed names a link, a boolean and more at once.
 - **`LET` is required to set an a.d.t.'s property** (page 23, page 156).
   Page 158 drops it; that is read as a print error.
+- **The language is case-insensitive**, names and keywords alike. *This is
+  a deviation from the original document, taken deliberately.* The polycopié
+  prints every keyword in upper case and underlined, and nothing in it shows
+  a keyword written otherwise; we accept `loop`, `Loop` and `LOOP` as the
+  same keyword. For names it follows the print: page 50 writes the functor
+  `opscrc` where page 127 writes `OPSCRC`, so `xi`, `XI` and `Xi` are one
+  name. It is worth it: with names folded and keywords not, `loop` would be
+  a name and `LOOP` a keyword, a trap in any program; one rule for every
+  word, as in Pascal or Ada, removes it. Every program the polycopié quotes
+  parses the same as before, and ours keep the print's upper-case keywords.
+  Considered and rejected: keywords in upper case only (the trap above), and
+  keywords reserved in every case but required in upper case (stricter than
+  any reader needs). Strings keep their case: `"ARC"` and `"arc"` are two
+  class names.
 - **`EXIT`, `NEXT`, `RELOOP` take an optional count**, one by default. Page
   22 always writes it.
 
