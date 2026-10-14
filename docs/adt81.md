@@ -32,6 +32,10 @@ it was obtained, where it departs from the print, and why.
    work, with our rule names and structure. It still accepts all eleven
    listings, unambiguously, and the Rust lexer produces the same tokens as
    Lark on all of them.
+7. **A parser in Rust.** Hand-written, recursive descent, one function per
+   rule of the grammar, building the grammar's own tree. On every test
+   program and on the eleven listings it builds the same tree as Lark, node
+   for node, and it refuses every reject.
 
 ## The print's notation
 
@@ -150,6 +154,19 @@ The print leaves these open; they were decided on 2026-10-14.
   keywords reserved in every case but required in upper case (stricter than
   any reader needs). Strings keep their case: `"ARC"` and `"arc"` are two
   class names.
+- **A designation names an a.d.t. by one term**: a name, a string, a call
+  or a parenthesised expression, where page 23 allows any string
+  expression. Writing the parser showed three statements the grammar read
+  two ways, none of them in the polycopié's code. The decision settles them
+  as precedence, and gives the bracket after a name one meaning:
+  - `'` and `.` bind tighter than `&`, as postfix operators do in most
+    languages: `"A" & "B" ' F` is `"A" & ("B" ' F)`, and `a . "x" & "y"`
+    is `(a . "x") & "y"`. Parentheses give the other reading,
+    `("A" & "B") ' F`.
+  - In a designation, a bracket after a name is the class, as the print
+    writes `"P" [ "POINT" ]`: `CREATE p ["C"]` creates the object `p` of
+    class `"C"`. A class named by an indexed variable is written
+    `CREATE (T[i])`.
 - **`EXIT`, `NEXT`, `RELOOP` take an optional count**, one by default. Page
   22 always writes it.
 
@@ -171,6 +188,9 @@ legal; a functor's prefix being an a.d.t.
 | `tests/adt81/reject.txt` | statements the grammar must refuse, one per decision among them |
 | `tools/check_grammar.py` | the gate: `just check-grammar` |
 | `src/adt81/lexer.rs` | the Rust lexer; its tests keep its keywords and symbols in step with the grammar |
+| `src/adt81/parser.rs` | the Rust parser; its tests keep its rules in step with the grammar |
 
 `just check` runs the gate with the rest: every test program parses one way
-only, every reject is refused, every rule is reachable.
+only and to the same tree in Rust, every reject is refused by both, every
+rule is reachable. `tools/check_grammar.py --tree FILE` prints Lark's tree
+as `embryo-systems parse --fragment FILE` prints the parser's.

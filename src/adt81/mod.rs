@@ -2,3 +2,4 @@
 //! `adt81/grammar.lark`; docs/adt81.md tells how it was derived.
 
 pub mod lexer;
+pub mod parser;

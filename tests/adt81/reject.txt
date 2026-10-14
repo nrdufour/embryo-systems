@@ -22,3 +22,6 @@ ASSERT o r p ;
 "A" . "x" ' COND := 1 ;
 # decision: imaginary units are suffixes
 z : COMPLEX INIT 1.0 + i 2.0 ;
+# decision: one term per name in a designation
+x := p[1] [ "C" ] . "x" ;
+CREATE "A" & "B" ;

@@ -8,8 +8,8 @@ The scans live in `embryo-systems-archive` (private); the site is
 
 The language of HBDS. `adt81/grammar.lark` is its grammar, derived from the
 polycopié's BNF and code; [docs/adt81.md](docs/adt81.md) tells how, and every
-decision taken on it. `src/adt81` is the Rust implementation, a lexer so far:
-`embryo-systems lex FILE`.
+decision taken on it. `src/adt81` is the Rust implementation, a lexer and a
+parser so far: `embryo-systems parse FILE` prints a program's syntax tree.
 
 ## Develop
 
