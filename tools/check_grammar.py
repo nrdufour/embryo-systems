@@ -15,6 +15,8 @@ things; `--program` before them parses them as programs; `--tree` prints
 the tree in the form `embryo-systems parse` prints it.
 """
 
+import functools
+import json
 import re
 import subprocess
 import sys
@@ -26,7 +28,6 @@ from lark.exceptions import LarkError
 ROOT = Path(__file__).resolve().parent.parent
 GRAMMAR = ROOT / "adt81" / "grammar.lark"
 TESTS = ROOT / "tests" / "adt81"
-PARSER = ROOT / "target" / "debug" / "embryo-systems"
 RULE = re.compile(r"^\??([a-z_]+):(.*?)(?=^\??[a-z_]+:|^[A-Z_]+:|\Z)", re.M | re.S)
 
 
@@ -63,9 +64,22 @@ def parse(parser, path, start):
     return dump(tree), None
 
 
+@functools.cache
+def parser_binary():
+    """The debug build's path, wherever cargo puts it (CI sets CARGO_TARGET_DIR)."""
+    meta = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return Path(json.loads(meta.stdout)["target_directory"]) / "debug" / "embryo-systems"
+
+
 def rust(start, path=None, text=None):
     """`embryo-systems parse`'s output lines, and whether it succeeded."""
-    args = [str(PARSER), "parse", f"--{start}", str(path) if path else "-"]
+    args = [str(parser_binary()), "parse", f"--{start}", str(path) if path else "-"]
     run = subprocess.run(args, input=text, capture_output=True, text=True)
     return run.stdout.splitlines(), run.returncode == 0
 
