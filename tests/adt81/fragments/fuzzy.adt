@@ -1,0 +1,14 @@
+-- Fuzzy declarations and values: approximation, probability, opinion, --
+-- multiplicity, and imaginary units as suffixes. --
+
+T, P : FLOAT APPR PROB ;
+R : FLOAT SUBJ ;
+H : FLOAT MULT ;
+Q : LONG QUATERNION APPR ;
+V : SPARSE TENSOR OF COMPLEX APPR PROB SUBJ MULT INOUT ;
+T := 291.4 +- 0.5 % 0.95 ;
+P := 1013.2 +- 1.5 ;
+R := 7.0 @"estimated by eye" ;
+H := { 12.1 +- 0.1 % 0.6 @"north gauge", 12.4 +- 0.2 % 0.4 @"south gauge" } ;
+Q := 1.0 +- 0.01 - 0.5i +- 0.02 + 0.25j + 2.0k +- 0.1 ;
+W := T * P

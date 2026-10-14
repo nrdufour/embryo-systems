@@ -21,6 +21,10 @@ test:
 lint:
     cargo clippy --all-targets -- -D warnings
 
+# adt81/grammar.lark: every test program parses one way, every reject is refused.
+check-grammar:
+    python3 tools/check_grammar.py
+
 # Format every tracked Rust and Nix file in place.
 fmt:
     cargo fmt
@@ -32,7 +36,7 @@ fmt-check:
     nixfmt --check $(git ls-files '*.nix')
 
 # What CI runs, so a red build is reproducible in one command.
-check: fmt-check lint test confusables
+check: fmt-check lint test check-grammar confusables
 
 # Characters that render like ASCII, or render as nothing at all, but compare
 # unequal. CI runs this in its own workflow, without a path filter, so it

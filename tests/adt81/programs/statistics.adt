@@ -1,0 +1,29 @@
+-- Mean and standard deviation of a sample, and a computed attribute. --
+
+SUBROUTINE MOMENTS (x, n, mean, sd) ;
+        x : VECTOR OF FLOAT IN ;
+        n : INTEGER IN ;
+        mean, sd : FLOAT OUT ;
+LOCAL
+        s, s2 : FLOAT INIT 0. ;
+        i : INTEGER ;
+BEGIN
+        IF n < 2 THEN
+                mean := 0. ; sd := 0. ;
+                RETURN
+        ENDIF ;
+        LOOP FOR i : 1 TO n DO
+                s := s + x[i] ;
+                s2 := s2 + x[i] ^ 2
+        ENDLOOP ;
+        mean := s / n ;
+        sd := SQRT ((s2 - n * mean ^ 2) / (n - 1))
+END -- MOMENTS -- ;
+
+FUNCTION "TOWN" . "DENSITY" RETURNS FLOAT ;
+LOCAL
+        area : FLOAT ;
+BEGIN
+        area := THIS . "AREA" ;
+        IF area = 0. THEN RESULT 0. ELSE RESULT THIS . "INHABITANTS" / area ENDIF
+END ;

@@ -6,6 +6,16 @@ Guidance for Claude Code working in this repository.
 
 Rebuilding François Bouillé's HBDS system from the 1995 polycopié, in Rust
 
+## Rules
+
+- **Nothing from the polycopié is carried here.** Its copyright is under
+  review: this repository quotes and cites pages, never copies a scan, a
+  transcription or a listing. Test programs are written for the purpose. The
+  sources live in the private `embryo-systems-archive`.
+- **The grammar leads.** `adt81/grammar.lark` defines ADT'81; the Rust code
+  follows it, and a change to the language is made there first, with its
+  reason in `docs/adt81.md`.
+
 ## Commands
 
 The flake's dev shell (loaded by direnv) carries every tool. `just` lists the
