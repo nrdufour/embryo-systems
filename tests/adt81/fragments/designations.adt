@@ -1,0 +1,14 @@
+-- Designations inside expressions: ' and . bind tighter than &, and a --
+-- bracket after a name in a designation is the class. --
+
+x := "A" & "B" ' F ;
+x := ("A" & "B") ' F ;
+x := a . "x" & "y" ;
+x := a . ("x" & "y") ;
+CREATE p [ "C" ] ;
+CREATE (T[i]) ;
+x := p [ "C" ] . "x" ;
+x := (p[1]) [ "C" ] . "x" ;
+x := v[i] ' F ;
+x := a "r" b ;
+x := THIS "r" a ' F

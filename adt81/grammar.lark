@@ -7,8 +7,9 @@
 // was derived and why each choice was made.
 //
 // Lark syntax, Earley parsing. `just check-grammar` parses every program in
-// tests/adt81 with it and fails if one parses two ways. The Rust parser in
-// src/adt81 follows this file.
+// tests/adt81 with it and fails if one parses two ways, or if the Rust
+// parser in src/adt81, which follows this file rule for rule, builds
+// another tree.
 //
 // Comment tags:
 //   fix       the print is wrong at that place
@@ -189,7 +190,7 @@ design: "DESIGN"i (class_list | class_attribute_list | class_link_declarations)
 
 class_link_declarations: class_link_declaration ("," class_link_declaration)*
 
-class_link_declaration: class_link ("REVERSE"i string_expression | "REFLEXIVE"i)?
+class_link_declaration: class_link ("REVERSE"i adt_name | "REFLEXIVE"i)?
 
 designation_list: designation ("," designation)*
 
@@ -254,9 +255,9 @@ io: "READ"i variable ("," variable)* | "PRINT"i expression_list
 
 // A.d.t. designations, pages 23 and 24
 
-class: string_expression
+class: adt_name
 
-class_attribute: class "." string_expression
+class_attribute: class "." adt_name
 
 // decision: a link's relationship is a string literal, never a computed
 // string, so that three juxtaposed terms are a link only around a quoted
@@ -265,17 +266,17 @@ class_link: class STRING class
 
 // fix: the brackets around an object's class are literal, as the code
 // writes them, "P" [ "POINT" ].
-object: name | string_expression "[" class "]" | "THIS"i
+object: name | adt_name "[" class "]" | "THIS"i
 
-object_attribute: name | object "." string_expression
+object_attribute: name | object "." adt_name
 
 // An a.d.t. by its shape: whether a designation is a class or an object is
 // the checker's.
-designation: class | string_expression "[" class "]" | "THIS"i
+designation: class | adt_name "[" class "]" | "THIS"i
 
 // gap: page 27 uses an a.d.t. operand it never defines; page 29 expands
 // the abbreviation as "abstract data type".
-adt: designation | designation "." string_expression | designation STRING designation
+adt: designation | designation "." adt_name | designation STRING designation
 
 // Constants, pages 25 and 26
 
@@ -368,7 +369,7 @@ function_call: module_name "(" expression_list ")"
 
 // gap: pages 26 and 27 use an object attribute expression they never
 // define; page 23's object attribute is meant.
-object_attribute_value: object "." string_expression
+object_attribute_value: object "." adt_name
 
 // fix: page 27 also accepts a bare expression as the prefix, which would
 // make a + b'F mean (a + b)'F; it is written in parentheses.
@@ -384,12 +385,15 @@ list_complement: list_term ("COMPL"i list_term)?
 
 list_term: variable | functor_expression | "(" expression ")"
 
-// A functor result inside a designation is written in parentheses,
-// LET (a'F) . "x" ' COND := ...:
-// otherwise a'F'G would read two ways.
-string_expression: string_term ("&" string_term)*
-
-string_term: variable | STRING | function_call | "(" expression ")"
+// decision: page 23 names an a.d.t. by any string expression; here by one
+// term, so that ' and . bind tighter than &, as postfix operators do:
+// "A" & "B" ' F is "A" & ("B" ' F), a . "x" & "y" is (a . "x") & "y". And
+// a bracket after a name in a designation is the class, p [ "C" ], as the
+// print writes "P" [ "POINT" ]; an indexed name is written (T[i]).
+// Parentheses give the other readings, and a functor result inside a
+// designation, LET (a'F) . "x" ' COND := ...: otherwise a'F'G would read
+// two ways.
+adt_name: name | STRING | function_call | "(" expression ")"
 
 variable: name ("[" expression_list "]")?
 

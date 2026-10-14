@@ -21,8 +21,9 @@ test:
 lint:
     cargo clippy --all-targets -- -D warnings
 
-# adt81/grammar.lark: every test program parses one way, every reject is refused.
+# adt81/grammar.lark: every test program parses one way, and to Lark's tree in Rust.
 check-grammar:
+    cargo build --quiet
     python3 tools/check_grammar.py
 
 # Format every tracked Rust and Nix file in place.
