@@ -180,6 +180,11 @@ The print leaves these open; they were decided on 2026-10-14.
   computed name has nothing to compute it with; allowed, it also made
   `FUNCTION "A" . p (x)` read two ways: the attribute `p` with a parameter
   `x`, or the attribute named by the call `p(x)`.
+- **A quote written twice inside a string is a quote**, `"say ""hi"""`,
+  as in Pascal and Ada (decided 2026-10-15). A string held no quote
+  before, so a COND could not name an attribute: page 158's
+  `THIS."temp" > 0.` is meant as a string, and only this makes it one,
+  `"THIS . ""temp"" > 0."`.
 - **`EXIT`, `NEXT`, `RELOOP` take an optional count**, one by default. Page
   22 always writes it.
 

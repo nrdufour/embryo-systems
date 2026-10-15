@@ -1,0 +1,7 @@
+-- A COND that does not parse is refused when it is set. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "AREA" ; CREATE "AREA" . "temp" ;
+        LET "AREA" . "temp" ' COND := "THIS . >"
+END ;

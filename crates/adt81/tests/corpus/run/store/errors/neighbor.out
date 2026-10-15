@@ -1,0 +1,2 @@
+two
+13:9: runtime error: the COND of AREA "neighbor" AREA refuses this change: THIS ' OPSCRC("neighbor", "AREA") ' OFIN ' CARD <= 2

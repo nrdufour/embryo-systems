@@ -153,7 +153,7 @@ fn module_name(tree: &Tree) -> Name {
 fn string(node: &Node) -> Str {
     let token = as_token(node);
     Str {
-        text: token.text[1..token.text.len() - 1].to_string(),
+        text: token.text[1..token.text.len() - 1].replace("\"\"", "\""),
         span: span(node),
     }
 }

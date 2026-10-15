@@ -60,7 +60,16 @@ const NAMES: &[&str] = &[
     "a", "b", "x", "y", "n", "Total", "opscrc", "v2", "p_q", "L", "M", "s",
 ];
 const MODULES: &[&str] = &["P", "S", "F", "K", "Sib", "CARD", "OPSC"];
-const STRINGS: &[&str] = &["A", "B", "STREAM", "x > 0", "r", "neighbor of", ""];
+const STRINGS: &[&str] = &[
+    "A",
+    "B",
+    "STREAM",
+    "x > 0",
+    "r",
+    "neighbor of",
+    "",
+    "THIS . \"temp\" > 0.",
+];
 const DEPTH: usize = 3;
 
 struct Gen(Rng);

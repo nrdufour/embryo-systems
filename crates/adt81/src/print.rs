@@ -81,8 +81,9 @@ fn names(names: &[Name]) -> String {
     join(names, |n| n.spelling.clone())
 }
 
+/// A string literal: a quote inside is written twice.
 fn quoted(text: &str) -> String {
-    format!("\"{text}\"")
+    format!("\"{}\"", text.replace('"', "\"\""))
 }
 
 // Types and declarations

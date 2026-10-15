@@ -296,10 +296,7 @@ impl<'a> Lexer<'a> {
         } else if c.is_ascii_digit() {
             self.number()
         } else if c == b'"' {
-            match self.rest()[1..].find(['"', '\n']) {
-                Some(end) if self.rest().as_bytes()[1 + end] == b'"' => (Kind::String, end + 2),
-                _ => return Err(self.error("string not closed on its line")),
-            }
+            (Kind::String, self.string_len()?)
         } else if let Some(symbol) = SYMBOLS.iter().find(|s| self.rest().starts_with(**s)) {
             (Kind::Symbol, symbol.len())
         } else {
@@ -335,6 +332,21 @@ impl<'a> Lexer<'a> {
                 }
             }
             return;
+        }
+    }
+
+    /// A string's length, its quotes included: a quote written twice is
+    /// one quote inside it.
+    fn string_len(&self) -> Result<usize, Error> {
+        let bytes = self.rest().as_bytes();
+        let mut i = 1;
+        loop {
+            match bytes.get(i) {
+                Some(b'"') if bytes.get(i + 1) == Some(&b'"') => i += 2,
+                Some(b'"') => return Ok(i + 1),
+                Some(b'\n') | None => return Err(self.error("string not closed on its line")),
+                Some(_) => i += 1,
+            }
         }
     }
 
@@ -521,6 +533,21 @@ mod tests {
                 (Kind::String, "\"ok\"")
             ]
         );
+    }
+
+    #[test]
+    fn doubled_quotes() {
+        assert_eq!(
+            kinds(r#"x := "say ""hi""" & """""#),
+            [
+                (Kind::Ident, "x"),
+                (Kind::Symbol, ":="),
+                (Kind::String, r#""say ""hi""""#),
+                (Kind::Symbol, "&"),
+                (Kind::String, r#""""""#),
+            ]
+        );
+        assert!(tokenize(r#"x := "open"""#).is_err());
     }
 
     #[test]

@@ -23,9 +23,14 @@ pub struct Journal {
 
 impl Recorder for Journal {
     fn record(&mut self, change: &Change) -> Result<(), String> {
-        let line = encode(change) + "\n";
+        self.record_all(std::slice::from_ref(change))
+    }
+
+    /// A transaction's changes in one write, then one sync.
+    fn record_all(&mut self, changes: &[Change]) -> Result<(), String> {
+        let text: String = changes.iter().map(|c| encode(c) + "\n").collect();
         self.file
-            .write_all(line.as_bytes())
+            .write_all(text.as_bytes())
             .and_then(|_| self.file.sync_data())
             .map_err(|e| format!("the journal cannot be written: {e}"))
     }

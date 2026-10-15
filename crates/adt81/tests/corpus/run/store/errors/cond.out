@@ -1,0 +1,2 @@
+before
+9:9: runtime error: the COND of AREA.temp refuses this change: THIS . "temp" > 0.

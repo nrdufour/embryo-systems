@@ -1,0 +1,10 @@
+-- A COND refuses a change: page 158's temperature, set below zero. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "AREA" ; CREATE "AREA" . "temp" ; CREATE "a1" [ "AREA" ] ;
+        LET "AREA" . "temp" ' COND := "THIS . ""temp"" > 0." ;
+        LET "a1" [ "AREA" ] . "temp" := 10. ;
+        PRINT "before" ;
+        LET "a1" [ "AREA" ] . "temp" := -5.
+END ;

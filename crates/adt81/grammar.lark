@@ -424,8 +424,10 @@ IMAG_FLOAT_I: /[0-9]+\.[0-9]*i(?![A-Za-z0-9_])/
 IMAG_FLOAT_J: /[0-9]+\.[0-9]*j(?![A-Za-z0-9_])/
 IMAG_FLOAT_K: /[0-9]+\.[0-9]*k(?![A-Za-z0-9_])/
 
-// A string holds any character but the quote, on one line.
-STRING: /"[^"\n]*"/
+// A string holds any character on one line, a quote written twice.
+// decision: "" inside a string is a quote, as in Pascal and Ada, so that
+// a COND can name an attribute: "THIS . ""temp"" > 0." (page 158).
+STRING: /"(?:[^"\n]|"")*"/
 
 // A comment runs from -- to the next -- on the same line (page 28).
 COMMENT: /--[^\n]*?--/
