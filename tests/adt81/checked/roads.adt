@@ -1,0 +1,65 @@
+-- Every kind of name, declared and used: written to check clean. --
+
+PROGRAM ROADS ;
+LOCAL
+        n : INTEGER ;
+        total : FLOAT ;
+        towns, L : LIST OF OBJECT ;
+        t, o : OBJECT ;
+        v : VECTOR [1:n] OF FLOAT ;
+        c : CLASS ;
+EXTERNAL
+        REPORT : SUBROUTINE ;
+        DIST : FUNCTION RETURNS FLOAT ;
+        MEAN : FUNCTION RETURNS FLOAT ;
+BEGIN
+        n := 10 ;
+        towns := "TOWN" ' OBJ ;
+        EACH t OF towns DO
+                Total := TOTAL + t . "INHABITANTS" ;
+                LOOP FOR n : 1 TO 10 DO v[n] := DIST(t, t) ENDLOOP
+        ENDEACH ;
+        L := c ' NEIGHBOURS ' OBJ ;
+        o := towns ' FIRST ;
+        LET "TOWN" . "INHABITANTS" ' COND := "THIS . INHABITANTS >= 0" ;
+        CALL SUMUP (total, n) ;
+        CALL REPORT ;
+        RESUME WALKER ;
+        PRINT n, MEAN(v, n)
+END ;
+
+SUBROUTINE SUMUP (s, k) ;
+        s : FLOAT INOUT ;
+        k : INTEGER IN ;
+BEGIN
+        s := s / k
+END ;
+
+FUNCTION MEAN (x, k) RETURNS FLOAT ;
+        x : VECTOR OF FLOAT IN ;
+        k : INTEGER IN ;
+LOCAL
+        i : INTEGER ;
+        s : FLOAT ;
+BEGIN
+        s := 0. ;
+        LOOP FOR i : 1 TO k DO s := s + x[i] ENDLOOP ;
+        RESULT s / k
+END ;
+
+FUNCTION "TOWN" . "DENSITY" RETURNS FLOAT ;
+BEGIN
+        RESULT THIS . "INHABITANTS" / THIS . "AREA"
+END ;
+
+COROUTINE WALKER ;
+BEGIN
+        PAUSE
+END ;
+
+FUNCTOR C ' NEIGHBOURS RETURNS LIST OF CLASS ;
+LOCAL
+        C : CLASS ;
+BEGIN
+        NEIGHBOURS := C ' PSC ' FIN
+END ;

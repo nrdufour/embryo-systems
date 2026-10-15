@@ -11,7 +11,7 @@ polycopié's BNF and code; [docs/adt81.md](docs/adt81.md) tells how, and every
 decision taken on it. `src/adt81` is the Rust implementation, a lexer, a
 parser and a typed tree so far: `embryo-systems parse FILE` prints a
 program's syntax tree, `embryo-systems fmt FILE` the program in canonical
-form.
+form, `embryo-systems check FILE` its undeclared and misused names.
 
 ## Develop
 

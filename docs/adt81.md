@@ -182,12 +182,42 @@ The print leaves these open; they were decided on 2026-10-14.
 - **`EXIT`, `NEXT`, `RELOOP` take an optional count**, one by default. Page
   22 always writes it.
 
+## Name resolution
+
+The checker's first layer, `embryo-systems check`: every name a program
+uses is declared, and known as what it is. It takes programs only;
+fragments are excerpts, with no module to declare their names.
+
+- A module is defined once per file. The modules of a file see one another;
+  `EXTERNAL` declares the modules compiled elsewhere, and may name one of
+  the file's, if of the same kind (decided 2026-10-15).
+- Each formal parameter is listed once and specified once; only formal
+  parameters are specified. A local is declared once, and is not a
+  parameter; an external clashes with neither.
+- A variable is a local or a parameter, or, inside a functor, the
+  functor's own name, which holds its result (`COUPLE := ...`, page 76).
+  Variables are whatever an expression, an assignment, a loop, a bound,
+  a list statement or a designation names bare. An undeclared one is an
+  error, reported once per module.
+- A functor's prefix is declared like any variable, which gives it its
+  type: page 76 declares `LOCAL C : CLASS` for `FUNCTOR C'COUPLE(D)`.
+- `CALL` names a subroutine, `RESUME` a coroutine, `CHAIN` a program, a
+  call in an expression a function, `'` a functor. The wrong kind is an
+  error; an unknown subroutine, coroutine or program too.
+- An unknown function, functor or property (`LET ... ' COND`) is only a
+  warning (decided 2026-10-15): `src/adt81/builtins.rs` lists the
+  built-in functors of pages 76 to 80 and the properties of pages 156 to
+  158, but the print says its lists are partial, and lists no function.
+- Not checked: unit names (`UNIT (m3s)`), which the print does not list,
+  and `THIS`.
+
 ## What the grammar leaves to the checker
 
 Types: which operators apply to which operands, complex numbers compared with
 `=` and `/=` only (page 27), a character constant being one character long.
-Kinds: whether a name designates a variable, a class, an object, an
-attribute or a link; homogeneous `CREATE` lists; which `ASSOC` pairs are
+Kinds: whether a variable holds a class, an object, an attribute or a
+link (that a name is a variable at all, name resolution checks, above);
+homogeneous `CREATE` lists; which `ASSOC` pairs are
 legal; a functor's prefix being an a.d.t.
 
 ## Files
@@ -204,6 +234,9 @@ legal; a functor's prefix being an a.d.t.
 | `src/adt81/ast.rs`, `lower.rs` | the typed tree, and the parser's tree lowered to it |
 | `src/adt81/print.rs` | the typed tree written back as source, `embryo-systems fmt` |
 | `src/adt81/sample.rs`, `examples/sample.rs` | random programs, for the tests and the gate |
+| `src/adt81/names.rs`, `builtins.rs`, `diagnostic.rs` | name resolution, the built-in catalogue, what the checker reports |
+| `tests/adt81/checked/*.adt` | programs that must check clean |
+| `tests/names.rs` | name resolution, rule by rule |
 | `tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |
 
 `just check` runs the gate with the rest: every test program, and 200
