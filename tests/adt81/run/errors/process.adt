@@ -1,0 +1,8 @@
+-- Runtime error: a process, before the simulation engine exists. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "MACHINE" ; CREATE "m1" [ "MACHINE" ] ;
+        PRINT "before" ;
+        ACTIVATE "m1" [ "MACHINE" ]
+END ;

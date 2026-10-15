@@ -1,0 +1,38 @@
+-- A computed attribute in the manner of page 127: an arc's length from --
+-- the points it passes by, computed when read, THIS being the arc. --
+
+PROGRAM ARCS ;
+LOCAL
+        a : OBJECT ;
+BEGIN
+        CREATE "POINT", "ARC" ;
+        CREATE "POINT" . "X", "POINT" . "Y", "ARC" . "LENGTH" ;
+        SPECIFY "ARC" . "LENGTH" : FLOAT COMPUTED ;
+        CREATE "ARC" "passes_by" "POINT" ;
+        CREATE "p1" [ "POINT" ], "p2" [ "POINT" ], "p3" [ "POINT" ], "a1" [ "ARC" ] ;
+        LET "p1" [ "POINT" ] . "X" := 0. ; LET "p1" [ "POINT" ] . "Y" := 0. ;
+        LET "p2" [ "POINT" ] . "X" := 3. ; LET "p2" [ "POINT" ] . "Y" := 4. ;
+        LET "p3" [ "POINT" ] . "X" := 3. ; LET "p3" [ "POINT" ] . "Y" := 10. ;
+        ASSERT "a1" [ "ARC" ] "passes_by" "p1" [ "POINT" ] ;
+        ASSERT "a1" [ "ARC" ] "passes_by" "p2" [ "POINT" ] ;
+        ASSERT "a1" [ "ARC" ] "passes_by" "p3" [ "POINT" ] ;
+        a := "ARC" ' OBJ ' FIRST ;
+        PRINT a, a . "LENGTH"
+END ;
+
+FUNCTION "ARC" . "LENGTH" RETURNS FLOAT ;
+LOCAL
+        L : LIST OF OBJECT ;
+        p : OBJECT ;
+        x, y, xp, yp, len : FLOAT ;
+        first : BOOLEAN ;
+BEGIN
+        len := 0. ; first := TRUE ;
+        L := THIS ' OPSCRC("passes_by", "POINT") ' OFIN ;
+        EACH p OF L DO
+                x := p . "X" ; y := p . "Y" ;
+                IF NOT first THEN len := len + SQRT((x - xp) ^ 2 + (y - yp) ^ 2) ENDIF ;
+                xp := x ; yp := y ; first := FALSE
+        ENDEACH ;
+        RESULT len
+END ;

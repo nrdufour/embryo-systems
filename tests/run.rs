@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use embryo_systems::adt81::diagnostic::Severity;
 use embryo_systems::adt81::interp::{self, Io};
 use embryo_systems::adt81::{self as adt81, lower};
+use embryo_systems::hbds::Store;
 
 #[derive(Default)]
 struct Capture {
@@ -40,7 +41,8 @@ fn run(source: &str, input: &str) -> String {
         input: input.lines().map(String::from).collect(),
         output: String::new(),
     }));
-    let result = interp::run(program, capture.clone());
+    let store = Arc::new(Mutex::new(Store::memory()));
+    let result = interp::run(program, capture.clone(), store);
     let mut output = capture.lock().unwrap().output.clone();
     if let Err(e) = result {
         output += &format!("{e}\n");
@@ -62,7 +64,9 @@ fn programs(dir: &Path) -> Vec<PathBuf> {
 fn golden_runs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81/run");
     let mut paths = programs(&root);
-    paths.extend(programs(&root.join("errors")));
+    for dir in ["errors", "store", "store/errors"] {
+        paths.extend(programs(&root.join(dir)));
+    }
     assert!(paths.len() >= 10, "{} programs", paths.len());
     let mut failures = Vec::new();
     for path in paths {

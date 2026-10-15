@@ -1,0 +1,7 @@
+-- Store error: an object of a class that does not exist. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "TOWN" ;
+        CREATE "Marseille" [ "PORT" ]
+END ;

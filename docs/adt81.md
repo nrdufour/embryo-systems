@@ -266,9 +266,9 @@ The rules:
 finds errors, then runs its first PROGRAM: READ reads standard input, a
 line per variable (a literal, fuzzy ones included, or text as it is),
 PRINT writes its values on one line. A runtime error stops it, with its
-position. The interpreter covers the language's core; the a.d.t. half
-(CREATE, ASSOC, LET, the functors on classes and objects, attributes,
-links, processes) needs the HBDS store, not built yet, and says so.
+position. Classes, objects, attributes and links live in the HBDS store
+([hbds.md](hbds.md)); processes, and running COND and ACTION, are not
+there yet, and say so.
 
 Decided on 2026-10-15:
 

@@ -1,0 +1,6 @@
+[Rhone[RIVER], Saone[RIVER]]
+[Vouglans[DAM], Genissiat[DAM]]
+661
+[Lyon[TOWN]]
+1661 [RIVER "crosses" TOWN, RIVER "alimented_by" DAM] [RIVER "alimented_by" DAM]
+3 2
