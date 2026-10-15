@@ -3,13 +3,15 @@
 //! made it goes on, as the print's exchange zone forces its writes (page
 //! 103) and its file system keeps a DAYFILE (page 86). Opening a store
 //! replays its journal into a fresh one, then records what follows. The
-//! print's own persistence, SFSI and ZE (project 13), would be another
+//! store holds `DIR/lock` while it is open, so that a second one, in this
+//! process or another, is refused rather than writing the same journal.
+//! The print's own persistence, SFSI and ZE (project 13), would be another
 //! [`Recorder`].
 //!
 //! A line is a sequence of terms: words, numbers, quoted strings, and
 //! parenthesised lists of terms. `class 1 "TOWN" class`, `set 7 3 (f 2.5)`.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::Write;
 use std::path::Path;
 
@@ -19,6 +21,10 @@ use hbds_gtad::{Change, ClassKind, Error, Recorder, State, Store, state_name};
 
 pub struct Journal {
     file: File,
+    /// Locked while the store is open; the system lets go when the
+    /// process ends, however it ends. Not the journal itself, which
+    /// compaction will replace by another file.
+    _lock: File,
 }
 
 impl Recorder for Journal {
@@ -37,10 +43,24 @@ impl Recorder for Journal {
 }
 
 /// Opens, or creates, the store in `dir`, replaying its journal. A last
-/// line cut short by a crash is dropped, with a warning.
+/// line cut short by a crash is dropped, with a warning. A store already
+/// open is refused.
 pub fn open(dir: &Path) -> Result<(Store, Vec<String>), Error> {
     let io = |e: std::io::Error| Error(format!("{}: {e}", dir.display()));
     fs::create_dir_all(dir).map_err(io)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(dir.join("lock"))
+        .map_err(io)?;
+    lock.try_lock().map_err(|e| match e {
+        TryLockError::WouldBlock => Error(format!(
+            "{}: the store is in use by another run",
+            dir.display()
+        )),
+        TryLockError::Error(e) => io(e),
+    })?;
     let path = dir.join("journal");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
@@ -66,7 +86,7 @@ pub fn open(dir: &Path) -> Result<(Store, Vec<String>), Error> {
         .open(&path)
         .map_err(io)?;
     file.set_len(complete as u64).map_err(io)?;
-    store.record_to(Box::new(Journal { file }));
+    store.record_to(Box::new(Journal { file, _lock: lock }));
     Ok((store, warnings))
 }
 
