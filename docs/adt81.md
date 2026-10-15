@@ -205,6 +205,13 @@ The print leaves these open; they were decided on 2026-10-14.
   named so, as a computed attribute's function is. `HOLD x FOR dt` holds
   the running process only, which page 125's `HOLD FOR dt` names
   implicitly.
+- **THIS is a value**, the object it stands for, `PRINT THIS` (decided
+  2026-10-15): the print uses it only before a part, `THIS."temp"`
+  (page 158), and a process's body needs to name its process.
+- **TIME is the simulation's time**, a built-in name, SIMULA's `time`,
+  that a variable of that name hides (decided 2026-10-15): the print gives
+  no way to read the time. *Not the print's.* A call needs an argument
+  (page 27's expression list), so it is a name, not `TIME()`.
 - **A quote written twice inside a string is a quote**, `"say ""hi"""`,
   as in Pascal and Ada (decided 2026-10-15). A string held no quote
   before, so a COND could not name an attribute: page 158's

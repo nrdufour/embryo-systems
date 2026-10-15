@@ -1,12 +1,14 @@
 main holds
-fh opens at 0.0
-s1 checks at 0.0
-s1 checks at 3.0
-fh opens at 4.0
-s1 checks at 6.0
-fh opens at 8.0
-s1 checks at 9.0
+fh[fire hydrant] opens at 0.0
+s1[surpressor] checks at 0.0
+s1[surpressor] checks at 3.0
+fh[fire hydrant] opens at 4.0
+s1[surpressor] checks at 6.0
+fh[fire hydrant] opens at 8.0
+s1[surpressor] checks at 9.0
+main at 10.0
 HOLD 12.0 HOLD 12.0
-fh done
-s1 checks at 12.0
+fh[fire hydrant] done
+s1[surpressor] checks at 12.0
+main at 15.0
 TERMINATED 12.0 HOLD 15.0

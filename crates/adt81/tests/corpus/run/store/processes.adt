@@ -8,17 +8,16 @@ PROGRAM HYDRANTS ;
 BEGIN
         CREATE "fire hydrant", "surpressor" ;
         INCLUDE "fire hydrant", "surpressor" INTO "PROCESS" ;
-        CREATE "fire hydrant" . "tag", "surpressor" . "tag" ;
         CREATE "fh" [ "fire hydrant" ], "s1" [ "surpressor" ] ;
-        LET "fh" [ "fire hydrant" ] . "tag" := "fh" ;
-        LET "s1" [ "surpressor" ] . "tag" := "s1" ;
         ACTIVATE "fh" [ "fire hydrant" ] ;
         ACTIVATE "s1" [ "surpressor" ] ;
         PRINT "main holds" ;
         HOLD FOR 10 ;
+        PRINT "main at", TIME ;
         PRINT "fh" [ "fire hydrant" ] . "STATE", "fh" [ "fire hydrant" ] . "CLOCK",
               "s1" [ "surpressor" ] . "STATE", "s1" [ "surpressor" ] . "CLOCK" ;
         HOLD FOR 5 ;
+        PRINT "main at", TIME ;
         PRINT "fh" [ "fire hydrant" ] . "STATE", "fh" [ "fire hydrant" ] . "CLOCK",
               "s1" [ "surpressor" ] . "STATE", "s1" [ "surpressor" ] . "CLOCK"
 END ;
@@ -28,16 +27,16 @@ LOCAL
         i : INTEGER ;
 BEGIN
         LOOP FOR i : 1 TO 3 DO
-                PRINT THIS . "tag", "opens at", THIS . "CLOCK" ;
+                PRINT THIS, "opens at", THIS . "CLOCK" ;
                 HOLD FOR 4
         ENDLOOP ;
-        PRINT THIS . "tag", "done"
+        PRINT THIS, "done"
 END ;
 
 COROUTINE "surpressor" ;
 BEGIN
         LOOP WHILE TRUE DO
-                PRINT THIS . "tag", "checks at", THIS . "CLOCK" ;
+                PRINT THIS, "checks at", THIS . "CLOCK" ;
                 HOLD THIS FOR 3
         ENDLOOP
 END ;

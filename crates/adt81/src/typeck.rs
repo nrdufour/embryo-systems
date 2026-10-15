@@ -83,6 +83,7 @@ impl<'c> Checker<'c> {
         match self.scope.get(&n.key) {
             Some(s) if s.kind == SymbolKind::Result => returns_of_module(self.module),
             Some(s) => s.ty.as_ref().map_or(Typed::UNKNOWN, Typed::of),
+            None if n.key == "TIME" => Typed::plain(Ty::Float),
             None => Typed::UNKNOWN,
         }
     }
@@ -703,6 +704,7 @@ impl<'c> Checker<'c> {
             ExprKind::String(s) if s.chars().count() == 1 => Typed::plain(Ty::Character),
             ExprKind::String(_) => Typed::plain(Ty::String),
             ExprKind::Boolean(_) => Typed::plain(Ty::Boolean),
+            ExprKind::This => Typed::plain(Ty::Adt(AdtType::Object)),
             ExprKind::Variable(v) => self.variable(v),
             ExprKind::Call(c) => {
                 self.args(c);

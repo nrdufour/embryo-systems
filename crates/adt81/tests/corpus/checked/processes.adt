@@ -17,6 +17,7 @@ END ;
 
 COROUTINE "pump" ;
 BEGIN
+        PRINT THIS, TIME ;
         HOLD THIS FOR 2 ;
         HOLD FOR 2 ;
         PASSIVATE ;

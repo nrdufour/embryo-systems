@@ -366,6 +366,12 @@ comparator: "=" | "/=" | "<" | "<=" | ">" | ">="
     | functor_expression
     | object_attribute_value
     | multiple
+    | this
+
+// decision: THIS is a value, the object it stands for (page 158 uses it
+// only before a part, THIS."temp"), so that a process's body can print or
+// hand on its process.
+this: "THIS"i
 
 // listing: pages 152 to 154 attach to a number an approximation (+-), a
 // probability (%) and an opinion (@), in that order.

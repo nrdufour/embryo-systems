@@ -452,6 +452,7 @@ impl Printer {
             }
             ExprKind::String(s) => self.push(&quoted(s)),
             ExprKind::Boolean(b) => self.push(boolean(*b)),
+            ExprKind::This => self.push("THIS"),
             ExprKind::Variable(v) => {
                 let text = self.variable(v);
                 self.push(&text);

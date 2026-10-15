@@ -49,6 +49,7 @@ rules! {
     Functor = "functor",
     ComputedAttribute = "computed_attribute",
     ProcessClass = "process_class",
+    This = "this",
     Hold = "hold",
     ModuleName = "module_name",
     FormalParameters = "formal_parameters",
@@ -1652,6 +1653,7 @@ impl<'a> Parser<'a> {
             Kind::Ident if self.is_sym(1, "(") => self.function_call(),
             Kind::Ident => self.variable(),
             Kind::String => Ok(self.take()),
+            Kind::Keyword => Ok(node(R::This, vec![self.take()])),
             Kind::Symbol => {
                 let c = vec![self.take(), self.expression()?, self.sym(")")?];
                 Ok(node(R::Operand, c))
