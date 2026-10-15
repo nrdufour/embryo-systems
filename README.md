@@ -8,12 +8,18 @@ The scans live in `embryo-systems-archive` (private); the site is
 
 The language of HBDS. `adt81/grammar.lark` is its grammar, derived from the
 polycopié's BNF and code; [docs/adt81.md](docs/adt81.md) tells how, and every
-decision taken on it. `src/adt81` is the Rust implementation, a lexer, a
-parser and a typed tree so far: `embryo-systems parse FILE` prints a
-program's syntax tree, `embryo-systems fmt FILE` the program in canonical
-form, `embryo-systems check FILE` its undeclared and misused names and
-its type errors, and `embryo-systems run FILE` runs it, but for the a.d.t.
-statements, which wait for the HBDS store.
+decision taken on it. `src/adt81` is the Rust implementation: a lexer, a
+parser, a typed tree, a checker and an interpreter.
+
+```sh
+cargo run -q -- run tests/adt81/run/hello.adt    # Hello, world!
+```
+
+`embryo-systems run FILE` checks a program and runs it, but for the a.d.t.
+statements, which wait for the HBDS store; `check FILE` only checks it,
+`fmt FILE` prints it in canonical form, `parse FILE` prints its syntax
+tree. `tests/adt81/run/` holds more programs to run, with their expected
+output.
 
 ## Develop
 

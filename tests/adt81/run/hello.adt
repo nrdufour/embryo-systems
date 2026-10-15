@@ -1,0 +1,6 @@
+-- The first program to run. --
+
+PROGRAM HELLO ;
+BEGIN
+        PRINT "Hello, world!"
+END ;
