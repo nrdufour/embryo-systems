@@ -1,0 +1,37 @@
+-- Two coroutines interleaved by RESUME and PAUSE, each going on where it --
+-- paused: written for the interpreter's tests. --
+
+PROGRAM PINGPONG ;
+LOCAL
+        i : INTEGER ;
+BEGIN
+        LOOP FOR i : 1 TO 3 DO
+                PRINT "main", i ;
+                RESUME PING ;
+                RESUME PONG
+        ENDLOOP ;
+        RESUME PING
+END ;
+
+COROUTINE PING ;
+LOCAL
+        k : INTEGER ;
+BEGIN
+        LOOP FOR k : 1 TO 3 DO
+                PRINT "ping", k ;
+                PAUSE
+        ENDLOOP ;
+        PRINT "ping ends"
+END ;
+
+COROUTINE PONG ;
+LOCAL
+        k : INTEGER ;
+BEGIN
+        k := 0 ;
+        LOOP WHILE TRUE DO
+                k := k + 10 ;
+                PRINT "pong", k ;
+                PAUSE
+        ENDLOOP
+END ;

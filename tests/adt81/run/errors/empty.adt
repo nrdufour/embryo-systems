@@ -1,0 +1,9 @@
+-- Runtime error: an element of an empty list. --
+
+PROGRAM E ;
+LOCAL
+        L : LIST OF INTEGER ;
+        n : INTEGER ;
+BEGIN
+        n := L ' FIRST
+END ;

@@ -1,0 +1,7 @@
+-- Runtime error: READ past the end of the input. --
+
+PROGRAM E ;
+LOCAL n : INTEGER ;
+BEGIN
+        READ n
+END ;

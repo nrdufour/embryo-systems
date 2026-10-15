@@ -1,0 +1,12 @@
+-- Runtime error: resuming a coroutine that has ended. --
+
+PROGRAM E ;
+BEGIN
+        RESUME K ;
+        RESUME K
+END ;
+
+COROUTINE K ;
+BEGIN
+        PRINT "once"
+END ;

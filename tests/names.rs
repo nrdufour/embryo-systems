@@ -138,13 +138,13 @@ fn functors() {
 #[test]
 fn calls() {
     assert_check(
-        "PROGRAM P ; LOCAL x : INTEGER ;\nBEGIN\n    CALL F ;\n    RESUME S ;\n    CHAIN Q ;\n    CALL NOWHERE ;\n    x := SQRT(x) + x(1) ;\n    CHAIN P\nEND ;\nFUNCTION F RETURNS FLOAT ; BEGIN END ;\nSUBROUTINE S ; BEGIN END ;",
+        "PROGRAM P ; LOCAL x : INTEGER ;\nBEGIN\n    CALL F ;\n    RESUME S ;\n    CHAIN Q ;\n    CALL NOWHERE ;\n    x := HYPO(x) + x(1) ;\n    CHAIN P\nEND ;\nFUNCTION F RETURNS FLOAT ; BEGIN END ;\nSUBROUTINE S ; BEGIN END ;",
         &[
             "3:10: error: `F` is a function, not a subroutine",
             "4:12: error: `S` is a subroutine, not a coroutine",
             "5:11: error: unknown program `Q`",
             "6:10: error: unknown subroutine `NOWHERE`",
-            "7:10: warning: unknown function `SQRT`",
+            "7:10: warning: unknown function `HYPO`",
             "7:20: error: `x` is a variable, not a function",
         ],
     );
@@ -175,10 +175,8 @@ fn clean_programs() {
         assert_eq!(check(&source), Vec::<String>::new(), "{}", path.display());
     }
     let statistics = fs::read_to_string(root.join("programs/statistics.adt")).unwrap();
-    assert_eq!(
-        check(&statistics),
-        ["20:15: warning: unknown function `SQRT`"]
-    );
+    // SQRT is one of our math functions (docs/adt81.md, "Running").
+    assert_eq!(check(&statistics), Vec::<String>::new());
 }
 
 #[test]

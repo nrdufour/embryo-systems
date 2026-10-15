@@ -111,6 +111,16 @@ pub const FUNCTORS: &[Functor] = &[
 /// Properties of an a.d.t., set with LET: pages 156 to 158.
 pub const PROPERTIES: &[(&str, u16)] = &[("COND", 156), ("ACTION", 157)];
 
+/// Functions of a real number: ours, not the print's, which lists none
+/// (docs/adt81.md, "Running"). FLOOR, CEIL and ROUND give integers.
+pub const FUNCTIONS: &[&str] = &[
+    "SQRT", "ABS", "EXP", "LN", "SIN", "COS", "TAN", "ATAN", "FLOOR", "CEIL", "ROUND",
+];
+
+pub fn is_function(key: &str) -> bool {
+    FUNCTIONS.contains(&key)
+}
+
 pub fn functor(key: &str) -> Option<&'static Functor> {
     FUNCTORS.iter().find(|f| f.name == key)
 }

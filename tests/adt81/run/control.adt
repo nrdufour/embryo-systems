@@ -1,0 +1,49 @@
+-- Every loop form, EXIT, NEXT and RELOOP with their counts, CASE, PAR, --
+-- VECT and STOP: written for the interpreter's tests. --
+
+PROGRAM CONTROL ;
+LOCAL
+        i, j, k, t : INTEGER ;
+BEGIN
+        t := 0 ;
+        LOOP FOR i : 1 TO 10 STEP 3 DO t := t * 10 + i ENDLOOP ;
+        PRINT t ;
+        LOOP FOR i : 5 TO 1 STEP -2 DO PRINT i ENDLOOP ;
+        i := 0 ;
+        LOOP WHILE i < 3 DO i := i + 1 ENDLOOP ;
+        PRINT i ;
+        LOOP DO i := i + 1 UNTIL i >= 7 ENDLOOP ;
+        PRINT i ;
+        t := 0 ;
+        LOOP FOR i : 1 TO 3 DO
+                LOOP FOR j : 1 TO 3 DO
+                        IF j = 2 THEN NEXT 2 ENDIF ;
+                        t := t + 1
+                ENDLOOP
+        ENDLOOP ;
+        PRINT t ;
+        t := 0 ;
+        LOOP FOR i : 1 TO 3 DO
+                LOOP FOR j : 1 TO 3 DO
+                        IF i = 2 THEN EXIT 2 ENDIF ;
+                        t := t + 10
+                ENDLOOP
+        ENDLOOP ;
+        PRINT t ;
+        t := 0 ; k := 0 ;
+        LOOP FOR i : 1 TO 3 DO
+                t := t + i ;
+                IF i = 3 AND k = 0 THEN k := 1 ; RELOOP ENDIF
+        ENDLOOP ;
+        PRINT t ;
+        CASE t WHEN 1, 12 DO PRINT "twelve" WHEN 6 DO PRINT "six" OTHERS PRINT "other" ENDCASE ;
+        CASE t WHEN 5 DO PRINT "five" OTHERS PRINT "other" ENDCASE ;
+        t := 0 ;
+        PARBEGIN t := t + 1 PAR t := t * 10 PAR t := t + 2 ENDPAR ;
+        PRINT t ;
+        VECT FOR i : 1 TO 3 DO t := t + i ENDVECT ;
+        PRINT t ;
+        IF t > 100 THEN PRINT "big" ELSE PRINT "small" ENDIF ;
+        STOP ;
+        PRINT "never"
+END ;

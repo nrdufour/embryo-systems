@@ -260,6 +260,59 @@ The rules:
   takes, that a.d.t. or a list of them (pages 76 to 80), and gives what
   it gives; a functor's prefix is declared an a.d.t. or a list.
 
+## Running
+
+`embryo-systems run FILE` checks a program, refuses it if the checker
+finds errors, then runs its first PROGRAM: READ reads standard input, a
+line per variable (a literal, fuzzy ones included, or text as it is),
+PRINT writes its values on one line. A runtime error stops it, with its
+position. The interpreter covers the language's core; the a.d.t. half
+(CREATE, ASSOC, LET, the functors on classes and objects, attributes,
+links, processes) needs the HBDS store, not built yet, and says so.
+
+Decided on 2026-10-15:
+
+- **An approximation propagates worst-case, to first order**: the absolute
+  contributions of the operands add up, `d(XY) = |Y| dX + |X| dY`; a
+  function's, `|f'(x)| dx`. Page 152 only says the result's approximation
+  is computed "likewise".
+- **A computed probability is the product of the operands'**, as for
+  independent events, an operand without one being certain. Page 152 has
+  the law given by rules, which come with the expert system; this is the
+  default until then.
+- **Coroutines** run each on a thread of its own, handing control over by
+  channel, so that only one ever runs: RESUME continues a coroutine where
+  it paused, its "Local Sequence Counter" (page 112), PAUSE gives control
+  back to its resumer. Arguments go with the first RESUME; resuming an
+  ended or running coroutine is an error.
+- **Math functions of our own**, the print listing none: SQRT, ABS, EXP,
+  LN, SIN, COS, TAN, ATAN, and FLOOR, CEIL, ROUND which give integers.
+  *Not the print's.*
+
+From the print: multiple values combine each with each (page 152's 4 by 3
+giving 12); opinions concatenate (page 152), joined here by `"; "`.
+
+Defaults taken, the print being silent:
+
+- PARBEGIN's branches and VECT's iterations run in order.
+- `EXIT n` leaves n loops, `NEXT n` goes on with the n-th loop's next
+  iteration, `RELOOP n` restarts the n-th loop; EACH and VECT are loops.
+- PAUSE outside a coroutine waits for a line of input, as FORTRAN's did;
+  STOP ends the program, RESTART runs it again, `CHAIN Q` ends it and runs
+  the program Q. REPROC is an error: what it does is not established.
+- IN parameters are passed by value, OUT and INOUT by reference.
+- Lists are values; each keeps a cursor, which FIRST, LAST, SUCC and PRED
+  move and the *OUT functors follow, on the list a variable holds.
+  CIRCULAR lists wrap around. INSERT and EXTRACT take the elements of the
+  lists they are given; `AFTER k` and `BEFORE k` count from 1.
+- A variable has no value until assigned, and reading it is an error; an
+  array's cells start at zero, or at INIT. RESET gives back the initial
+  value. A CONSTANTE cannot be assigned.
+- Two integers divide truncating, MOD is the Euclidean remainder, an
+  integer to a negative power is a rational, overflow is an error.
+- The approximation of a complex number, a Gauss integer or a quaternion
+  is not computed yet (page 153 has one per component).
+
 ## What the grammar leaves to the checker
 
 What neither layer checks yet: the parameters of multifunctors, the
@@ -285,6 +338,9 @@ expression written as a string), and fragments.
 | `tests/names.rs` | name resolution, rule by rule |
 | `src/adt81/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |
 | `tests/types.rs` | kinds and types, rule by rule |
+| `src/adt81/value.rs`, `interp.rs` | values and their fuzzy arithmetic, and the interpreter |
+| `tests/adt81/run/` | programs with their input and expected output, runtime errors included |
+| `tests/run.rs` | runs them |
 | `tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |
 
 `just check` runs the gate with the rest: every test program, and 200

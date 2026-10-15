@@ -1,0 +1,31 @@
+-- INSERT, EXTRACT, EMPTY, the list functors and the cursor, EACH, the --
+-- list operators, lists as values: written for the interpreter's tests. --
+
+PROGRAM LISTS ;
+LOCAL
+        L, M, K : LIST OF INTEGER ;
+        e, n : INTEGER ;
+BEGIN
+        INSERT (1), (2), (3) INTO L ;
+        INSERT (9) INTO L AFTER 1 ;
+        INSERT (0) INTO L BEFORE 1 ;
+        PRINT L, L ' CARD ;
+        M := L ;
+        EXTRACT (9) OUTOF L ;
+        PRINT L, M ;
+        PRINT L ' FIRST, L ' SUCC, L ' SUCC, L ' CURRENT, L ' PRED, L ' LAST ;
+        e := L ' FIRSTOUT ;
+        PRINT e, L ;
+        PRINT L ' ELMT(2), L ' SUBLIST(2, 5), L ' OCCUR(2, 1), L ' POSLP(3, 1), L ' SIGMA ;
+        K := L UNION M ;
+        PRINT K ;
+        PRINT L INTER M, M COMPL L ;
+        PRINT 2 IN L, 7 NOTIN L ;
+        n := 0 ;
+        EACH e OF M / e > 1 DO n := n + e ENDEACH ;
+        PRINT n ;
+        CIRCULAR L ;
+        PRINT L ' LAST, L ' SUCC ;
+        EMPTY L ;
+        PRINT L, L ' CARD
+END ;

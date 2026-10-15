@@ -199,7 +199,7 @@ fn mode(m: Mode) -> &'static str {
     }
 }
 
-fn float(x: f64) -> String {
+pub(super) fn float(x: f64) -> String {
     let text = x.abs().to_string();
     let text = if text.contains('.') {
         text

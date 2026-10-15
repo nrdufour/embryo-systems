@@ -323,6 +323,15 @@ fn functors() {
         "L := n ' OBJ",
         &["1:6: error: `n` is an integer, not an a.d.t. or its name"],
     );
+    // List functors take lists of anything (page 80); a.d.t. statements do
+    // not.
+    assert_eq!(
+        body(
+            "K : LIST OF INTEGER ; i : INTEGER ;",
+            "i := K ' CARD ; i := K ' FIRST ; ACTIVATE K"
+        ),
+        ["1:43: error: a list of integer is used where an object is expected"]
+    );
     assert_eq!(
         check("FUNCTOR C ' F RETURNS LIST ;\nLOCAL C : INTEGER ;\nBEGIN END ;"),
         ["1:9: error: the functor's prefix `C` is an integer, not an a.d.t. or a list"]
@@ -347,10 +356,8 @@ fn clean_programs() {
         assert_eq!(check(&source), Vec::<String>::new(), "{}", path.display());
     }
     let statistics = fs::read_to_string(root.join("programs/statistics.adt")).unwrap();
-    assert_eq!(
-        check(&statistics),
-        ["20:15: warning: unknown function `SQRT`"]
-    );
+    // SQRT is one of our math functions (docs/adt81.md, "Running").
+    assert_eq!(check(&statistics), Vec::<String>::new());
 }
 
 #[test]

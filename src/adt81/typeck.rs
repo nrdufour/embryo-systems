@@ -531,7 +531,8 @@ impl<'c> Checker<'c> {
         match t {
             Ty::Unknown => Ty::Unknown,
             Ty::Character | Ty::String => Ty::Adt(AdtType::Class),
-            t if t.adt_kind().is_some() => t,
+            // A list of anything is a list functor's prefix (page 80).
+            t if t.adt_kind().is_some() || matches!(t, Ty::List(_)) => t,
             t => {
                 let message = format!("{what} is {}, not an a.d.t. or its name", t.a());
                 self.error(span, message);
@@ -541,9 +542,11 @@ impl<'c> Checker<'c> {
     }
 
     fn kind_is(&mut self, t: &Ty, want: AdtKind, span: Span) {
-        if let Some(k) = t.adt_kind()
-            && (k != want || matches!(t, Ty::List(_)))
-        {
+        let wrong = match t.adt_kind() {
+            Some(k) => k != want || matches!(t, Ty::List(_)),
+            None => matches!(t, Ty::List(e) if **e != Ty::Unknown),
+        };
+        if wrong {
             let message = format!("{} is used where {} is expected", t.a(), want.a());
             self.error(span, message);
         }
@@ -941,8 +944,10 @@ impl<'c> Checker<'c> {
                         r.ty.a()
                     );
                     self.error(right.span, message);
+                    return typed(Ty::Unknown);
                 }
-                typed(l.ty.clone())
+                // A real exponent makes a float of an integer: 2 ^ 0.5.
+                typed(l.ty.join(&r.ty).unwrap_or(Ty::Unknown))
             }
             ArrayAdd | ArrayMul | ArrayDot | ArrayPow => self.array_op(op, (&l, left), &r, fuzz),
         }

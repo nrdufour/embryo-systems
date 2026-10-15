@@ -1,0 +1,31 @@
+-- Every number type and its operators: written for the interpreter's tests. --
+
+PROGRAM ARITH ;
+LOCAL
+        n, m : INTEGER ;
+        r : RATIONAL ;
+        x : FLOAT ;
+        g : GAUSS ;
+        z : COMPLEX ;
+        q : QUATERNION ;
+        b : BOOLEAN ;
+        s : STRING ;
+        c : CHARACTER ;
+BEGIN
+        n := 7 ; m := -2 ;
+        PRINT n + m, n - m, n * m, n / m, n MOD m, -7 MOD 2, (-7) MOD 2 ;
+        r := 1 // 3 + 1 // 6 ;
+        PRINT r, r * 4, 2 ^ (-2), (2 // 3) ^ 2 ;
+        x := n ;
+        PRINT x, x / 2, n / 2, 2 ^ 0.5 ;
+        g := 3 + 4i ;
+        PRINT g, g * (1 - 2i), g * g, (5 + 5i) / (1 + 2i) ;
+        z := 1.0 + 2.0i ;
+        PRINT z * z, z + g, z / 2 ;
+        q := 1.0j ;
+        PRINT q * 1.0k, 1.0k * q, q * q ;
+        b := n > m AND NOT (x = 7) OR 1 // 2 < 0.6 ;
+        PRINT b, 3 = 3.0, "abc" < "abd", g = 3 + 4i ;
+        s := "ab" & "c" ; c := "d" ;
+        PRINT s & c, c
+END ;
