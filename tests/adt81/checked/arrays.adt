@@ -1,0 +1,23 @@
+-- Page 153's array operators: written to check clean. --
+
+SUBROUTINE ALGEBRA (U, V, A, B, K, M) ;
+        U, V : VECTOR OF FLOAT APPR IN ;
+        A, B : MATRIX OF FLOAT APPR PROB IN ;
+        K : FLOAT APPR IN ;
+        M : MATRIX OF FLOAT IN ;
+LOCAL
+        S : FLOAT APPR ;
+        W : VECTOR OF FLOAT APPR ;
+        C, D : MATRIX OF FLOAT APPR PROB ;
+        N : MATRIX OF FLOAT APPR ;
+        T : TENSOR [1:2, 1:2, 1:2] OF INTEGER ;
+        i : INTEGER ;
+BEGIN
+        S := U [.] V ;
+        W := U [^] V ;
+        C := A [*] B ; D := A [+] B ;
+        N := K [*] M ;
+        S := U[1] + V[2] ;
+        i := T[1, 2, 2] ;
+        W[i] := S
+END ;

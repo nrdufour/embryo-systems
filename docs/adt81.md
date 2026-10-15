@@ -211,14 +211,60 @@ fragments are excerpts, with no module to declare their names.
 - Not checked: unit names (`UNIT (m3s)`), which the print does not list,
   and `THIS`.
 
+## Kinds and types
+
+The checker's second layer, run by `embryo-systems check` after name
+resolution. Two decisions shape it (2026-10-15):
+
+- **Numbers widen freely**: integer to rational, float, complex and
+  quaternion, integer to Gauss and Gauss to complex, in any operation or
+  assignment. The print's float rules (page 26) let an integer multiply a
+  float but not be added to one; that reads as a shortcut of the BNF, not
+  a rule. Narrowing, a float into an integer, is an error.
+- **What the program cannot type is accepted silently**: an object's
+  attribute (`o . "X"`, whose class is known at run time only), the
+  element of a list declared without its element type, the result of an
+  unknown functor or function. The checker reports only what it can
+  prove.
+
+The rules:
+
+- Operators take what pages 26 to 28 and 153 give them: booleans for
+  `OR`... `NOT`; numbers for `+ - * /`, an integer division when both
+  are integers (`%` being a probability); integers for `MOD` and `//`,
+  which gives a rational; a real exponent for `^`; lists for `UNION`,
+  `INTER`, `COMPL` and the right of `IN`; characters and strings for `&`.
+  `= /=` compare any two values of one sort; `< <= > >=` do not order
+  complex numbers, Gauss integers or quaternions (page 27). `[+]` adds
+  arrays of one rank, `[*]` multiplies matrices or an array by a number,
+  `[.]` and `[^]` are the scalar and vectorial products of vectors.
+- A value goes where its type widens to the target's: assignments, READ,
+  RESULT (in a function only), loop bounds, the elements EACH goes over,
+  arguments of the file's modules (their number too). An OUT or INOUT
+  argument is a variable; an IN parameter is never assigned. A one
+  character string is also a character.
+- Fuzziness flows with values, through operators, and a variable
+  receives only the aspects it is declared with: a variable "must have
+  been previously specified or declared as concerned" (page 152). `FUZZY`
+  is all four.
+- Conditions are booleans; indices are integers, as many as the array's
+  rank; EXIT counts, durations and times are numbers; INSERT, EXTRACT,
+  EMPTY, LINEAR... name lists.
+- Kinds: a string names a class (page 23), `"P" [ "C" ]` and `THIS` an
+  object; `.` gives an attribute and a string a link, of a class or of an
+  object. A `CREATE` list is all classes or all objects; `ASSOC` and
+  `DISSOC` pair a class's attribute or link with a class, an object's with
+  an object, an object with a class (page 24); an object's attribute, an
+  object link, `ACTIVATE` and its kin take objects; `INCLUDE`, `COMPOSE`,
+  `SPECIFY` take classes. A functor applies to what its catalogue entry
+  takes, that a.d.t. or a list of them (pages 76 to 80), and gives what
+  it gives; a functor's prefix is declared an a.d.t. or a list.
+
 ## What the grammar leaves to the checker
 
-Types: which operators apply to which operands, complex numbers compared with
-`=` and `/=` only (page 27), a character constant being one character long.
-Kinds: whether a variable holds a class, an object, an attribute or a
-link (that a name is a variable at all, name resolution checks, above);
-homogeneous `CREATE` lists; which `ASSOC` pairs are
-legal; a functor's prefix being an a.d.t.
+What neither layer checks yet: the parameters of multifunctors, the
+elements INSERT adds, the value of a property (`COND` is a boolean
+expression written as a string), and fragments.
 
 ## Files
 
@@ -237,6 +283,8 @@ legal; a functor's prefix being an a.d.t.
 | `src/adt81/names.rs`, `builtins.rs`, `diagnostic.rs` | name resolution, the built-in catalogue, what the checker reports |
 | `tests/adt81/checked/*.adt` | programs that must check clean |
 | `tests/names.rs` | name resolution, rule by rule |
+| `src/adt81/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |
+| `tests/types.rs` | kinds and types, rule by rule |
 | `tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |
 
 `just check` runs the gate with the rest: every test program, and 200

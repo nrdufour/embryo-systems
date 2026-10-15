@@ -315,7 +315,7 @@ fn expr_level(e: &Expr) -> u8 {
     }
 }
 
-fn op_text(op: BinaryOp) -> &'static str {
+pub(super) fn op_text(op: BinaryOp) -> &'static str {
     use BinaryOp::*;
     match op {
         Or => "OR",

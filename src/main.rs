@@ -2,7 +2,7 @@ use std::io::Read;
 use std::process::ExitCode;
 
 use embryo_systems::adt81::diagnostic::Severity;
-use embryo_systems::adt81::{lexer, lower, names, parser};
+use embryo_systems::adt81::{lexer, lower, names, parser, typeck};
 
 const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE
@@ -11,7 +11,8 @@ const USAGE: &str = "usage: embryo-systems lex FILE
 
 FILE - reads standard input. parse prints the syntax tree, fmt the source
 in canonical form; both read a program unless told --fragment. check
-reports undeclared and misused names in a program, and fails on errors.";
+reports undeclared and misused names, and type errors, in a program, and
+fails on errors.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,7 +51,10 @@ fn main() -> ExitCode {
         })
     } else if command == "check" {
         lower::parse_program(&source).map(|program| {
-            let diagnostics = names::resolve(&program).diagnostics;
+            let resolution = names::resolve(&program);
+            let mut diagnostics = typeck::check_types(&program, &resolution);
+            diagnostics.extend(resolution.diagnostics);
+            diagnostics.sort_by_key(|d| (d.span.line, d.span.column));
             for d in &diagnostics {
                 println!("{path}:{d}");
             }

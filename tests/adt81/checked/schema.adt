@@ -1,0 +1,33 @@
+-- A.d.t. statements, with every pair page 24 allows: written to check clean. --
+
+PROGRAM SCHEMA ;
+LOCAL
+        c, d : CLASS ;
+        o, p : OBJECT ;
+        towns : LIST OF OBJECT ;
+        n : INTEGER ;
+        name : STRING ;
+BEGIN
+        CREATE "TOWN", "RIVER", c ;
+        CREATE "Paris" [ "TOWN" ], o ;
+        CREATE "TOWN" . "AREA" ;
+        CREATE "RIVER" "crosses" "TOWN" REVERSE "crossed by" ;
+        ASSOC "TOWN" . "AREA" WITH c,
+              "RIVER" "crosses" "TOWN" WITH d,
+              o . "AREA" WITH p,
+              o "near" p WITH p,
+              o WITH c ;
+        DISSOC o FROM c ;
+        name := "TOWN" ;
+        CREATE name ;
+        towns := name ' OBJ ;
+        n := towns ' CARD ;
+        LET o . "AREA" := 105.4 ;
+        LET "TOWN" . "AREA" ' COND := "THIS . AREA > 0." ;
+        ASSERT o "near" p ;
+        IF o "near" p THEN PRINT n ENDIF ;
+        EACH p OF towns DO PRINT p . "AREA" ENDEACH ;
+        ACTIVATE o ; DELAY o FOR 2.5 ;
+        INCLUDE c INTO d ;
+        COMPOSE "GEO" WITH "TOWN", "RIVER"
+END ;
