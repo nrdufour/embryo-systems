@@ -1,0 +1,17 @@
+-- A fact that is not MODIFIABLE changes under a rule's control only --
+-- (page 106). Written for the expert-system tests. --
+
+PROGRAM MODIFIABLE ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "valve" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        LET "PLANT" . "valve" ' MODIFIABLE := "FALSE" ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "open" [ "STEPS" ] ;
+        LET "open" [ "STEPS" ] ' YES := "LET ""boiler"" [ ""PLANT"" ] . ""valve"" := 1" ;
+        CALL CHAV ;
+        PRINT "boiler" [ "PLANT" ] . "valve" ;
+        LET "boiler" [ "PLANT" ] . "valve" := 2
+END ;

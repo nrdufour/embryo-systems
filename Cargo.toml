@@ -5,6 +5,7 @@ members = [
     "crates/hbds-gtad",
     "crates/hbds-functors",
     "crates/hbds-journal",
+    "crates/hbds-rules",
     "crates/adt81",
 ]
 resolver = "3"

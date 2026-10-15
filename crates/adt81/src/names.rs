@@ -309,6 +309,7 @@ impl Resolver<'_> {
             }
             None if want == Kind::Functor && builtins::is_functor(&n.key) => {}
             None if want == Kind::Function && builtins::is_function(&n.key) => {}
+            None if want == Kind::Subroutine && builtins::is_subroutine(&n.key) => {}
             None if matches!(want, Kind::Functor | Kind::Function) => {
                 let message = format!("unknown {want} `{}`", n.spelling);
                 self.warning(n.span, message);

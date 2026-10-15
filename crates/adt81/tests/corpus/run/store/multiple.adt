@@ -1,0 +1,26 @@
+-- Multiple triggering (page 106): a rule tried again only once every --
+-- fact it consumes has changed; its PROLOGUE tells each try. Written for --
+-- the expert-system tests. --
+
+PROGRAM MULTIPLE ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "temperature", "PLANT" . "pressure" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "watch" [ "STEPS" ], "heat" [ "STEPS" ], "press" [ "STEPS" ] ;
+        LET "watch" [ "STEPS" ] . "PRIORITY" := 5 ;
+        LET "watch" [ "STEPS" ] . "TRIGGERING" := "MULTIPLE" ;
+        LET "watch" [ "STEPS" ] ' PROLOGUE := "PRINT ""watch?""" ;
+        LET "watch" [ "STEPS" ] ' PREMISES :=
+            """boiler"" [ ""PLANT"" ] . ""temperature"" > 100 AND ""boiler"" [ ""PLANT"" ] . ""pressure"" > 2" ;
+        LET "watch" [ "STEPS" ] ' YES := "PRINT ""both high""" ;
+        LET "heat" [ "STEPS" ] . "PRIORITY" := 2 ;
+        LET "heat" [ "STEPS" ] ' YES :=
+            "LET ""boiler"" [ ""PLANT"" ] . ""temperature"" := 120 ; PRINT ""heat""" ;
+        LET "press" [ "STEPS" ] . "PRIORITY" := 1 ;
+        LET "press" [ "STEPS" ] ' YES :=
+            "LET ""boiler"" [ ""PLANT"" ] . ""pressure"" := 3 ; PRINT ""press""" ;
+        CALL CHAV("STEPS")
+END ;

@@ -1,0 +1,17 @@
+-- A rule that always changes what its PREMISES read tries itself again --
+-- and again: past 10 000 tries, CHAV stops, refused whole. Written for --
+-- the expert-system tests. --
+
+PROGRAM CONVERGE ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "count" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        LET "boiler" [ "PLANT" ] . "count" := 0 ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "again" [ "STEPS" ] ;
+        LET "again" [ "STEPS" ] ' PREMISES := """boiler"" [ ""PLANT"" ] . ""count"" >= 0" ;
+        LET "again" [ "STEPS" ] ' YES := "LET ""boiler"" [ ""PLANT"" ] . ""count"" := ""boiler"" [ ""PLANT"" ] . ""count"" + 1" ;
+        CALL CHAV
+END ;

@@ -1,0 +1,10 @@
+-- A rule's PREMISES are compiled when written: if they do not parse, --
+-- the LET is refused. Written for the expert-system tests. --
+
+PROGRAM PREMISES ;
+BEGIN
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "r" [ "STEPS" ] ;
+        LET "r" [ "STEPS" ] ' PREMISES := "THIS . ""x"" >"
+END ;

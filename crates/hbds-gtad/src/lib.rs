@@ -238,6 +238,13 @@ struct Snapshot {
     associations: Vec<(AdtRef, AdtRef)>,
 }
 
+/// A point inside a transaction to come back to: the model then, and how
+/// many changes the transaction held.
+pub struct Savepoint {
+    snapshot: Snapshot,
+    changes: usize,
+}
+
 /// Changes applied but not yet recorded: kept or refused together.
 struct Transaction {
     depth: usize,
@@ -347,6 +354,29 @@ impl Store {
             return Err(Error(e));
         }
         Ok(())
+    }
+
+    /// The open transaction's changes so far, in order; none outside one.
+    pub fn pending(&self) -> &[Change] {
+        self.transaction.as_ref().map_or(&[], |t| &t.changes)
+    }
+
+    /// A point of the open transaction to [`rollback`](Store::rollback)
+    /// to; `None` outside one.
+    pub fn savepoint(&self) -> Option<Savepoint> {
+        let t = self.transaction.as_ref()?;
+        Some(Savepoint {
+            snapshot: self.snapshot(),
+            changes: t.changes.len(),
+        })
+    }
+
+    /// Undoes what the open transaction did since `point`.
+    pub fn rollback(&mut self, point: Savepoint) {
+        self.restore(point.snapshot);
+        if let Some(t) = &mut self.transaction {
+            t.changes.truncate(point.changes);
+        }
     }
 
     /// Applies a change already checked: the one path for every mutation,
@@ -682,7 +712,31 @@ impl Store {
         }
     }
 
+    /// A class, then the hyperclasses that include it, and theirs, each
+    /// once: what it inherits from (docs/hbds.md, "Inheritance").
+    pub fn lineage(&self, class: Id) -> Vec<Id> {
+        let mut out = vec![class];
+        let mut i = 0;
+        while i < out.len() {
+            if let Some(c) = self.classes.get(&out[i]) {
+                for h in &c.hyper {
+                    if !out.contains(h) {
+                        out.push(*h);
+                    }
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// A class's attribute, its own or inherited from its hyperclasses.
     pub fn find_attribute(&self, class: Id, name: &str) -> Option<Id> {
+        let lineage = self.lineage(class);
+        lineage.iter().find_map(|c| self.own_attribute(*c, name))
+    }
+
+    fn own_attribute(&self, class: Id, name: &str) -> Option<Id> {
         (self.attributes.iter())
             .find(|(_, a)| a.class == class && same(&a.name, name))
             .map(|(i, _)| *i)
@@ -698,7 +752,16 @@ impl Store {
         }
     }
 
+    /// A link between two classes, their own or inherited from their
+    /// hyperclasses.
     pub fn find_class_link(&self, from: Id, relation: &str, to: Id) -> Option<Id> {
+        let (froms, tos) = (self.lineage(from), self.lineage(to));
+        (froms.iter())
+            .flat_map(|a| tos.iter().map(move |b| (*a, *b)))
+            .find_map(|(a, b)| self.own_class_link(a, relation, b))
+    }
+
+    fn own_class_link(&self, from: Id, relation: &str, to: Id) -> Option<Id> {
         (self.class_links.iter())
             .find(|(_, l)| {
                 l.from == from
@@ -760,7 +823,7 @@ impl Store {
     }
 
     pub fn create_attribute(&mut self, class: Id, name: &str) -> Stored<Id> {
-        if self.find_attribute(class, name).is_some() {
+        if self.own_attribute(class, name).is_some() {
             return error(format!(
                 "the attribute \"{}\" . \"{name}\" exists",
                 self.classes[&class].name
@@ -782,7 +845,7 @@ impl Store {
         reverse: Option<&str>,
         reflexive: bool,
     ) -> Stored<Id> {
-        if self.find_class_link(from, relation, to).is_some() {
+        if self.own_class_link(from, relation, to).is_some() {
             return error(format!("the link \"{relation}\" exists"));
         }
         if reflexive && from != to {
@@ -834,7 +897,11 @@ impl Store {
         }
     }
 
+    /// Sets a value; setting the one it has changes nothing.
     pub fn set(&mut self, object: Id, attribute: Id, value: Value) -> Stored<()> {
+        if self.get(object, attribute) == Some(&value) {
+            return Ok(());
+        }
         self.commit(Change::Set {
             object,
             attribute,
@@ -1270,5 +1337,78 @@ mod tests {
             Err(Error("the disk is full".into()))
         );
         assert!(s.find_class("RIVER").is_none());
+    }
+
+    #[test]
+    fn classes_inherit_from_their_hyperclasses() {
+        let (mut s, ids) = world();
+        // HYDRO includes DAM; NATURE includes HYDRO: two levels up.
+        let nature = s.create_class("NATURE", ClassKind::Class).unwrap();
+        s.include(ids["DAM"], ids["HYDRO"]).unwrap();
+        s.include(ids["HYDRO"], nature).unwrap();
+        let age = s.create_attribute(nature, "AGE").unwrap();
+        let flows = s
+            .create_class_link(nature, "flows", nature, None, false)
+            .unwrap();
+        assert_eq!(s.lineage(ids["DAM"]), [ids["DAM"], ids["HYDRO"], nature]);
+        assert_eq!(s.find_attribute(ids["DAM"], "age"), Some(age));
+        assert_eq!(s.attribute(ids["DAM"], "AGE"), Ok(age));
+        assert_eq!(
+            s.find_class_link(ids["DAM"], "flows", ids["DAM"]),
+            Some(flows)
+        );
+        let lake = s.create_class("LAKE", ClassKind::Class).unwrap();
+        assert_eq!(s.find_attribute(lake, "AGE"), None);
+        // An object carries an inherited attribute's value, and realizes
+        // an inherited link.
+        let v = s.find_object(ids["DAM"], "Vouglans").unwrap();
+        s.set(v, age, Value::integer(50)).unwrap();
+        assert_eq!(s.get(v, age), Some(&Value::integer(50)));
+        let w = s.create_object(ids["DAM"], "Tignes").unwrap();
+        let l = s.assert_link(v, "flows", w, None).unwrap();
+        assert_eq!(s.object_links[&l].class_link, flows);
+        // A class's own attribute of the same name is created, and found
+        // first.
+        let own = s.create_attribute(ids["DAM"], "AGE").unwrap();
+        assert_eq!(s.find_attribute(ids["DAM"], "AGE"), Some(own));
+        // A cycle of inclusions ends.
+        s.include(nature, ids["DAM"]).unwrap();
+        assert_eq!(s.lineage(nature), [nature, ids["DAM"], ids["HYDRO"]]);
+        assert_eq!(s.find_attribute(nature, "VOL"), Some(ids["VOL"]));
+    }
+
+    #[test]
+    fn setting_the_value_an_attribute_has_changes_nothing() {
+        let (mut s, ids) = world();
+        let lyon = s.find_object(ids["TOWN"], "Lyon").unwrap();
+        s.begin();
+        s.set(lyon, ids["AREA"], Value::integer(48)).unwrap();
+        s.set(lyon, ids["AREA"], Value::integer(48)).unwrap();
+        assert_eq!(s.pending().len(), 1);
+        s.end(true).unwrap();
+    }
+
+    #[test]
+    fn pending_changes_and_savepoints() {
+        let (mut s, ids) = world();
+        assert!(s.pending().is_empty());
+        assert!(s.savepoint().is_none());
+        let lyon = s.find_object(ids["TOWN"], "Lyon").unwrap();
+        s.begin();
+        s.set(lyon, ids["AREA"], Value::integer(48)).unwrap();
+        s.begin();
+        let point = s.savepoint().unwrap();
+        let dump = s.dump();
+        s.create_class("LAKE", ClassKind::Class).unwrap();
+        s.set(lyon, ids["AREA"], Value::integer(50)).unwrap();
+        assert_eq!(s.pending().len(), 3);
+        s.rollback(point);
+        assert_eq!(s.pending().len(), 1);
+        assert_eq!(s.dump(), dump);
+        s.end(true).unwrap();
+        assert_eq!(s.pending().len(), 1);
+        s.end(true).unwrap();
+        assert!(s.pending().is_empty());
+        assert_eq!(s.get(lyon, ids["AREA"]), Some(&Value::integer(48)));
     }
 }

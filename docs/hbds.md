@@ -31,6 +31,7 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-gtad` | the a.d.t. engine (project 12): the model, its changes, lookups, states; persistence behind its `Recorder` trait | core |
 | `hbds-functors` | the functor engine (project 15): the catalogue on a.d.t. and its implementation on GTAD | core, gtad |
 | `hbds-journal` | GTAD's persistence, a `Recorder`: the journal below; SFSI and ZE would be another | core, gtad |
+| `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (arithmetic and fuzzy propagation, math functions, what an unknown name means); it wires the engines together | the engines |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal |
 
@@ -66,6 +67,20 @@ Taken on 2026-10-15:
   `p . "y"` beside `p . "X"` and declares `LA` beside `la`. It is the
   language's rule for names, carried over to the store.
 - **COND and ACTION run on change**; see below.
+- **Setting a value to the one it has changes nothing**, and records
+  nothing; its COND and ACTION still run.
+
+## Inheritance
+
+A class inherits the attributes and the class links of the hyperclasses
+that include it, and of theirs, at any depth (decided on 2026-10-15):
+figure 46 has every rule class "inheriting the components" of the
+hyperclass RULE, and page 159 every class included in CONSTRAINT inherit
+its FORMULA. An object carries values of its class's inherited attributes
+and realizes its inherited links; lookups try the class first, then its
+hyperclasses, nearest first. ATT stays a class's own attributes (page
+76). A class may have an attribute of the same name as an inherited one,
+and its own is found first.
 
 ## COND and ACTION
 
@@ -121,6 +136,81 @@ sequenceDiagram
 A COND names an attribute with a quote written twice inside its string,
 `"THIS . ""temp"" > 0."`; page 158's own `THIS."temp" > 0. "` is not one
 string ([adt81.md](adt81.md), "Decisions").
+
+## Expert systems
+
+SES, HBDS's structured expert system (project 16, pages 106 to 111, with
+page 80 and figures 39 and 46 to 50), and its two engines: CHAV, forward
+chaining, and HYPOCHAV, which starts from hypotheses. The print gives the
+model; the syntax and the algorithm are ours, decided on 2026-10-15.
+
+```mermaid
+flowchart LR
+    FACT[["FACT"]] -- "includes" --> RULE[["RULE"]]
+    RULE -- "includes" --> RC["a rule class"]
+    RC -- "has" --> R(("a rule"))
+    R -- "PREMISES read<br/>(INRULE)" --> F1["facts consumed:<br/>classes, class attributes, class links"]
+    R -- "YES and NO write<br/>(OUTRULE)" --> F2["facts produced"]
+    R -- "activates, inhibits" --> R2(("another rule"))
+```
+
+- **Rules are objects, as the print says** (figure 46): an object of a
+  class INCLUDEd INTO the system hyperclass RULE, which is included in
+  FACT, so that rules are facts and metarules come free (figure 47).
+  FACT and RULE are created the first time a program names them.
+- **A rule's parts are its code**, set as COND is: `LET r ' PREMISES :=
+  "..."`, with PROLOGUE, PREMISES (a boolean expression), YES and NO (the
+  *conséquents oui* and *non*) and EPILOGUE (statements), THIS being the
+  rule. It inherits from RULE the attributes PRIORITY, RELIABILITY,
+  EXPLANATION and TRIGGERING, and the links "activates" and "inhibits".
+- **Facts are classes, class attributes and class links** (figure 50:
+  "in fact the realizations of these components"): a created object, a
+  set value, an asserted link realize them.
+- **Compiled at capture** (page 80): when a part is written, ADT'81 reads
+  in it the names of what it uses, the PREMISES' reads, the other parts'
+  writes, and refuses a part that does not parse. The names are resolved
+  against the store when needed, so that a rule written before its schema
+  still connects. INRULE gives a rule's consumed facts, OUTRULE those YES
+  and NO produce, INFACT a fact's producing rules, OUTFACT its consuming
+  ones; a value stands for its class attribute, an object for its class.
+  Only names written as strings count.
+
+`CALL CHAV("RULES", ...)` runs the rules of those classes or
+hyperclasses, every rule in RULE without one:
+
+```mermaid
+flowchart TD
+    A["every rule on the agenda"] --> P{"a rule on it?"}
+    P -- no --> E["done"]
+    P -- "yes: the highest PRIORITY,<br/>the oldest among equals" --> T["PROLOGUE; PREMISES;<br/>YES if they hold, else NO; EPILOGUE"]
+    T --> C["the facts its changes realize put<br/>the rules that consume them back"]
+    C --> L["if it fired: activated rules back,<br/>inhibited ones out for the run"]
+    L --> P
+```
+
+A run is one transaction, refused whole by an error, or past 10 000 tries
+("CHAV does not converge"). A change to nothing new triggers nothing, and
+the values a rule's PREMISES asked for do not put it back.
+`CALL HYPOCHAV("statements", "RULES", ...)` first runs the statements,
+whose facts are hypothetical; the rules they trigger go before all others,
+and what those establish is hypothetical in turn (page 107). It prints
+every hypothetical fact with the rule that established it, then puts the
+store back as it was: a hypothesis is explored, not kept.
+
+The ten parameters page 106 asks the algorithm to take into account:
+
+| parameter | here |
+|---|---|
+| askability (*demandabilité*) | `ASKABLE`, a boolean expression a fact carries, THIS the object. A value the PREMISES lack is asked (`boiler[PLANT].temperature ? `) and read from the input if its fact is askable; otherwise it is not known, and the PREMISES do not hold. |
+| editability (*éditabilité*) | `EDITABLE`, likewise: what YES or NO establishes of an editable fact is printed, with the rule and its EXPLANATION. |
+| priority | the rule's PRIORITY, 0 by default; read at each choice, so that a metarule can change it |
+| modifiability (*modifiabilité*) | `MODIFIABLE`, likewise, true by default: a fact that is not modifiable refuses any change but a rule's, at any time, as a false COND does |
+| a fact's reliability | the probability of its value (`%`) or of its link, 1 without one |
+| a rule's reliability | its RELIABILITY, 1 by default: what YES or NO writes takes the probability RELIABILITY times the lowest reliability the PREMISES read, when that is below 1 |
+| simple triggering | by default: any change to a fact a rule consumes puts it back |
+| multiple triggering | `TRIGGERING := "MULTIPLE"`: only once every fact it consumes has changed since its last try; one group of facts per rule, a simplification of figure 47's GFCR |
+| activation | the "activates" links of a rule that fires |
+| inhibition | its "inhibits" links |
 
 ## The model
 
@@ -202,9 +292,6 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
   whether building one copies the embryos' attributes and links, and how
   the structure's classes are named, the print does not say. BUILD records
   the structure and its prototype.
-- **What a class inherits from its hyperclass.** Page 159 has "all
-  classes included in" the hyperclass CONSTRAINT "inherit of the FORMULA",
-  its attribute. INCLUDE records the inclusion; nothing is inherited yet.
 - **What associations are for.** ASSOC and DISSOC keep their pairs (page
   24, figure 9's multi-layer system), but no functor reads them yet.
 - Processes (ACTIVATE...) belong to the simulation engine (page 112).
@@ -217,6 +304,8 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `crates/hbds-functors`, `crates/hbds-lists` | the functors on a.d.t., and the list engine |
 | `crates/hbds-core` | values, specifications, the vocabulary |
 | `crates/hbds-journal` | the journal's format, recording and replay |
+| `crates/hbds-rules` | the expert systems: the model, the functors, the chaining |
+| `crates/hbds-rules/tests/engine.rs` | the chaining rule by rule, on a fake language |
 | `tools/check_engines.py` | what each crate may depend on |
 | `crates/adt81/src/interp.rs` | the a.d.t. statements and expressions, on the store |
 | `crates/adt81/tests/corpus/run/store/` | programs on the store, with their expected output |

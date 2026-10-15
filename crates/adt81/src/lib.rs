@@ -13,6 +13,7 @@ pub mod print;
 pub mod sample;
 pub mod typeck;
 pub mod types;
+pub mod uses;
 pub mod value;
 
 /// Both layers of the checker, names then types, their diagnostics sorted

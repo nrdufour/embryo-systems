@@ -5,8 +5,10 @@
 //! A tree walk over the [`ast`](super::ast) of a program the checker has
 //! passed. Classes, objects, attributes and links live in the HBDS
 //! [`Store`], whose COND and ACTION run when they change, a statement
-//! being a transaction; processes, the simulation engine's, are not there
-//! yet: reaching them is a runtime error that says so.
+//! being a transaction; the expert-system engines (hbds-rules) run rules
+//! through it, CALLed as CHAV and HYPOCHAV. Processes, the simulation
+//! engine's, are not there yet: reaching them is a runtime error that
+//! says so.
 //!
 //! Each coroutine runs on its own thread, and control passes by channel,
 //! so that only one thread ever runs: RESUME continues a coroutine where
@@ -23,6 +25,7 @@ use super::ast::*;
 use super::builtins;
 use super::lower;
 use super::types::{Ty, Typed};
+use super::uses::{self, Part};
 use super::value::{self, Ask, Computed, Fz, List, Scalar, Value};
 use hbds_core::{AdtRef, Id, fold};
 use hbds_gtad::{ClassKind, Code, State as AdtState, Store, Stored};
@@ -145,6 +148,7 @@ pub fn run(
         link: None,
         store,
         computed: Arc::new(computed),
+        ses: Arc::new(Mutex::new(Ses::default())),
     };
     // The interpreter recurses (statements, calls, CONDs and ACTIONs): it
     // runs on a thread of its own, with the stack that takes.
@@ -277,6 +281,20 @@ struct Frame {
     depth: usize,
 }
 
+/// The rule code running, for the expert-system engines (docs/hbds.md,
+/// "Expert systems").
+#[derive(Default, Clone)]
+struct Ses {
+    /// How many rules' code this runs within: their changes may touch
+    /// facts that are not MODIFIABLE.
+    inside: usize,
+    /// In PREMISES: the lowest probability read, and whether a fact read
+    /// was not known.
+    premises: Option<(f64, bool)>,
+    /// In YES or NO: the probability what is written takes.
+    stamp: Option<f64>,
+}
+
 /// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
 const DEPTH: usize = 64;
 
@@ -328,6 +346,104 @@ struct Machine {
     store: Arc<Mutex<Store>>,
     /// The functions that compute attributes, by class and attribute.
     computed: Arc<HashMap<(String, String), usize>>,
+    ses: Arc<Mutex<Ses>>,
+}
+
+/// The expert-system engines' way into ADT'81: they decide what runs
+/// when, ADT'81 runs it.
+struct Engine<'m> {
+    m: &'m Machine,
+}
+
+/// What went wrong in a rule's part, or in HYPOCHAV's hypotheses.
+fn told(flow: Flow, part: &str, rule: Option<&str>) -> String {
+    let message = match flow {
+        Flow::Error(e) if e.message.starts_with("in ") => return e.message,
+        Flow::Error(e) => e.message,
+        _ => "EXIT, NEXT, RELOOP, STOP, RESTART or CHAIN leaves it".into(),
+    };
+    match rule {
+        Some(r) => format!("in the {part} of {r}: {message}"),
+        None => format!("in HYPOCHAV's hypotheses: {message}"),
+    }
+}
+
+impl hbds_rules::Compiler for Engine<'_> {
+    fn uses(&self, part: &str, code: &Code) -> Result<hbds_rules::Uses, String> {
+        hbds_rules::Compiler::uses(&uses::Adt81, part, code)
+    }
+}
+
+impl hbds_rules::Host for Engine<'_> {
+    fn store(&self) -> &Mutex<Store> {
+        &self.m.store
+    }
+
+    fn premises(&mut self, rule: Id, code: &Code) -> Result<(bool, f64), String> {
+        let what = self.m.describe(AdtRef::Object(rule));
+        let Part::Expr(e) = self.m.part("PREMISES", code, &what)? else {
+            unreachable!("PREMISES are an expression")
+        };
+        let mut f = Frame {
+            this: Some(AdtRef::Object(rule)),
+            ..Frame::default()
+        };
+        let (holds, ses) = self.m.with_ses(
+            |s| {
+                s.inside += 1;
+                s.premises = Some((1.0, false));
+                s.stamp = None;
+            },
+            || self.m.truth(&e, &mut f),
+        );
+        let (reliability, unknown) = ses.premises.expect("in PREMISES");
+        match holds {
+            Ok(holds) => Ok((holds, reliability)),
+            Err(_) if unknown => Ok((false, reliability)),
+            Err(flow) => Err(told(flow, "PREMISES", Some(&what))),
+        }
+    }
+
+    fn run(
+        &mut self,
+        rule: Option<Id>,
+        part: &str,
+        code: &Code,
+        reliability: f64,
+    ) -> Result<(), String> {
+        let what = rule.map(|r| self.m.describe(AdtRef::Object(r)));
+        let named = what.as_deref().unwrap_or("HYPOCHAV");
+        let Part::Stmts(fragment) = self.m.part(part, code, named)? else {
+            unreachable!("{part} is statements")
+        };
+        let mut f = Frame {
+            this: rule.map(AdtRef::Object),
+            ..Frame::default()
+        };
+        let (done, _) = self.m.with_ses(
+            |s| {
+                s.inside += 1;
+                s.premises = None;
+                s.stamp = (reliability < 1.0).then_some(reliability);
+            },
+            || self.m.run_fragment(&fragment, &mut f),
+        );
+        done.map_err(|flow| told(flow, part, what.as_deref()))
+    }
+
+    fn holds(&mut self, code: &Code, this: AdtRef) -> Result<bool, String> {
+        let at = Span { line: 1, column: 1 };
+        self.m
+            .fact_holds(code, "EDITABLE", this, at)
+            .map_err(|flow| match flow {
+                Flow::Error(e) => e.message,
+                _ => "an EDITABLE leaves by a jump".into(),
+            })
+    }
+
+    fn edit(&mut self, line: &str) {
+        self.m.io.lock().unwrap().write(&format!("{line}\n"));
+    }
 }
 
 /// One iteration's outcome, for the loop that runs it.
@@ -970,6 +1086,7 @@ impl Machine {
                     Real::Integer(i) => *i as f64,
                     Real::Float(x) => *x,
                 });
+                let p = p.or(self.ses.lock().unwrap().stamp);
                 self.atomic(s.span, |m| {
                     let mut store = m.store.lock().unwrap();
                     if *negated {
@@ -1086,6 +1203,11 @@ impl Machine {
                 "processes come with the simulation engine (page 112)",
             )),
             StmtKind::Chain(n) => Err(Flow::Chain(n.clone())),
+            StmtKind::Call(c)
+                if self.module(&c.name).is_none() && builtins::is_subroutine(&c.name.key) =>
+            {
+                self.atomic(s.span, |m| m.engine(c, f, s.span))
+            }
             StmtKind::Call(c) => {
                 let Some(m) = self
                     .module(&c.name)
@@ -1243,9 +1365,11 @@ impl Machine {
                 let a = self.object(from, f, e.span)?;
                 let b = self.object(to, f, e.span)?;
                 let store = self.store.lock().unwrap();
-                Ok(Value::boolean(
-                    store.object_link(a, &relation.text, b).is_some(),
-                ))
+                let link = store.object_link(a, &relation.text, b);
+                if let Some(l) = link {
+                    self.read_fact(store.object_links[&l].probability);
+                }
+                Ok(Value::boolean(link.is_some()))
             }
         }
     }
@@ -1345,7 +1469,12 @@ impl Machine {
             })
             .collect::<Exec<Vec<String>>>()?;
         let store = self.store.lock().unwrap();
-        let result = stored(hbds_functors::apply(&store, &name.key, &refs, &args), span)?;
+        let result = if hbds_rules::functor(&name.key).is_some() {
+            let found = hbds_rules::apply(&store, &uses::Adt81, &name.key, &refs);
+            found.map_err(|e| error(span, e))?
+        } else {
+            stored(hbds_functors::apply(&store, &name.key, &refs, &args), span)?
+        };
         Ok(Value::List(List::new(
             result.into_iter().map(Value::Adt).collect(),
         )))
@@ -1357,7 +1486,10 @@ impl Machine {
     /// object, or an a.d.t. a variable holds.
     fn named(&self, n: &AdtName, f: &mut Frame, span: Span) -> Exec<Result<String, AdtRef>> {
         let v = match n {
-            AdtName::String(s) => return Ok(Ok(s.text.clone())),
+            AdtName::String(s) => {
+                self.system(&s.text, span)?;
+                return Ok(Ok(s.text.clone()));
+            }
             AdtName::Name(name) => self.read(
                 &Variable {
                     name: name.clone(),
@@ -1372,7 +1504,10 @@ impl Machine {
             Value::One(Fz {
                 x: Scalar::String(s),
                 ..
-            }) => Ok(Ok(s)),
+            }) => {
+                self.system(&s, span)?;
+                Ok(Ok(s))
+            }
             Value::One(Fz {
                 x: Scalar::Character(c),
                 ..
@@ -1532,11 +1667,172 @@ impl Machine {
                 format!("\"{class}\" . \"{name}\" is COMPUTED, but no FUNCTION computes it"),
             ));
         }
+        let found = self.store.lock().unwrap().get(o, attribute).cloned();
+        match found {
+            Some(v) => {
+                if let Value::One(fz) = &v {
+                    self.read_fact(fz.prob);
+                }
+                Ok(v)
+            }
+            None => self.unknown(o, attribute, span),
+        }
+    }
+
+    /// A value PREMISES read: the lowest probability is theirs.
+    fn read_fact(&self, probability: Option<f64>) {
+        if let Some((low, _)) = &mut self.ses.lock().unwrap().premises {
+            *low = low.min(probability.unwrap_or(1.0));
+        }
+    }
+
+    /// A value not there: in PREMISES, asked if the fact is ASKABLE, and
+    /// otherwise not known, which makes them false; elsewhere, an error.
+    fn unknown(&self, o: Id, a: Id, span: Span) -> Exec<Value> {
+        let what = self.describe(AdtRef::ObjectAttribute(o, a));
+        if self.ses.lock().unwrap().premises.is_none() {
+            return Err(error(span, format!("{what} has no value")));
+        }
+        let askable = self.property(AdtRef::ClassAttribute(a), "ASKABLE");
+        if let Some(code) = askable
+            && self.fact_holds(&code, "ASKABLE", AdtRef::Object(o), span)?
+        {
+            self.io.lock().unwrap().write(&format!("{what} ? "));
+            let line = self.io.lock().unwrap().read_line();
+            if let Some(line) = line {
+                let v = match self.parse_input(line.trim(), &Ty::Unknown, span) {
+                    Ok(v) => v,
+                    Err(_) => Value::exact(Scalar::String(line.trim().to_string())),
+                };
+                stored(self.store.lock().unwrap().set(o, a, v.clone()), span)?;
+                self.trigger(Invoked::Set(o, a), &Frame::default(), span)?;
+                if let Value::One(fz) = &v {
+                    self.read_fact(fz.prob);
+                }
+                return Ok(v);
+            }
+        }
+        if let Some((_, unknown)) = &mut self.ses.lock().unwrap().premises {
+            *unknown = true;
+        }
+        Err(error(span, format!("{what} is not known")))
+    }
+
+    /// An a.d.t. as PRINT shows it.
+    fn describe(&self, r: AdtRef) -> String {
+        self.store.lock().unwrap().describe(r)
+    }
+
+    /// A property an a.d.t. carries, if it does.
+    fn property(&self, r: AdtRef, name: &str) -> Option<Code> {
         let store = self.store.lock().unwrap();
-        store.get(o, attribute).cloned().ok_or_else(|| {
-            let what = store.describe(AdtRef::ObjectAttribute(o, attribute));
-            error(span, format!("{what} has no value"))
-        })
+        store.props(r)?.properties.get(name).cloned()
+    }
+
+    /// Runs `body` with the rule state `set` makes, then puts it back;
+    /// gives what `body` gives and the state it ended with.
+    fn with_ses<T>(&self, set: impl FnOnce(&mut Ses), body: impl FnOnce() -> T) -> (T, Ses) {
+        let saved = {
+            let mut ses = self.ses.lock().unwrap();
+            let saved = ses.clone();
+            set(&mut ses);
+            saved
+        };
+        let result = body();
+        let ended = std::mem::replace(&mut *self.ses.lock().unwrap(), saved);
+        (result, ended)
+    }
+
+    /// A property's code, ADT'81's and parsed, or what is wrong with it.
+    fn part(&self, part: &str, code: &Code, what: &str) -> Result<Part, String> {
+        if code.language != LANGUAGE {
+            return Err(format!(
+                "the {part} of {what} is written in {}, which ADT'81 does not run",
+                code.language
+            ));
+        }
+        uses::parse(part, &code.text)
+            .map_err(|e| format!("the {part} of {what} does not parse: {e}"))
+    }
+
+    /// Whether a fact's ASKABLE, EDITABLE or MODIFIABLE holds, THIS the
+    /// object concerned; what it reads is not the PREMISES'.
+    fn fact_holds(&self, code: &Code, kind: &str, this: AdtRef, span: Span) -> Exec<bool> {
+        let what = self.describe(this);
+        let Part::Expr(e) = self.part(kind, code, &what).map_err(|m| error(span, m))? else {
+            unreachable!("{kind} is an expression")
+        };
+        let mut f = Frame {
+            this: Some(this),
+            ..Frame::default()
+        };
+        let (holds, _) = self.with_ses(|s| s.premises = None, || self.truth(&e, &mut f));
+        holds.map_err(|flow| within(flow, kind, &what, span))
+    }
+
+    /// FACT and RULE, created the first time a program names them.
+    fn system(&self, name: &str, span: Span) -> Exec<()> {
+        if !hbds_rules::is_system(name) {
+            return Ok(());
+        }
+        let mut store = self.store.lock().unwrap();
+        if store.find_class(name).is_some() {
+            return Ok(());
+        }
+        stored(hbds_rules::install(&mut store), span)
+    }
+
+    /// CALL CHAV(rule classes) and CALL HYPOCHAV(hypotheses, rule
+    /// classes): the expert-system engines (pages 106 and 107).
+    fn engine(&self, c: &Call, f: &mut Frame, span: Span) -> Exec<()> {
+        let mut args = c.args.iter();
+        let hypotheses = if c.name.key == "HYPOCHAV" {
+            let wrong = || {
+                error(
+                    span,
+                    "HYPOCHAV takes its hypotheses first, statements in a string",
+                )
+            };
+            let v = self.eval(args.next().ok_or_else(wrong)?, f)?;
+            let text = match v.scalar() {
+                Some(Scalar::String(s)) => s.clone(),
+                _ => return Err(wrong()),
+            };
+            let code = Code {
+                language: LANGUAGE.into(),
+                text,
+            };
+            self.part("HYPOTHESES", &code, "HYPOCHAV")
+                .map_err(|_| error(span, "HYPOCHAV's hypotheses do not parse"))?;
+            Some(code)
+        } else {
+            None
+        };
+        stored(hbds_rules::install(&mut self.store.lock().unwrap()), span)?;
+        let mut scope = Vec::new();
+        for a in args {
+            let class = match self.eval(a, f)? {
+                Value::Adt(AdtRef::Class(c)) => c,
+                v => match v.scalar() {
+                    Some(Scalar::String(name)) => {
+                        stored(self.store.lock().unwrap().class(name), a.span)?
+                    }
+                    _ => {
+                        return Err(error(
+                            a.span,
+                            format!("{} takes rule classes, not {v}", c.name.spelling),
+                        ));
+                    }
+                },
+            };
+            scope.push(class);
+        }
+        let mut engine = Engine { m: self };
+        let run = match &hypotheses {
+            Some(h) => hbds_rules::hypochav(&mut engine, h, &scope),
+            None => hbds_rules::chav(&mut engine, &scope),
+        };
+        run.map(|_| ()).map_err(|e| error(span, e))
     }
 
     /// Runs `body` as one transaction of the store: its changes, and those
@@ -1564,6 +1860,19 @@ impl Machine {
                 }
             }
         };
+        if self.ses.lock().unwrap().inside == 0 {
+            for r in &adts {
+                if let Some(code) = self.property(*r, "MODIFIABLE")
+                    && !self.fact_holds(&code, "MODIFIABLE", AdtRef::Object(this), span)?
+                {
+                    let what = self.describe(*r);
+                    return Err(error(
+                        span,
+                        format!("{what} is not MODIFIABLE but by a rule"),
+                    ));
+                }
+            }
+        }
         let adts = adts.into_iter().chain([AdtRef::Object(this)]);
         for r in adts {
             let (cond, action, what) = {
@@ -1766,6 +2075,7 @@ impl Machine {
             LetTarget::Attribute { object, attribute } => {
                 let o = self.object(object, f, span)?;
                 let name = self.text(attribute, f, span)?;
+                let v = self.stamped(v);
                 let mut store = self.store.lock().unwrap();
                 let a = stored(store.attribute(store.objects[&o].class, &name), span)?;
                 stored(store.set(o, a, v), span)?;
@@ -1782,6 +2092,7 @@ impl Machine {
                 )?;
                 match r {
                     Value::Adt(AdtRef::ObjectAttribute(o, a)) => {
+                        let v = self.stamped(v);
                         stored(self.store.lock().unwrap().set(o, a, v), span)?;
                         self.trigger(Invoked::Set(o, a), f, span)
                     }
@@ -1803,10 +2114,11 @@ impl Machine {
                         ));
                     }
                 };
-                let parses = match name.key.as_str() {
-                    "COND" => lower::parse_fragment(&format!("x := {text}")).map(|_| ()),
-                    "ACTION" => lower::parse_fragment(&text).map(|_| ()),
-                    _ => Ok(()),
+                // Compiled at capture: a rule's part that does not parse is
+                // refused, as a COND is (page 80).
+                let parses = match builtins::is_property(&name.key) {
+                    true => uses::parse(&name.key, &text).map(|_| ()),
+                    false => Ok(()),
                 };
                 if let Err(e) = parses {
                     return Err(error(
@@ -1817,6 +2129,17 @@ impl Machine {
                 let mut store = self.store.lock().unwrap();
                 stored(store.set_property(target, &name.key, LANGUAGE, &text), span)
             }
+        }
+    }
+
+    /// What YES or NO writes takes their reliability as its probability.
+    fn stamped(&self, v: Value) -> Value {
+        match (self.ses.lock().unwrap().stamp, v) {
+            (Some(p), Value::One(mut fz)) => {
+                fz.prob = Some(p);
+                Value::One(fz)
+            }
+            (_, v) => v,
         }
     }
 

@@ -1,0 +1,4 @@
+busy
+boiler[PLANT].temperature = 120, by hypothesis
+boiler[PLANT].alarm = TRUE, by hot[STEPS]
+20 FALSE
