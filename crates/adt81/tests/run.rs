@@ -1,4 +1,4 @@
-//! Golden runs: each program in tests/adt81/run, written for the
+//! Golden runs: each program in tests/corpus/run, written for the
 //! purpose, checks clean, runs on its `.in`, and prints its `.out`, a
 //! runtime error included as the last line.
 
@@ -7,10 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use embryo_systems::adt81::diagnostic::Severity;
-use embryo_systems::adt81::interp::{self, Io};
-use embryo_systems::adt81::{self as adt81, lower};
-use embryo_systems::hbds::Store;
+use adt81::diagnostic::Severity;
+use adt81::interp::{self, Io};
+use adt81::lower;
+use hbds::Store;
 
 #[derive(Default)]
 struct Capture {
@@ -62,7 +62,7 @@ fn programs(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn golden_runs() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81/run");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/run");
     let mut paths = programs(&root);
     for dir in ["errors", "store", "store/errors"] {
         paths.extend(programs(&root.join(dir)));
@@ -89,7 +89,7 @@ fn golden_runs() {
 /// as an a.d.t. statement before the store exists; never a panic.
 #[test]
 fn checked_programs_run_cleanly() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81/checked");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/checked");
     for path in programs(&root) {
         let source = fs::read_to_string(&path).unwrap();
         run(&source, "");

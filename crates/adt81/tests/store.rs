@@ -6,9 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use embryo_systems::adt81::interp::{self, Io};
-use embryo_systems::adt81::lower;
-use embryo_systems::hbds::{Store, journal};
+use adt81::interp::{self, Io};
+use adt81::lower;
+use hbds::{Store, journal};
 
 #[derive(Default)]
 struct Capture(String);
@@ -84,7 +84,9 @@ fn a_schema_outlives_its_run() {
     assert_eq!(store.lock().unwrap().dump(), before);
     assert_eq!(run(READ, &store), READ_OUT);
     assert!(
-        before.contains("attribute TEMP : FLOAT APPR UNIT (kelvin) COND = \"THIS . T > 0.\""),
+        before.contains(
+            "attribute TEMP : FLOAT APPR UNIT (kelvin) COND (ADT'81) = \"THIS . T > 0.\""
+        ),
         "{before}"
     );
     assert!(before.contains("object Arles (destroyed)"), "{before}");

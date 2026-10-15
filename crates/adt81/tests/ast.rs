@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use embryo_systems::adt81::ast::*;
-use embryo_systems::adt81::{lower, print, sample};
+use adt81::ast::*;
+use adt81::{lower, print, sample};
 
 fn fragment(source: &str) -> Fragment {
     lower::parse_fragment(source).unwrap_or_else(|e| panic!("{source}: {e}"))
@@ -71,7 +71,7 @@ fn round_trip_fragment(fragment: &Fragment, what: &str) {
 
 #[test]
 fn corpus_round_trips() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus");
     for dir in ["programs", "checked", "fragments"] {
         for entry in fs::read_dir(root.join(dir)).unwrap() {
             let path = entry.unwrap().path();

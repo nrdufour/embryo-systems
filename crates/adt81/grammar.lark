@@ -7,7 +7,7 @@
 // was derived and why each choice was made.
 //
 // Lark syntax, Earley parsing. `just check-grammar` parses every program in
-// tests/adt81 with it and fails if one parses two ways, or if the Rust
+// crates/adt81/tests/corpus with it and fails if one parses two ways, or if the Rust
 // parser in src/adt81, which follows this file rule for rule, builds
 // another tree.
 //

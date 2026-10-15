@@ -1,5 +1,5 @@
 //! The ADT'81 lexer: source text to tokens, by the lexical rules at the end
-//! of `adt81/grammar.lark`.
+//! of `crates/adt81/grammar.lark`.
 //!
 //! Matches what Lark's basic lexer does with that grammar, so that the Rust
 //! parser and the grammar gate see the same tokens: the longest symbol wins,
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn keywords_and_symbols_match_the_grammar() {
-        let grammar = include_str!("../../adt81/grammar.lark");
+        let grammar = include_str!("../grammar.lark");
         let mut words = Vec::new();
         let mut symbols = Vec::new();
         // Rule lines only: comments and terminal definitions (regular

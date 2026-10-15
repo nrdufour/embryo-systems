@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use super::journal::Journal;
-use crate::adt81::value::Value;
+use crate::spec::Spec;
+use crate::value::Value;
+pub use crate::{fold, same};
 
 pub type Id = u64;
 
@@ -42,13 +44,21 @@ pub enum ClassKind {
 }
 
 /// What an a.d.t. may carry: SPECIFY's specification and the properties
-/// LET sets (COND, ACTION, pages 156 to 158).
+/// a program sets (COND, ACTION, pages 156 to 158).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Props {
-    pub spec: Option<String>,
+    pub spec: Option<Spec>,
     pub unit: Option<String>,
     pub computed: bool,
-    pub properties: BTreeMap<String, String>,
+    pub properties: BTreeMap<String, Code>,
+}
+
+/// Code an a.d.t. carries, and the language it is written in: the store
+/// keeps it, a language runs it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Code {
+    pub language: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,9 +111,6 @@ pub struct ObjectLink {
     pub state: State,
 }
 
-/// The struct, where `AdtRef::ObjectLink` is in scope.
-type LinkOfObjects = ObjectLink;
-
 /// Every mutation of the store: what the journal records.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
@@ -150,7 +157,7 @@ pub enum Change {
     },
     Specify {
         target: AdtRef,
-        spec: Option<String>,
+        spec: Option<Spec>,
         unit: Option<String>,
         computed: bool,
     },
@@ -180,6 +187,7 @@ pub enum Change {
     Property {
         target: AdtRef,
         name: String,
+        language: String,
         text: String,
     },
 }
@@ -195,7 +203,7 @@ impl fmt::Display for Error {
 
 pub type Stored<T> = Result<T, Error>;
 
-fn error<T>(message: impl Into<String>) -> Stored<T> {
+pub(crate) fn error<T>(message: impl Into<String>) -> Stored<T> {
     Err(Error(message.into()))
 }
 
@@ -212,7 +220,7 @@ pub struct Store {
 }
 
 /// Results in order, without repeats.
-fn push_new(out: &mut Vec<AdtRef>, r: AdtRef) {
+pub(crate) fn push_new(out: &mut Vec<AdtRef>, r: AdtRef) {
     if !out.contains(&r) {
         out.push(r);
     }
@@ -399,9 +407,14 @@ impl Store {
                 }
             }
             Change::Dissoc { a, b } => self.associations.retain(|p| *p != (a, b)),
-            Change::Property { target, name, text } => {
+            Change::Property {
+                target,
+                name,
+                language,
+                text,
+            } => {
                 if let Some(p) = self.props_mut(target) {
-                    p.properties.insert(name, text);
+                    p.properties.insert(name, Code { language, text });
                 }
             }
         }
@@ -519,7 +532,7 @@ impl Store {
 
     /// Whether an a.d.t. is seen: it is active, and so is what it depends
     /// on (an object's class, a link's two ends, an attribute's carrier).
-    fn active(&self, r: AdtRef) -> bool {
+    pub(crate) fn active(&self, r: AdtRef) -> bool {
         let on = |r| self.state(r) == Some(State::Active);
         match r {
             AdtRef::Class(_) => on(r),
@@ -736,7 +749,7 @@ impl Store {
     pub fn specify(
         &mut self,
         target: AdtRef,
-        spec: Option<String>,
+        spec: Option<Spec>,
         unit: Option<String>,
         computed: bool,
     ) -> Stored<()> {
@@ -797,142 +810,22 @@ impl Store {
         self.commit(Change::Dissoc { a, b })
     }
 
-    pub fn set_property(&mut self, target: AdtRef, name: &str, text: &str) -> Stored<()> {
+    /// Code for an a.d.t. to carry, in `language`.
+    pub fn set_property(
+        &mut self,
+        target: AdtRef,
+        name: &str,
+        language: &str,
+        text: &str,
+    ) -> Stored<()> {
         if matches!(target, AdtRef::ObjectLink(_)) {
             return error("an object link carries no property; its class link does");
         }
         self.commit(Change::Property {
             target,
             name: name.to_string(),
+            language: language.to_string(),
             text: text.to_string(),
-        })
-    }
-
-    // Functors
-
-    /// A functor of the catalogue (pages 76 to 80) applied to each prefix,
-    /// the results united in order. `args` are a multifunctor's strings.
-    pub fn functor(&self, name: &str, prefix: &[AdtRef], args: &[String]) -> Stored<Vec<AdtRef>> {
-        let mut out = Vec::new();
-        for &p in prefix {
-            if !self.active(p) {
-                continue;
-            }
-            for r in self.functor_one(name, p, args)? {
-                if self.active(r) {
-                    push_new(&mut out, r);
-                }
-            }
-        }
-        Ok(out)
-    }
-
-    fn functor_one(&self, name: &str, p: AdtRef, args: &[String]) -> Stored<Vec<AdtRef>> {
-        use AdtRef::*;
-        let wrong = || error(format!("`{name}` does not apply to {}", self.describe(p)));
-        let arg = |i: usize| -> Stored<&str> {
-            args.get(i)
-                .map(String::as_str)
-                .ok_or_else(|| Error(format!("`{name}` takes {} argument(s)", i + 1)))
-        };
-        let objects_of = |c: Id| {
-            (self.objects.iter())
-                .filter(move |(_, o)| o.class == c)
-                .map(|(i, _)| Object(*i))
-        };
-        let attributes_of = |c: Id| {
-            (self.attributes.iter())
-                .filter(move |(_, a)| a.class == c)
-                .map(|(i, _)| *i)
-        };
-        let links = |f: &dyn Fn(&LinkOfObjects) -> bool| -> Vec<AdtRef> {
-            (self.object_links.iter())
-                .filter(|(_, l)| f(l))
-                .map(|(i, _)| ObjectLink(*i))
-                .collect()
-        };
-        let relation = |l: &LinkOfObjects| {
-            self.class_links
-                .get(&l.class_link)
-                .and_then(|c| c.relation.clone())
-        };
-        let class_of = |o: Id| {
-            self.objects
-                .get(&o)
-                .map(|o| self.classes[&o.class].name.clone())
-        };
-        Ok(match (name, p) {
-            ("ATT", Class(c)) => attributes_of(c).map(ClassAttribute).collect(),
-            ("VATT", ClassAttribute(a)) => {
-                let c = self.attributes[&a].class;
-                objects_of(c)
-                    .map(|o| match o {
-                        Object(o) => ObjectAttribute(o, a),
-                        _ => unreachable!(),
-                    })
-                    .collect()
-            }
-            ("OBJ", Class(c)) => objects_of(c).collect(),
-            ("PSC" | "NSC", Class(c)) => (self.class_links.iter())
-                .filter(|(_, l)| {
-                    if name == "PSC" {
-                        l.from == c
-                    } else {
-                        l.to == c
-                    }
-                })
-                .map(|(i, _)| ClassLink(*i))
-                .collect(),
-            ("EFF", ClassLink(l)) => links(&|o| o.class_link == l),
-            ("OATT", Object(o)) => attributes_of(self.objects[&o].class)
-                .map(|a| ObjectAttribute(o, a))
-                .collect(),
-            ("OPSC", Object(o)) => links(&|l| l.from == o),
-            ("ONSC", Object(o)) => links(&|l| l.to == o),
-            ("ATTOF", ClassAttribute(a)) => vec![Class(self.attributes[&a].class)],
-            ("VATTOF", ObjectAttribute(_, a)) => vec![ClassAttribute(a)],
-            ("OBJOF", Object(o)) => vec![Class(self.objects[&o].class)],
-            ("INI", ClassLink(l)) => vec![Class(self.class_links[&l].from)],
-            ("FIN", ClassLink(l)) => vec![Class(self.class_links[&l].to)],
-            ("EFFOF", ObjectLink(l)) => vec![ClassLink(self.object_links[&l].class_link)],
-            ("OATTOF", ObjectAttribute(o, _)) => vec![Object(o)],
-            ("OINI", ObjectLink(l)) => vec![Object(self.object_links[&l].from)],
-            ("OFIN", ObjectLink(l)) => vec![Object(self.object_links[&l].to)],
-            ("CONT", Class(h)) => (self.classes.iter())
-                .filter(|(_, c)| c.hyper.contains(&h))
-                .map(|(i, _)| Class(*i))
-                .collect(),
-            ("CONTOF", Class(c)) => self.classes[&c].hyper.iter().map(|h| Class(*h)).collect(),
-            ("INV", ClassLink(l)) => vec![ClassLink(self.class_links[&l].reverse)],
-            ("OINV", ObjectLink(l)) => vec![ObjectLink(self.object_links[&l].reverse)],
-            ("OPSCR", Object(o)) => {
-                let r = arg(0)?;
-                links(&|l| l.from == o && relation(l).is_some_and(|x| same(&x, r)))
-            }
-            ("OPSCRC", Object(o)) => {
-                let (r, c) = (arg(0)?, arg(1)?);
-                links(&|l| {
-                    l.from == o
-                        && relation(l).is_some_and(|x| same(&x, r))
-                        && class_of(l.to).is_some_and(|x| same(&x, c))
-                })
-            }
-            ("ONSCRC", Object(o)) => {
-                let (r, c) = (arg(0)?, arg(1)?);
-                links(&|l| {
-                    l.to == o
-                        && relation(l).is_some_and(|x| same(&x, r))
-                        && class_of(l.from).is_some_and(|x| same(&x, c))
-                })
-            }
-            ("OATTN", Object(o)) => {
-                let a = arg(0)?;
-                match self.find_attribute(self.objects[&o].class, a) {
-                    Some(a) => vec![ObjectAttribute(o, a)],
-                    None => Vec::new(),
-                }
-            }
-            _ => return wrong(),
         })
     }
 
@@ -1003,8 +896,8 @@ impl Store {
             if p.computed {
                 t += " COMPUTED";
             }
-            for (k, v) in &p.properties {
-                t += &format!(" {k} = \"{v}\"");
+            for (k, code) in &p.properties {
+                t += &format!(" {k} ({}) = \"{}\"", code.language, code.text);
             }
             t
         };
@@ -1086,18 +979,6 @@ impl Store {
             v => v.to_string(),
         }
     }
-}
-
-/// Whether two a.d.t. names are one: they compare folded, as the
-/// polycopié's own code needs (`"arc"` reaching `FUNCTION "ARC" .
-/// "LENGTH"`, page 127), and are kept as written.
-pub fn same(a: &str, b: &str) -> bool {
-    a == b || a.to_uppercase() == b.to_uppercase()
-}
-
-/// A name folded, for keys.
-pub fn fold(name: &str) -> String {
-    name.to_uppercase()
 }
 
 fn involves(a: AdtRef, r: AdtRef) -> bool {

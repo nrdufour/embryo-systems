@@ -6,7 +6,7 @@ definition is the "BNF simplifiée" printed in the 1995 polycopié, pages 19 to
 The polycopié itself is not in this repository: its copyright is under review,
 so this project quotes and cites it, and carries none of it.
 
-`adt81/grammar.lark` is our grammar of the same language. This page tells how
+`crates/adt81/grammar.lark` is our grammar of the same language. This page tells how
 it was obtained, where it departs from the print, and why.
 
 ## Method
@@ -206,7 +206,7 @@ fragments are excerpts, with no module to declare their names.
   call in an expression a function, `'` a functor. The wrong kind is an
   error; an unknown subroutine, coroutine or program too.
 - An unknown function, functor or property (`LET ... ' COND`) is only a
-  warning (decided 2026-10-15): `src/adt81/builtins.rs` lists the
+  warning (decided 2026-10-15): `crates/adt81/src/builtins.rs` lists the
   built-in functors of pages 76 to 80 and the properties of pages 156 to
   158, but the print says its lists are partial, and lists no function.
 - Not checked: unit names (`UNIT (m3s)`), which the print does not list,
@@ -324,23 +324,23 @@ expression written as a string), and fragments.
 
 | path | what |
 |---|---|
-| `adt81/grammar.lark` | the grammar |
-| `tests/adt81/programs/*.adt` | programs, parsed from `program` |
-| `tests/adt81/fragments/*.adt` | declarations and statements, from `fragment` |
-| `tests/adt81/reject.txt` | statements the grammar must refuse, one per decision among them |
+| `crates/adt81/grammar.lark` | the grammar |
+| `crates/adt81/tests/corpus/programs/*.adt` | programs, parsed from `program` |
+| `crates/adt81/tests/corpus/fragments/*.adt` | declarations and statements, from `fragment` |
+| `crates/adt81/tests/corpus/reject.txt` | statements the grammar must refuse, one per decision among them |
 | `tools/check_grammar.py` | the gate: `just check-grammar` |
-| `src/adt81/lexer.rs` | the Rust lexer; its tests keep its keywords and symbols in step with the grammar |
-| `src/adt81/parser.rs` | the Rust parser; its tests keep its rules in step with the grammar |
-| `src/adt81/ast.rs`, `lower.rs` | the typed tree, and the parser's tree lowered to it |
-| `src/adt81/print.rs` | the typed tree written back as source, `embryo-systems fmt` |
-| `src/adt81/sample.rs`, `examples/sample.rs` | random programs, for the tests and the gate |
-| `src/adt81/names.rs`, `builtins.rs`, `diagnostic.rs` | name resolution, the built-in catalogue, what the checker reports |
-| `tests/adt81/checked/*.adt` | programs that must check clean |
+| `crates/adt81/src/lexer.rs` | the Rust lexer; its tests keep its keywords and symbols in step with the grammar |
+| `crates/adt81/src/parser.rs` | the Rust parser; its tests keep its rules in step with the grammar |
+| `crates/adt81/src/ast.rs`, `lower.rs` | the typed tree, and the parser's tree lowered to it |
+| `crates/adt81/src/print.rs` | the typed tree written back as source, `embryo-systems fmt` |
+| `crates/adt81/src/sample.rs`, `crates/adt81/examples/sample.rs` | random programs, for the tests and the gate |
+| `crates/adt81/src/names.rs`, `builtins.rs`, `diagnostic.rs` | name resolution, the built-in catalogue, what the checker reports |
+| `crates/adt81/tests/corpus/checked/*.adt` | programs that must check clean |
 | `tests/names.rs` | name resolution, rule by rule |
-| `src/adt81/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |
+| `crates/adt81/src/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |
 | `tests/types.rs` | kinds and types, rule by rule |
-| `src/adt81/value.rs`, `interp.rs` | values and their fuzzy arithmetic, and the interpreter |
-| `tests/adt81/run/` | programs with their input and expected output, runtime errors included |
+| `crates/adt81/src/value.rs`, `interp.rs` | values and their fuzzy arithmetic, and the interpreter |
+| `crates/adt81/tests/corpus/run/` | programs with their input and expected output, runtime errors included |
 | `tests/run.rs` | runs them |
 | `tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |
 
