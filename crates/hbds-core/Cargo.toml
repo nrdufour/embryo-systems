@@ -1,0 +1,8 @@
+[package]
+name = "hbds-core"
+version = "0.1.0"
+edition = "2024"
+
+# Shared vocabulary of the engines: values, a.d.t. references and kinds,
+# specifications, functor signatures. No logic, no dependency.
+[dependencies]

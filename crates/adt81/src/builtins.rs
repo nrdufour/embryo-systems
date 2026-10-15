@@ -1,9 +1,18 @@
-//! What ADT'81 adds to the names HBDS provides: functions of a real
-//! number. The functors and properties are HBDS's ([`hbds::functors`]).
+//! The names ADT'81 knows: the functors of the engines, on a.d.t.
+//! (hbds-functors) and on lists (hbds-lists), the properties GTAD keeps,
+//! and the functions of a real number, which are ADT'81's own.
 
-pub use hbds::functors::{
-    FUNCTORS, Functor, Gives, PROPERTIES, Takes, functor, is_functor, is_property,
-};
+pub use hbds_core::{Functor, Gives, Takes};
+pub use hbds_gtad::{PROPERTIES, is_property};
+
+/// A functor of either engine's catalogue.
+pub fn functor(key: &str) -> Option<&'static Functor> {
+    hbds_functors::functor(key).or_else(|| hbds_lists::functor(key))
+}
+
+pub fn is_functor(key: &str) -> bool {
+    functor(key).is_some()
+}
 
 /// Functions of a real number: ours, not the print's, which lists none
 /// (docs/adt81.md, "Running"). FLOOR, CEIL and ROUND give integers.

@@ -23,17 +23,16 @@ use super::builtins;
 use super::lower;
 use super::types::{Ty, Typed};
 use super::value::{self, Ask, Computed, Fz, List, Scalar, Value};
-use hbds::fold;
-use hbds::store::{ClassKind, Id, State as AdtState, Stored};
-use hbds::{AdtRef, Store};
+use hbds_core::{AdtRef, Id, fold};
+use hbds_gtad::{ClassKind, State as AdtState, Store, Stored};
 
 /// The language the store's COND and ACTION are tagged with, when ADT'81
 /// writes them.
 pub const LANGUAGE: &str = "ADT'81";
 
 /// A SPECIFY's specification, as the store keeps it.
-fn specification(s: &Specification) -> hbds::spec::Spec {
-    use hbds::spec::{Base, Fuzziness as Z, Scalar as S, Spec};
+fn specification(s: &Specification) -> hbds_core::spec::Spec {
+    use hbds_core::spec::{Base, Fuzziness as Z, Scalar as S, Spec};
     let fuzz = |f: &Fuzziness| match *f {
         Fuzziness::Fuzzy => Z {
             appr: true,
@@ -859,20 +858,18 @@ impl Machine {
                     None => None,
                 };
                 self.with_list(list, f, |l| {
-                    let at = match position {
-                        None => l.items.len(),
+                    let (at, span) = match position {
+                        None => (None, s.span),
                         Some((p, k, span)) => {
-                            let k = usize::try_from(k).ok().filter(|k| *k <= l.items.len());
-                            let k =
-                                k.ok_or_else(|| error(span, "this position is outside the list"))?;
-                            match p {
+                            let k = usize::try_from(k).unwrap_or(usize::MAX);
+                            let k = match p {
                                 Position::After => k,
                                 Position::Before => k.saturating_sub(1),
-                            }
+                            };
+                            (Some(k), span)
                         }
                     };
-                    l.items.splice(at..at, new);
-                    Ok(())
+                    hbds_lists::insert(l, new, at).map_err(|m| error(span, m))
                 })
             }
             StmtKind::Extract { items, list } => {
@@ -884,14 +881,12 @@ impl Machine {
                     }
                 }
                 self.with_list(list, f, |l| {
-                    l.items.retain(|x| !out.contains(x));
-                    l.cursor = l.cursor.min(l.items.len().saturating_sub(1));
+                    hbds_lists::extract(l, &out);
                     Ok(())
                 })
             }
             StmtKind::Empty(list) => self.with_list(list, f, |l| {
-                l.items.clear();
-                l.cursor = 0;
+                hbds_lists::empty(l);
                 Ok(())
             }),
             StmtKind::Organize { kind, lists } => {
@@ -1296,7 +1291,7 @@ impl Machine {
             })
             .collect::<Exec<Vec<String>>>()?;
         let store = self.store.lock().unwrap();
-        let result = stored(store.functor(&name.key, &refs, &args), span)?;
+        let result = stored(hbds_functors::apply(&store, &name.key, &refs, &args), span)?;
         Ok(Value::List(List::new(
             result.into_iter().map(Value::Adt).collect(),
         )))
@@ -1697,7 +1692,9 @@ impl Machine {
                 format!("`{}` applies to a list", c.name.spelling),
             ));
         };
-        let result = at(list_functor(&c.name.key, &mut list, &args), span)?;
+        let add = |a: &Value, b: &Value| value::binary(BinaryOp::Add, a, b).map_err(|f| f.0);
+        let result = hbds_lists::apply(&c.name.key, &mut list, &args, &add);
+        let result = result.map_err(|m| error(span, m))?;
         // The functors that move the cursor or take an element out change
         // the list a variable holds.
         if let Some(s) = held {
@@ -1803,98 +1800,4 @@ fn math(key: &str, x: &Fz) -> Computed<Fz> {
         "CEIL" => integral(value::real_function(x, f64::ceil, |_| 0.0)?),
         _ => integral(value::real_function(x, f64::round, |_| 0.0)?),
     }
-}
-
-/// The list functors of page 80.
-fn list_functor(key: &str, l: &mut List, args: &[Value]) -> Computed<Value> {
-    let fault = |m: &str| Err(value::Fault(m.into()));
-    let position = |v: &Value, l: &List| -> Computed<usize> {
-        let p = v.as_integer()?;
-        match usize::try_from(p) {
-            Ok(p) if p >= 1 && p <= l.items.len() => Ok(p - 1),
-            _ => Err(value::Fault(format!(
-                "no element {p} in a list of {}",
-                l.items.len()
-            ))),
-        }
-    };
-    if l.items.is_empty() && !matches!(key, "CARD" | "SUBLIST" | "OCCUR" | "POSLP" | "SIGMA") {
-        return fault("the list is empty");
-    }
-    let last = l.items.len().saturating_sub(1);
-    Ok(match (key, args) {
-        ("FIRST", []) => {
-            l.cursor = 0;
-            l.items[0].clone()
-        }
-        ("LAST", []) => {
-            l.cursor = last;
-            l.items[last].clone()
-        }
-        ("CURRENT", []) => l.items[l.cursor].clone(),
-        ("SUCC", []) => {
-            if l.cursor == last {
-                if !l.circular {
-                    return fault("the current element has no successor");
-                }
-                l.cursor = 0;
-            } else {
-                l.cursor += 1;
-            }
-            l.items[l.cursor].clone()
-        }
-        ("PRED", []) => {
-            if l.cursor == 0 {
-                if !l.circular {
-                    return fault("the current element has no predecessor");
-                }
-                l.cursor = last;
-            } else {
-                l.cursor -= 1;
-            }
-            l.items[l.cursor].clone()
-        }
-        ("FIRSTOUT", []) => {
-            l.cursor = 0;
-            l.items.remove(0)
-        }
-        ("LASTOUT", []) => {
-            l.cursor = l.cursor.min(last.saturating_sub(1));
-            l.items.remove(last)
-        }
-        ("CURRENTOUT", []) => {
-            let v = l.items.remove(l.cursor);
-            l.cursor = l.cursor.min(l.items.len().saturating_sub(1));
-            v
-        }
-        ("CARD", []) => Value::integer(l.items.len() as i64),
-        ("ELMT", [p]) => l.items[position(p, l)?].clone(),
-        ("SUBLIST", [p, n]) => {
-            let start = position(p, l)?;
-            let n = usize::try_from(n.as_integer()?).unwrap_or(0);
-            let end = (start + n).min(l.items.len());
-            Value::List(List::new(l.items[start..end].to_vec()))
-        }
-        ("OCCUR", [x, p]) => {
-            let start = position(p, l)?;
-            Value::integer(l.items[start..].iter().filter(|v| *v == x).count() as i64)
-        }
-        ("POSLP", [x, p]) => {
-            let start = position(p, l)?;
-            let found = l.items[start..].iter().position(|v| v == x);
-            Value::integer(found.map_or(0, |i| (start + i + 1) as i64))
-        }
-        ("SIGMA", []) => {
-            let mut sum = Value::integer(0);
-            for v in &l.items {
-                sum = value::binary(BinaryOp::Add, &sum, v)?;
-            }
-            sum
-        }
-        (name, _) => {
-            return Err(value::Fault(format!(
-                "`{name}` with these arguments: not yet"
-            )));
-        }
-    })
 }

@@ -1,28 +1,27 @@
-//! The HBDS model, what the print calls GTAD (pages 45 to 48): classes,
-//! their attributes and links, objects, their values and links, kept in
-//! memory, every mutation one [`Change`] so that a journal can record and
-//! replay it ([`journal`](super::journal)). docs/hbds.md gives the rules.
+//! GTAD, the a.d.t. engine (project 12, pages 45 to 48): classes, their
+//! attributes and links, objects, their values and links, in memory.
+//! Every mutation is one [`Change`], which a [`Recorder`] given to the
+//! store records before it is applied, and which replaying applies again:
+//! persistence is another engine's, behind that trait. docs/hbds.md gives
+//! the rules.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use super::journal::Journal;
-use crate::spec::Spec;
-use crate::value::Value;
-pub use crate::{fold, same};
+pub use hbds_core::spec::Spec;
+use hbds_core::value::Value;
+pub use hbds_core::{AdtRef, Id, fold, same};
 
-pub type Id = u64;
+/// What makes a store durable: given every change before it is applied.
+pub trait Recorder: Send {
+    fn record(&mut self, change: &Change) -> Result<(), String>;
+}
 
-/// An a.d.t., by its id: the six basic ones (page 46).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum AdtRef {
-    Class(Id),
-    Object(Id),
-    ClassAttribute(Id),
-    /// An object, and its class's attribute.
-    ObjectAttribute(Id, Id),
-    ClassLink(Id),
-    ObjectLink(Id),
+/// Properties of an a.d.t., set by a program: pages 156 to 158.
+pub const PROPERTIES: &[(&str, u16)] = &[("COND", 156), ("ACTION", 157)];
+
+pub fn is_property(key: &str) -> bool {
+    PROPERTIES.iter().any(|(name, _)| *name == key)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,7 +202,7 @@ impl fmt::Display for Error {
 
 pub type Stored<T> = Result<T, Error>;
 
-pub(crate) fn error<T>(message: impl Into<String>) -> Stored<T> {
+pub fn error<T>(message: impl Into<String>) -> Stored<T> {
     Err(Error(message.into()))
 }
 
@@ -216,11 +215,11 @@ pub struct Store {
     pub class_links: BTreeMap<Id, ClassLink>,
     pub object_links: BTreeMap<Id, ObjectLink>,
     pub associations: Vec<(AdtRef, AdtRef)>,
-    journal: Option<Journal>,
+    recorder: Option<Box<dyn Recorder>>,
 }
 
 /// Results in order, without repeats.
-pub(crate) fn push_new(out: &mut Vec<AdtRef>, r: AdtRef) {
+pub fn push_new(out: &mut Vec<AdtRef>, r: AdtRef) {
     if !out.contains(&r) {
         out.push(r);
     }
@@ -235,20 +234,14 @@ impl Store {
         }
     }
 
-    /// A store that records every change in `journal`.
-    pub(super) fn journaled(journal: Journal) -> Store {
-        Store {
-            next: 1,
-            journal: Some(journal),
-            ..Store::default()
-        }
+    /// From now on, every change goes to `recorder` before it is applied.
+    pub fn record_to(&mut self, recorder: Box<dyn Recorder>) {
+        self.recorder = Some(recorder);
     }
 
-    /// Takes `other`'s model, keeping this store's journal: a store
-    /// replayed, then journaled.
-    pub(super) fn take(&mut self, other: Store) {
-        let journal = self.journal.take();
-        *self = Store { journal, ..other };
+    /// Applies a change recorded before: what opening a durable store does.
+    pub fn replay(&mut self, change: Change) {
+        self.apply(change);
     }
 
     fn fresh(&mut self) -> Id {
@@ -259,8 +252,8 @@ impl Store {
 
     /// Records `change` in the journal, if there is one, then applies it.
     fn commit(&mut self, change: Change) -> Stored<()> {
-        if let Some(journal) = &mut self.journal {
-            journal.record(&change)?;
+        if let Some(recorder) = &mut self.recorder {
+            recorder.record(&change).map_err(Error)?;
         }
         self.apply(change);
         Ok(())
@@ -268,7 +261,7 @@ impl Store {
 
     /// Applies a change already checked: the one path for every mutation,
     /// live or replayed.
-    pub(super) fn apply(&mut self, change: Change) {
+    fn apply(&mut self, change: Change) {
         let mut seen = |id: Id| self.next = self.next.max(id + 1);
         match &change {
             Change::Class { id, .. } | Change::Object { id, .. } | Change::Attribute { id, .. } => {
@@ -532,14 +525,14 @@ impl Store {
 
     /// Whether an a.d.t. is seen: it is active, and so is what it depends
     /// on (an object's class, a link's two ends, an attribute's carrier).
-    pub(crate) fn active(&self, r: AdtRef) -> bool {
+    pub fn visible(&self, r: AdtRef) -> bool {
         let on = |r| self.state(r) == Some(State::Active);
         match r {
             AdtRef::Class(_) => on(r),
             AdtRef::Object(id) => on(r) && on(AdtRef::Class(self.objects[&id].class)),
             AdtRef::ClassAttribute(id) => on(r) && on(AdtRef::Class(self.attributes[&id].class)),
             AdtRef::ObjectAttribute(o, a) => {
-                self.active(AdtRef::Object(o)) && self.active(AdtRef::ClassAttribute(a))
+                self.visible(AdtRef::Object(o)) && self.visible(AdtRef::ClassAttribute(a))
             }
             AdtRef::ClassLink(id) => {
                 let l = &self.class_links[&id];
@@ -547,7 +540,7 @@ impl Store {
             }
             AdtRef::ObjectLink(id) => {
                 let l = &self.object_links[&id];
-                on(r) && self.active(AdtRef::Object(l.from)) && self.active(AdtRef::Object(l.to))
+                on(r) && self.visible(AdtRef::Object(l.from)) && self.visible(AdtRef::Object(l.to))
             }
         }
     }
@@ -563,7 +556,7 @@ impl Store {
     /// An active class by name.
     pub fn class(&self, name: &str) -> Stored<Id> {
         match self.find_class(name) {
-            Some(id) if self.active(AdtRef::Class(id)) => Ok(id),
+            Some(id) if self.visible(AdtRef::Class(id)) => Ok(id),
             Some(_) => error(format!("the class \"{name}\" is not active")),
             None => error(format!("there is no class \"{name}\"")),
         }
@@ -577,7 +570,7 @@ impl Store {
 
     pub fn object(&self, class: Id, name: &str) -> Stored<Id> {
         match self.find_object(class, name) {
-            Some(id) if self.active(AdtRef::Object(id)) => Ok(id),
+            Some(id) if self.visible(AdtRef::Object(id)) => Ok(id),
             Some(_) => error(format!("the object \"{name}\" is not active")),
             None => error(format!(
                 "there is no object \"{name}\" in \"{}\"",
@@ -594,7 +587,7 @@ impl Store {
 
     pub fn attribute(&self, class: Id, name: &str) -> Stored<Id> {
         match self.find_attribute(class, name) {
-            Some(id) if self.active(AdtRef::ClassAttribute(id)) => Ok(id),
+            Some(id) if self.visible(AdtRef::ClassAttribute(id)) => Ok(id),
             _ => error(format!(
                 "the class \"{}\" has no attribute \"{name}\"",
                 self.classes[&class].name
@@ -614,7 +607,7 @@ impl Store {
 
     pub fn class_link(&self, from: Id, relation: &str, to: Id) -> Stored<Id> {
         match self.find_class_link(from, relation, to) {
-            Some(id) if self.active(AdtRef::ClassLink(id)) => Ok(id),
+            Some(id) if self.visible(AdtRef::ClassLink(id)) => Ok(id),
             _ => error(format!(
                 "there is no link \"{}\" \"{relation}\" \"{}\"",
                 self.classes[&from].name, self.classes[&to].name
@@ -630,7 +623,7 @@ impl Store {
         let class_link = self.find_class_link(a.class, relation, b.class)?;
         (self.object_links.iter())
             .find(|(_, l)| l.class_link == class_link && l.from == from && l.to == to)
-            .filter(|(i, _)| self.active(AdtRef::ObjectLink(**i)))
+            .filter(|(i, _)| self.visible(AdtRef::ObjectLink(**i)))
             .map(|(i, _)| *i)
     }
 
@@ -1054,81 +1047,6 @@ mod tests {
         (s, ids)
     }
 
-    fn names(s: &Store, refs: &[AdtRef]) -> Vec<String> {
-        refs.iter().map(|r| s.describe(*r)).collect()
-    }
-
-    fn apply(s: &Store, name: &str, prefix: &[AdtRef], args: &[&str]) -> Vec<String> {
-        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-        names(s, &s.functor(name, prefix, &args).unwrap())
-    }
-
-    #[test]
-    fn functors() {
-        let (s, i) = world();
-        assert_eq!(
-            apply(&s, "OBJ", &[Class(i["TOWN"])], &[]),
-            ["Lyon[TOWN]", "Arles[TOWN]"]
-        );
-        assert_eq!(apply(&s, "ATT", &[Class(i["TOWN"])], &[]), ["TOWN.AREA"]);
-        assert_eq!(
-            apply(&s, "VATT", &[ClassAttribute(i["AREA"])], &[]),
-            ["Lyon[TOWN].AREA", "Arles[TOWN].AREA"]
-        );
-        assert_eq!(
-            apply(&s, "PSC", &[Class(i["RIVER"])], &[]),
-            ["RIVER \"crosses\" TOWN", "RIVER (unnamed) DAM"]
-        );
-        assert_eq!(
-            apply(&s, "NSC", &[Class(i["RIVER"])], &[]),
-            ["TOWN \"crossed by\" RIVER", "DAM \"feeds\" RIVER"]
-        );
-        assert_eq!(apply(&s, "EFF", &[ClassLink(i["crosses"])], &[]).len(), 2);
-        assert_eq!(
-            apply(&s, "OPSCRC", &[Object(i["Rhone"])], &["crosses", "TOWN"]),
-            [
-                "Rhone[RIVER] \"crosses\" Lyon[TOWN]",
-                "Rhone[RIVER] \"crosses\" Arles[TOWN]"
-            ]
-        );
-        let lyon = [Object(i["Lyon"])];
-        let crossed = s
-            .functor("OPSCRC", &lyon, &["crossed by".into(), "RIVER".into()])
-            .unwrap();
-        assert_eq!(apply(&s, "OFIN", &crossed, &[]), ["Rhone[RIVER]"]);
-        assert_eq!(apply(&s, "OINI", &crossed, &[]), ["Lyon[TOWN]"]);
-        let rhone = [Object(i["Rhone"])];
-        let fed = s
-            .functor("ONSCRC", &rhone, &["feeds".into(), "DAM".into()])
-            .unwrap();
-        assert_eq!(apply(&s, "OINI", &fed, &[]), ["Vouglans[DAM]"]);
-        assert_eq!(
-            apply(&s, "OATTN", &[Object(i["Vouglans"])], &["VOL"]),
-            ["Vouglans[DAM].VOL"]
-        );
-        assert_eq!(apply(&s, "OBJOF", &rhone, &[]), ["RIVER"]);
-        assert_eq!(
-            apply(&s, "INV", &[ClassLink(i["crosses"])], &[]),
-            ["TOWN \"crossed by\" RIVER"]
-        );
-        assert_eq!(
-            apply(&s, "CONT", &[Class(i["HYDRO"])], &[]),
-            ["TOWN", "RIVER"]
-        );
-        assert_eq!(apply(&s, "CONTOF", &[Class(i["TOWN"])], &[]), ["HYDRO"]);
-        // A list prefix: results united, in order, without repeats.
-        assert_eq!(
-            apply(
-                &s,
-                "OBJOF",
-                &[Object(i["Lyon"]), Object(i["Arles"]), Object(i["Rhone"])],
-                &[]
-            ),
-            ["TOWN", "RIVER"]
-        );
-        assert!(s.functor("OBJ", &rhone, &[]).is_err());
-    }
-
     #[test]
     fn reflexive_links_are_their_own_reverse() {
         let (s, i) = world();
@@ -1138,55 +1056,6 @@ mod tests {
         assert!(s.object_link(i["Arles"], "neighbor", i["Lyon"]).is_some());
         assert!(s.object_link(i["Lyon"], "crosses", i["Rhone"]).is_none());
         assert!(s.object_link(i["Lyon"], "crossed by", i["Rhone"]).is_some());
-    }
-
-    #[test]
-    fn states() {
-        let (mut s, i) = world();
-        let lyon = Object(i["Lyon"]);
-        s.change_state(lyon, State::Active, State::Hibernating)
-            .unwrap();
-        assert_eq!(apply(&s, "OBJ", &[Class(i["TOWN"])], &[]), ["Arles[TOWN]"]);
-        assert!(s.purge_adt(lyon).is_err());
-        s.change_state(lyon, State::Hibernating, State::Active)
-            .unwrap();
-        s.change_state(lyon, State::Active, State::Destroyed)
-            .unwrap();
-        assert!(
-            s.change_state(lyon, State::Hibernating, State::Active)
-                .is_err()
-        );
-        s.purge_adt(lyon).unwrap();
-        assert_eq!(apply(&s, "OBJ", &[Class(i["TOWN"])], &[]), ["Arles[TOWN]"]);
-        // Its links went with it.
-        assert_eq!(
-            apply(&s, "OPSC", &[Object(i["Rhone"])], &[]),
-            [
-                "Rhone[RIVER] \"crosses\" Arles[TOWN]",
-                "Rhone[RIVER] (unnamed) Vouglans[DAM]"
-            ]
-        );
-        assert!(s.object(i["TOWN"], "Lyon").is_err());
-    }
-
-    #[test]
-    fn names_compare_folded() {
-        let (mut s, i) = world();
-        assert_eq!(s.class("town"), Ok(i["TOWN"]));
-        assert_eq!(s.object(i["TOWN"], "LYON"), Ok(i["Lyon"]));
-        assert_eq!(s.attribute(i["TOWN"], "Area"), Ok(i["AREA"]));
-        assert!(s.object_link(i["Rhone"], "CROSSES", i["Lyon"]).is_some());
-        assert_eq!(
-            apply(&s, "OPSCRC", &[Object(i["Rhone"])], &["Crosses", "town"]).len(),
-            2
-        );
-        assert_eq!(
-            apply(&s, "OATTN", &[Object(i["Vouglans"])], &["vol"]),
-            ["Vouglans[DAM].VOL"]
-        );
-        // Kept as written; one name, whatever the case.
-        assert_eq!(s.describe(Class(i["TOWN"])), "TOWN");
-        assert!(s.create_class("Town", ClassKind::Class).is_err());
     }
 
     #[test]
@@ -1209,5 +1078,46 @@ mod tests {
                 .is_err()
         );
         assert!(s.attribute(i["RIVER"], "AREA").is_err());
+    }
+
+    #[test]
+    fn names_compare_folded() {
+        let (mut s, i) = world();
+        assert_eq!(s.class("town"), Ok(i["TOWN"]));
+        assert_eq!(s.object(i["TOWN"], "LYON"), Ok(i["Lyon"]));
+        assert_eq!(s.attribute(i["TOWN"], "Area"), Ok(i["AREA"]));
+        assert!(s.object_link(i["Rhone"], "CROSSES", i["Lyon"]).is_some());
+        assert_eq!(s.describe(Class(i["TOWN"])), "TOWN");
+        assert!(s.create_class("Town", ClassKind::Class).is_err());
+    }
+
+    #[test]
+    fn a_recorder_sees_every_change_first() {
+        struct Count(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+        impl Recorder for Count {
+            fn record(&mut self, change: &Change) -> Result<(), String> {
+                self.0.lock().unwrap().push(format!("{change:?}"));
+                Ok(())
+            }
+        }
+        struct Refuse;
+        impl Recorder for Refuse {
+            fn record(&mut self, _: &Change) -> Result<(), String> {
+                Err("the disk is full".into())
+            }
+        }
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut s = Store::memory();
+        s.record_to(Box::new(Count(seen.clone())));
+        let c = s.create_class("TOWN", ClassKind::Class).unwrap();
+        s.create_object(c, "Lyon").unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        // A change the recorder refuses is not applied.
+        s.record_to(Box::new(Refuse));
+        assert_eq!(
+            s.create_class("RIVER", ClassKind::Class),
+            Err(Error("the disk is full".into()))
+        );
+        assert!(s.find_class("RIVER").is_none());
     }
 }

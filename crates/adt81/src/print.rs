@@ -6,7 +6,7 @@
 use std::fmt;
 
 use super::ast::*;
-use hbds::value::float;
+use hbds_core::value::float;
 
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

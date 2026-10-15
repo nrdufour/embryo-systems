@@ -1,18 +1,72 @@
-//! HBDS, the engine: the a.d.t. a program creates and queries, kept in
-//! memory and, given a directory, made durable by a journal; their
-//! values, specifications and functors. It names no language: languages
-//! (ADT'81 first) depend on it, never the other way round. docs/hbds.md
-//! tells how, and what is decided.
+//! The vocabulary the HBDS engines share: values, references to a.d.t.,
+//! their types and kinds, specifications, functor signatures. Data only;
+//! each engine is a crate of its own on top of it (docs/hbds.md,
+//! "Engines").
 
 use std::fmt;
 
-pub mod functors;
-pub mod journal;
 pub mod spec;
-pub mod store;
 pub mod value;
 
-pub use store::{AdtRef, Store};
+pub type Id = u64;
+
+/// An a.d.t., by its id: the six basic ones (page 46).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum AdtRef {
+    Class(Id),
+    Object(Id),
+    ClassAttribute(Id),
+    /// An object, and its class's attribute.
+    ObjectAttribute(Id, Id),
+    ClassLink(Id),
+    ObjectLink(Id),
+}
+
+/// A functor as a catalogue describes it: its name, the page that lists
+/// it, what it applies to and what it gives.
+pub struct Functor {
+    pub name: &'static str,
+    pub page: u16,
+    pub takes: Takes,
+    pub gives: Gives,
+}
+
+impl Functor {
+    pub const fn new(name: &'static str, page: u16, takes: Takes, gives: Gives) -> Functor {
+        Functor {
+            name,
+            page,
+            takes,
+            gives,
+        }
+    }
+}
+
+/// What a functor applies to: one of these, or a list of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Takes {
+    Classes,
+    ClassAttributes,
+    ClassLinks,
+    Objects,
+    ObjectAttributes,
+    ObjectLinks,
+    /// A list, of anything.
+    Lists,
+    Any,
+}
+
+/// What a functor gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gives {
+    ListOf(AdtType),
+    Integer,
+    /// An element of the prefix list.
+    Element,
+    /// A list like the prefix.
+    Same,
+    Unknown,
+}
 
 /// The a.d.t. of HBDS: the six basic ones (page 46) and their extensions
 /// (page 47).

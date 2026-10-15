@@ -12,7 +12,7 @@ use std::cmp::Ordering;
 
 use super::ast::{BinaryOp, UnaryOp};
 use super::types::Ty;
-pub use hbds::value::{Array, Fz, List, Rank, Scalar, Value, float};
+pub use hbds_core::value::{Array, Fz, List, Rank, Scalar, Value, float};
 
 /// An array's rank as the store keeps it.
 pub fn rank(r: super::ast::Rank) -> Rank {
@@ -634,30 +634,16 @@ pub fn binary(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
     Ok(lift(values, many))
 }
 
+/// UNION, INTER and COMPL: the list engine's.
 fn list_op(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
     let (Value::List(l), Value::List(m)) = (a, b) else {
         return fault("UNION, INTER and COMPL take lists");
     };
-    let items = match op {
-        BinaryOp::Union => {
-            let mut items = l.items.clone();
-            items.extend(m.items.iter().filter(|x| !l.items.contains(x)).cloned());
-            items
-        }
-        BinaryOp::Inter => l
-            .items
-            .iter()
-            .filter(|x| m.items.contains(x))
-            .cloned()
-            .collect(),
-        _ => l
-            .items
-            .iter()
-            .filter(|x| !m.items.contains(x))
-            .cloned()
-            .collect(),
-    };
-    Ok(Value::List(List::new(items)))
+    Ok(Value::List(match op {
+        BinaryOp::Union => hbds_lists::union(l, m),
+        BinaryOp::Inter => hbds_lists::inter(l, m),
+        _ => hbds_lists::compl(l, m),
+    }))
 }
 
 /// Page 153: `[+]` adds arrays, `[*]` multiplies matrices or an array by a

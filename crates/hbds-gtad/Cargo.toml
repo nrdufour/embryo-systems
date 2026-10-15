@@ -1,0 +1,8 @@
+[package]
+name = "hbds-gtad"
+version = "0.1.0"
+edition = "2024"
+
+# The a.d.t. model, GTAD (project 12, pages 45 to 48).
+[dependencies]
+hbds-core = { path = "../hbds-core" }

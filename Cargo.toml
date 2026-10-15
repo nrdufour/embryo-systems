@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/hbds", "crates/adt81"]
+members = [
+    "crates/hbds-core",
+    "crates/hbds-lists",
+    "crates/hbds-gtad",
+    "crates/hbds-functors",
+    "crates/hbds-journal",
+    "crates/adt81",
+]
 resolver = "3"
 
 [package]
@@ -9,4 +16,5 @@ edition = "2024"
 
 [dependencies]
 adt81 = { path = "crates/adt81" }
-hbds = { path = "crates/hbds" }
+hbds-gtad = { path = "crates/hbds-gtad" }
+hbds-journal = { path = "crates/hbds-journal" }

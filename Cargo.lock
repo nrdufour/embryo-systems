@@ -6,7 +6,11 @@ version = 4
 name = "adt81"
 version = "0.1.0"
 dependencies = [
- "hbds",
+ "hbds-core",
+ "hbds-functors",
+ "hbds-gtad",
+ "hbds-journal",
+ "hbds-lists",
 ]
 
 [[package]]
@@ -14,9 +18,40 @@ name = "embryo-systems"
 version = "0.1.0"
 dependencies = [
  "adt81",
- "hbds",
+ "hbds-gtad",
+ "hbds-journal",
 ]
 
 [[package]]
-name = "hbds"
+name = "hbds-core"
 version = "0.1.0"
+
+[[package]]
+name = "hbds-functors"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
+ "hbds-gtad",
+]
+
+[[package]]
+name = "hbds-gtad"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
+]
+
+[[package]]
+name = "hbds-journal"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
+ "hbds-gtad",
+]
+
+[[package]]
+name = "hbds-lists"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
+]
