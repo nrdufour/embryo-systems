@@ -266,3 +266,50 @@ fn a_rule_in_another_language_is_not_run() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+const BODY: &str = r#"
+COROUTINE "pump" ;
+BEGIN
+        PRINT "starts at", THIS . "CLOCK" ;
+        LOOP WHILE TRUE DO HOLD FOR 2 ENDLOOP
+END ;
+"#;
+
+#[test]
+fn processes_outlive_their_run_but_not_their_sequencing_set() {
+    let dir = directory("processes");
+    let (store, _) = open(&dir);
+    let first = r#"
+PROGRAM FIRST ;
+BEGIN
+        CREATE "pump" ;
+        INCLUDE "pump" INTO "PROCESS" ;
+        CREATE "p" [ "pump" ] ;
+        ACTIVATE "p" [ "pump" ] ;
+        HOLD FOR 5
+END ;
+"#;
+    assert_eq!(run(&(first.to_string() + BODY), &store), "starts at 0.0\n");
+    drop(store);
+    // Due at 6 when the run ended: passive now, its clock kept; its body
+    // starts again from the top when reactivated.
+    let (store, _) = open(&dir);
+    let second = r#"
+PROGRAM SECOND ;
+BEGIN
+        PRINT "p" [ "pump" ] . "STATE", "p" [ "pump" ] . "CLOCK" ;
+        REACTIVATE "p" [ "pump" ] ;
+        HOLD FOR 1
+END ;
+"#;
+    assert_eq!(
+        run(&(second.to_string() + BODY), &store),
+        "PASSIVE 6.0\nstarts at 0.0\n"
+    );
+    drop(store);
+    let (store, _) = open(&dir);
+    let third =
+        r#"PROGRAM THIRD ; BEGIN PRINT "p" [ "pump" ] . "STATE", "p" [ "pump" ] . "CLOCK" END ;"#;
+    assert_eq!(run(third, &store), "PASSIVE 2.0\n");
+    let _ = fs::remove_dir_all(&dir);
+}

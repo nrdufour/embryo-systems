@@ -1,0 +1,15 @@
+-- REACTIVATE AT a time already past. Written for the simulation tests. --
+
+PROGRAM PAST ;
+BEGIN
+        CREATE "worker" ;
+        INCLUDE "worker" INTO "PROCESS" ;
+        CREATE "w" [ "worker" ] ;
+        HOLD FOR 5 ;
+        REACTIVATE "w" [ "worker" ] AT 2
+END ;
+
+COROUTINE "worker" ;
+BEGIN
+        HOLD FOR 1
+END ;

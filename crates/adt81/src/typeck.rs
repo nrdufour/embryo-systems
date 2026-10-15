@@ -442,8 +442,14 @@ impl<'c> Checker<'c> {
                     Some(When::Before(o) | When::After(o)) => self.object(o),
                 }
             }
-            StmtKind::Delay { object, duration } | StmtKind::Hold { object, duration } => {
+            StmtKind::Delay { object, duration } => {
                 self.object(object);
+                self.number(duration, "the duration");
+            }
+            StmtKind::Hold { object, duration } => {
+                if let Some(o) = object {
+                    self.object(o);
+                }
                 self.number(duration, "the duration");
             }
             StmtKind::Call(c) | StmtKind::Resume(c) => self.args(c),

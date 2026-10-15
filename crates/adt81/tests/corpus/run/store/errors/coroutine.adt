@@ -1,0 +1,12 @@
+-- A coroutine RESUME started is not a process: it does not HOLD. --
+-- Written for the simulation tests. --
+
+PROGRAM HOLDER ;
+BEGIN
+        RESUME K
+END ;
+
+COROUTINE K ;
+BEGIN
+        HOLD FOR 1
+END ;

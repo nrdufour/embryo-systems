@@ -18,7 +18,8 @@ ALLOWED = {
     "hbds-functors": {"hbds-core", "hbds-gtad"},
     "hbds-journal": {"hbds-core", "hbds-gtad"},
     "hbds-rules": {"hbds-core", "hbds-gtad"},
-    "adt81": {"hbds-core", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules"},
+    "hbds-simulation": {"hbds-core", "hbds-gtad"},
+    "adt81": {"hbds-core", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules", "hbds-simulation"},
     "embryo-systems": {"adt81", "hbds-gtad", "hbds-journal"},
 }
 

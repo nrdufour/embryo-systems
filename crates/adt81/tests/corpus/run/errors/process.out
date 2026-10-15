@@ -1,2 +1,2 @@
 before
-7:9: runtime error: processes come with the simulation engine (page 112): not yet
+7:9: runtime error: m1[MACHINE] is not a process: its class is not in PROCESS

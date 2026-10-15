@@ -124,6 +124,8 @@ pub enum ModuleName {
         class: Str,
         attribute: Str,
     },
+    /// A process class's body, `COROUTINE "PUMP"` (page 112).
+    Body(Str),
 }
 
 // Types, pages 20 and 21
@@ -582,8 +584,9 @@ pub enum StmtKind {
         object: Designation,
         duration: Expr,
     },
+    /// The current process, `HOLD FOR dt` (page 125), or one named.
     Hold {
-        object: Designation,
+        object: Option<Designation>,
         duration: Expr,
     },
     Passivate,

@@ -297,6 +297,7 @@ impl Gen {
                 class: self.str(),
                 attribute: self.str(),
             },
+            ModuleKind::Coroutine if self.0.one_in(3) => ModuleName::Body(self.str()),
             _ => ModuleName::Name(self.module_name()),
         };
         let (parameters, specifications) = match kind {
@@ -724,7 +725,7 @@ impl Gen {
                 duration: self.expr(e),
             },
             33 => StmtKind::Hold {
-                object: self.object(1),
+                object: self.some(|s| s.object(1)),
                 duration: self.expr(e),
             },
             34 => match self.0.below(3) {

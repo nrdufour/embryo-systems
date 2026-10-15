@@ -1,0 +1,16 @@
+-- ACTIVATE of a process already in the sequencing set: it is not --
+-- passive (figure 52). Written for the simulation tests. --
+
+PROGRAM TWICE ;
+BEGIN
+        CREATE "worker" ;
+        INCLUDE "worker" INTO "PROCESS" ;
+        CREATE "w" [ "worker" ] ;
+        ACTIVATE "w" [ "worker" ] ;
+        ACTIVATE "w" [ "worker" ]
+END ;
+
+COROUTINE "worker" ;
+BEGIN
+        HOLD FOR 1
+END ;

@@ -48,6 +48,8 @@ rules! {
     Coroutine = "coroutine",
     Functor = "functor",
     ComputedAttribute = "computed_attribute",
+    ProcessClass = "process_class",
+    Hold = "hold",
     ModuleName = "module_name",
     FormalParameters = "formal_parameters",
     ParameterSpecifications = "parameter_specifications",
@@ -579,7 +581,12 @@ impl<'a> Parser<'a> {
     }
 
     fn coroutine(&mut self) -> Parse<Node<'a>> {
-        let mut c = vec![self.kw("COROUTINE")?, self.module_name()?];
+        let mut c = vec![self.kw("COROUTINE")?];
+        if self.is_kind(0, Kind::String) {
+            c.push(node(R::ProcessClass, vec![self.take()]));
+        } else {
+            c.push(self.module_name()?);
+        }
         c.push(self.formal_parameters()?);
         c.push(self.sym(";")?);
         self.module_tail(&mut c)?;
@@ -1322,10 +1329,18 @@ impl<'a> Parser<'a> {
                     self.expect(Expected::Word("AFTER"));
                 }
             }
-            "DELAY" | "HOLD" => {
+            "DELAY" => {
                 c.push(self.object()?);
                 c.push(self.kw("FOR")?);
                 c.push(self.expression()?);
+            }
+            "HOLD" => {
+                if !self.is_kw(0, "FOR") {
+                    c.push(self.object()?);
+                }
+                c.push(self.kw("FOR")?);
+                c.push(self.expression()?);
+                return Ok(node(R::ProcessStatement, vec![node(R::Hold, c)]));
             }
             _ => c.push(self.object()?),
         }

@@ -1,0 +1,6 @@
+-- A duration is not negative. Written for the simulation tests. --
+
+PROGRAM NEGATIVE ;
+BEGIN
+        HOLD FOR -1
+END ;
