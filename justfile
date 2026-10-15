@@ -44,8 +44,16 @@ fmt-check:
     cargo fmt --all --check
     nixfmt --check $(git ls-files '*.nix')
 
+# The benchmarks, compared against bench/<host>.txt when this host has one.
+bench *scenarios:
+    cargo run --quiet --release -p embryo-systems-bench -- {{ scenarios }}
+
+# Measure every benchmark and write bench/<host>.txt: a change of speed, on purpose.
+bench-record:
+    cargo run --quiet --release -p embryo-systems-bench -- --record
+
 # What CI runs, so a red build is reproducible in one command.
-check: fmt-check lint test check-grammar engines docs confusables
+check: fmt-check lint test check-grammar engines docs confusables bench
 
 # Characters that render like ASCII, or render as nothing at all, but compare
 # unequal. CI runs this in its own workflow, without a path filter, so it

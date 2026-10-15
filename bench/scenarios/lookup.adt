@@ -1,0 +1,23 @@
+-- Lookups by name: n objects, then each found again by its name, in the --
+-- order stdin gives, and its attribute read. --
+
+program lookup ;
+local
+        s : string ;
+        n, i, t : integer ;
+begin
+        create "town" ;
+        create "town" . "inhabitants" ;
+        read n ;
+        loop for i : 1 to n do
+                read s ;
+                create s [ "town" ] ;
+                let s [ "town" ] . "inhabitants" := i
+        endloop ;
+        t := 0 ;
+        loop for i : 1 to n do
+                read s ;
+                t := t + s [ "town" ] . "inhabitants"
+        endloop ;
+        print t
+end ;

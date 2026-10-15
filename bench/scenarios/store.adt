@@ -1,0 +1,18 @@
+-- The store: n objects of one class, an attribute set on each, then the --
+-- class's cardinal and the attribute's sum. The names come on stdin. --
+
+program store ;
+local
+        s : string ;
+        n, i : integer ;
+begin
+        create "town" ;
+        create "town" . "inhabitants" ;
+        read n ;
+        loop for i : 1 to n do
+                read s ;
+                create s [ "town" ] ;
+                let s [ "town" ] . "inhabitants" := i
+        endloop ;
+        print "town" ' obj ' card, "town" ' obj ' oattn("inhabitants") ' sigma
+end ;
