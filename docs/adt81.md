@@ -1,4 +1,4 @@
-# ADT'81: how the grammar was derived
+# ADT'81
 
 ADT'81 is the programming language of François Bouillé's HBDS system. Its
 definition is the "BNF simplifiée" printed in the 1995 polycopié, pages 19 to
@@ -6,8 +6,10 @@ definition is the "BNF simplifiée" printed in the 1995 polycopié, pages 19 to
 The polycopié itself is not in this repository: its copyright is under review,
 so this project quotes and cites it, and carries none of it.
 
-`crates/adt81/grammar.lark` is our grammar of the same language. This page tells how
-it was obtained, where it departs from the print, and why.
+`crates/adt81/grammar.lark` is our grammar of the same language, and
+`crates/adt81` its implementation. This page tells how the grammar was
+obtained, where it departs from the print and why, then what the checker
+checks and how programs run.
 
 ## Method
 
@@ -42,6 +44,22 @@ it was obtained, where it departs from the print, and why.
    back, each gives the tree it came from; and Lark reads each printed
    program one way only, to the Rust parser's tree. That search found one
    more statement the grammar read two ways, settled below.
+9. **A checker and an interpreter** on that tree, each rule tested on
+   programs written for it, with outputs written by hand before the first
+   run.
+
+Each layer is checked against the one before it:
+
+```mermaid
+flowchart LR
+    print["the print's BNF<br/>pages 19 to 28"] -->|rewritten, departures cited| lark["grammar.lark"]
+    listings["the eleven listings<br/>(archive, locally)"] -->|parse one way| lark
+    lark -->|"Lark's tree = the Rust parser's tree<br/>corpus, 200 random programs"| parser["Rust parser"]
+    parser --> ast["typed tree"]
+    ast -->|"print, read back: same tree"| ast
+    ast --> checker["checker"] --> interp["interpreter"]
+    interp -->|"output = the expected one,<br/>written by hand"| golden["golden programs"]
+```
 
 ## The print's notation
 
@@ -211,9 +229,10 @@ fragments are excerpts, with no module to declare their names.
   call in an expression a function, `'` a functor. The wrong kind is an
   error; an unknown subroutine, coroutine or program too.
 - An unknown function, functor or property (`LET ... ' COND`) is only a
-  warning (decided 2026-10-15): `crates/adt81/src/builtins.rs` lists the
-  built-in functors of pages 76 to 80 and the properties of pages 156 to
-  158, but the print says its lists are partial, and lists no function.
+  warning (decided 2026-10-15): the engines catalogue the functors of
+  pages 76 to 80 (`crates/hbds-functors`, `crates/hbds-lists`) and the
+  properties of pages 156 to 158 (`crates/hbds-gtad`), but the print says
+  its lists are partial, and lists no function.
 - Not checked: unit names (`UNIT (m3s)`), which the print does not list,
   and `THIS`.
 
@@ -272,9 +291,9 @@ The rules:
 finds errors, then runs its first PROGRAM: READ reads standard input, a
 line per variable (a literal, fuzzy ones included, or text as it is),
 PRINT writes its values on one line. A runtime error stops it, with its
-position. Classes, objects, attributes and links live in the HBDS store
-([hbds.md](hbds.md)); processes, and running COND and ACTION, are not
-there yet, and say so.
+position. Classes, objects, attributes and links live in the HBDS store,
+where COND and ACTION run as they change ([hbds.md](hbds.md)); processes,
+the simulation engine's, are not there yet, and say so.
 
 Decided on 2026-10-15:
 
@@ -339,15 +358,17 @@ expression written as a string), and fragments.
 | `crates/adt81/src/ast.rs`, `lower.rs` | the typed tree, and the parser's tree lowered to it |
 | `crates/adt81/src/print.rs` | the typed tree written back as source, `embryo-systems fmt` |
 | `crates/adt81/src/sample.rs`, `crates/adt81/examples/sample.rs` | random programs, for the tests and the gate |
-| `crates/adt81/src/names.rs`, `builtins.rs`, `diagnostic.rs` | name resolution, the built-in catalogue, what the checker reports |
+| `crates/adt81/src/names.rs`, `diagnostic.rs` | name resolution, and what the checker reports |
+| `crates/adt81/src/builtins.rs` | the names ADT'81 knows: the engines' functors and properties, and its own math functions |
 | `crates/adt81/tests/corpus/checked/*.adt` | programs that must check clean |
-| `tests/names.rs` | name resolution, rule by rule |
+| `crates/adt81/tests/names.rs` | name resolution, rule by rule |
 | `crates/adt81/src/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |
-| `tests/types.rs` | kinds and types, rule by rule |
+| `crates/adt81/tests/types.rs` | kinds and types, rule by rule |
 | `crates/adt81/src/value.rs`, `interp.rs` | values and their fuzzy arithmetic, and the interpreter |
 | `crates/adt81/tests/corpus/run/` | programs with their input and expected output, runtime errors included |
-| `tests/run.rs` | runs them |
-| `tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |
+| `crates/adt81/tests/run.rs` | runs them |
+| `crates/adt81/tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |
+| `crates/adt81/tests/corpus.rs` | every corpus file lexes and parses, every reject is refused |
 
 `just check` runs the gate with the rest: every test program, and 200
 random ones, parses one way only and to the same tree in Rust, every reject

@@ -4,8 +4,9 @@
 //!
 //! A tree walk over the [`ast`](super::ast) of a program the checker has
 //! passed. Classes, objects, attributes and links live in the HBDS
-//! [`Store`]; processes, and COND and ACTION, are not run yet: reaching
-//! them is a runtime error that says so.
+//! [`Store`], whose COND and ACTION run when they change, a statement
+//! being a transaction; processes, the simulation engine's, are not there
+//! yet: reaching them is a runtime error that says so.
 //!
 //! Each coroutine runs on its own thread, and control passes by channel,
 //! so that only one thread ever runs: RESUME continues a coroutine where
