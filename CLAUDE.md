@@ -4,7 +4,9 @@ Guidance for Claude Code working in this repository.
 
 ## What this is
 
-Rebuilding François Bouillé's HBDS system from the 1995 polycopié, in Rust
+Rebuilding François Bouillé's HBDS system from the 1995 polycopié, in Rust:
+the engines in `crates/hbds-*`, the language in `crates/adt81`. README tells
+what works and how it fits together; `docs/` holds every decision.
 
 ## Rules
 
@@ -38,6 +40,9 @@ command.
   invisible: em and en dashes, minus signs, smart quotes, middle dots, ellipses,
   non-breaking and zero-width spaces. Visually distinct symbols are fine and
   wanted - degrees, arrows, `>=`. CI enforces exactly this.
+- **Docs name only what exists.** Every path and relative link in the
+  Markdown files must resolve; `just docs` checks it, so a move or a rename
+  updates the docs in the same change.
 - **Tool versions live in `flake.nix`**, nowhere else. No version numbers in
   workflow YAML.
 - **Renovate defaults are shared** (`nemo/renovate-config`). `renovate.json5`

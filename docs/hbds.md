@@ -1,8 +1,8 @@
-# The HBDS store
+# The HBDS engines
 
 What ADT'81 programs create and query: classes, their attributes and
-links, objects, their values and links. The print builds it in three
-layers:
+links, objects, their values and links, and the engines that keep and
+query them. The print builds the store in three layers:
 
 - **GTAD**, the a.d.t. engine, in memory (pages 45 to 48);
 - **ZE**, the exchange zone, a write-through cache of the persistent a.d.t.
@@ -11,8 +11,9 @@ layers:
   granules, index blocks and DAYFILE journal (pages 86 to 102).
 
 `crates/hbds-gtad` is the first layer, made durable by a journal in the
-DAYFILE's spirit (`crates/hbds-journal`). A faithful SFSI and ZE are a project of their own, as they are in
-the print (project 13); they can come later behind the same interface.
+DAYFILE's spirit (`crates/hbds-journal`). A faithful SFSI and ZE are a
+project of their own, as they are in the print (project 13); they can
+come later behind the same interface.
 
 ## Engines and languages
 
@@ -95,11 +96,50 @@ invoked, the associated condition is implicitly tested", and the action
   language they are written in; ADT'81 runs its own, and says so of any
   other.
 
+A statement that changes the store runs as one transaction:
+
+```mermaid
+sequenceDiagram
+    participant S as statement
+    participant G as GTAD
+    participant T as COND / ACTION
+    participant J as journal
+    S->>G: begin
+    S->>G: change (create, set, link)
+    G-->>S: applied, not yet recorded
+    S->>T: run the COND of the a.d.t. changed, THIS the object
+    alt the COND holds
+        T->>G: the ACTION's changes (nested, 64 deep at most)
+        S->>G: end, keep
+        G->>J: every change, in one write
+    else the COND is false, or an error
+        S->>G: end, refuse
+        G-->>G: the model as it was at begin
+    end
+```
+
 A COND names an attribute with a quote written twice inside its string,
 `"THIS . ""temp"" > 0."`; page 158's own `THIS."temp" > 0. "` is not one
 string ([adt81.md](adt81.md), "Decisions").
 
 ## The model
+
+The six basic a.d.t. (page 46, figure 6), as the store keeps them: a
+class carries attributes and links to other classes; an object belongs to
+a class, carries values for its class's attributes, and links realizing
+its class's links. Every link has its reverse.
+
+```mermaid
+flowchart LR
+    C[class] -- "has" --> A["class attribute"]
+    C -- "class link<br/>and its reverse" --> D["another class"]
+    O[object] -- "belongs to" --> C
+    O -- "has a value of" --> OA["object attribute"]
+    OA -- "realizes" --> A
+    O -- "object link<br/>and its reverse" --> P["another object"]
+    P -- "belongs to" --> D
+    H[hyperclass] -- "includes" --> C
+```
 
 - **Classes** are named by strings. An object is named within its class,
   `"Paris" [ "TOWN" ]`. A class is a class, an embryo (DESIGN), a
@@ -146,7 +186,7 @@ set 7 3 (i 522000)
 set 7 4 (fz (f 284.5) 0.5 - -)
 objectlink 9 10 5 8 7 0.9
 specify (ca 4) "FLOAT APPR" "kelvin" false
-property (ca 4) "COND" "ADT'81" "THIS . T > 0."
+property (ca 4) "COND" "ADT'81" "THIS . \"TEMP\" > 0."
 state (o 8) destroyed
 ```
 
@@ -162,6 +202,11 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
   whether building one copies the embryos' attributes and links, and how
   the structure's classes are named, the print does not say. BUILD records
   the structure and its prototype.
+- **What a class inherits from its hyperclass.** Page 159 has "all
+  classes included in" the hyperclass CONSTRAINT "inherit of the FORMULA",
+  its attribute. INCLUDE records the inclusion; nothing is inherited yet.
+- **What associations are for.** ASSOC and DISSOC keep their pairs (page
+  24, figure 9's multi-layer system), but no functor reads them yet.
 - Processes (ACTIVATE...) belong to the simulation engine (page 112).
 
 ## Files
@@ -175,4 +220,4 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `tools/check_engines.py` | what each crate may depend on |
 | `crates/adt81/src/interp.rs` | the a.d.t. statements and expressions, on the store |
 | `crates/adt81/tests/corpus/run/store/` | programs on the store, with their expected output |
-| `tests/store.rs` | the store across runs, a torn journal, a corrupt one |
+| `crates/adt81/tests/store.rs` | the store across runs, a torn journal, a corrupt one, a refused change, code in another language |

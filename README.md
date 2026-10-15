@@ -1,44 +1,130 @@
 # embryo-systems
 
-Rebuilding François Bouillé's HBDS system from the 1995 polycopié, in Rust.
-The scans live in `embryo-systems-archive` (private); the site is
-`embryo-systems.info`.
+Rebuilding François Bouillé's HBDS system from his 1995 course notes, the
+polycopié, in Rust.
 
-## ADT'81
+HBDS (*Hypergraph-Based Data Structure*) models a world as classes and
+objects, their attributes and the links between them, queried by
+functors. ADT'81 is its programming language. The scans and their
+transcriptions live in the private `embryo-systems-archive`. This
+repository quotes and cites them, and copies nothing from them. The site
+is `embryo-systems.info`.
 
-The language of HBDS. `crates/adt81/grammar.lark` is its grammar, derived from the
-polycopié's BNF and code; [docs/adt81.md](docs/adt81.md) tells how, and every
-decision taken on it. `crates/adt81` is the Rust implementation: a lexer, a
-parser, a typed tree, a checker and an interpreter.
+## Quick start
+
+With Nix, `direnv allow` once, or `nix develop`: the flake carries every
+tool. Without it, a Rust toolchain of 1.88 or later (edition 2024, let-chains) builds
+and tests everything; the grammar gate also needs Python 3 with
+[Lark](https://github.com/lark-parser/lark), and the recipes
+[just](https://github.com/casey/just). Then:
 
 ```sh
-cargo run -q -- run crates/adt81/tests/corpus/run/hello.adt    # Hello, world!
+cargo run -q -- run crates/adt81/tests/corpus/run/hello.adt      # Hello, world!
+cargo run -q -- check crates/adt81/tests/corpus/checked/roads.adt # names and types
+cargo run -q -- run --store /tmp/hydro crates/adt81/tests/corpus/run/store/functors.adt
+cargo run -q -- store /tmp/hydro                                   # what the store keeps
 ```
 
-`embryo-systems run FILE` checks a program and runs it, its classes and
-objects lasting the run; `run --store DIR FILE` keeps them in the HBDS
-store in DIR, for the next program ([docs/hbds.md](docs/hbds.md)), and
-`store DIR` shows what it holds. `check FILE` only checks a program,
-`fmt FILE` prints it in canonical form, `parse FILE` prints its syntax
-tree. `crates/adt81/tests/corpus/run/` holds more programs to run, with their expected
-output.
+| command | what it does |
+|---|---|
+| `embryo-systems run [--store DIR] FILE` | checks a program, then runs it. Its classes and objects last the run, or stay in the store in DIR for the next program. READ reads stdin, PRINT writes stdout. |
+| `embryo-systems check FILE` | undeclared and misused names, type errors |
+| `embryo-systems store DIR` | prints a store's contents |
+| `embryo-systems fmt FILE` | the program in canonical form |
+| `embryo-systems parse FILE`, `lex FILE` | the syntax tree, the tokens |
 
-## Layout
+`crates/adt81/tests/corpus/run/` holds programs to run, each with its expected output.
+
+## What works
+
+- **ADT'81, the whole language:**
+  - a grammar derived from the print's BNF and checked against the polycopié's eleven code listings
+  - a parser checked tree for tree against Lark
+  - a checker for names, types and fuzziness
+  - an interpreter, covering every number type (Gauss integers and quaternions included), fuzzy arithmetic, lists, arrays, modules, functors and coroutines
+- **The HBDS store:** classes, objects, attributes, links and their reverses, states, hyperclasses, every functor of the catalogue, and computed attributes. It is in memory, and made durable by a journal.
+- **COND and ACTION:** the constraints and actions a.d.t. carry run when the a.d.t. changes. A statement is a transaction: it is kept whole, or refused whole.
+- **The polycopié's own code runs:** pages 127-128's computed attributes ARC.LENGTH and AREA.PERIMETER give the right answers on a test schema, once three print errors are corrected.
+
+Every departure from the print, and every decision the print left open, is recorded with its page in [docs/adt81.md](docs/adt81.md) and [docs/hbds.md](docs/hbds.md).
+
+## How it fits together
+
+A program goes through the language's layers, then reaches the engines:
+
+```mermaid
+flowchart LR
+    src[".adt source"] --> lexer --> parser --> lower["typed tree"]
+    lower --> names["name resolution"] --> types["kinds and types"]
+    types --> interp[interpreter]
+    interp --> gtad["GTAD: a.d.t."]
+    interp --> lists["list engine"]
+    interp --> functors["functor engine"]
+    gtad -- "each change, through Recorder" --> journal[(journal)]
+    grammar["grammar.lark"] -. "the parser builds Lark's tree" .-> parser
+```
+
+Each engine is a crate of its own, as in the print, where each engine (*moteur*) is a project of its own. A language is a crate that uses the engines. Dependencies only go downward, and `just engines` enforces it:
+
+```mermaid
+flowchart BT
+    core["hbds-core<br/>values, a.d.t., specs"]
+    lists["hbds-lists<br/>list engine, project 14"] --> core
+    gtad["hbds-gtad<br/>a.d.t. engine, project 12"] --> core
+    functors["hbds-functors<br/>functor engine, project 15"] --> gtad
+    functors --> core
+    journal["hbds-journal<br/>persistence, project 13"] --> gtad
+    journal --> core
+    adt81["adt81<br/>the language"] --> lists
+    adt81 --> functors
+    adt81 --> gtad
+    cli["embryo-systems<br/>the command"] --> adt81
+    cli --> journal
+```
 
 | crate | what |
 |---|---|
-| `crates/hbds-core` | the vocabulary the engines share: values, a.d.t., specs |
-| `crates/hbds-gtad` | the a.d.t. engine |
-| `crates/hbds-lists` | the list engine |
-| `crates/hbds-functors` | the functor engine |
-| `crates/hbds-journal` | GTAD's persistence |
+| `crates/hbds-core` | the vocabulary the engines share: values, a.d.t. references and kinds, specifications |
+| `crates/hbds-gtad` | the a.d.t. engine: model, changes, states, transactions |
+| `crates/hbds-lists` | the list engine: cursors, circular lists, list functors |
+| `crates/hbds-functors` | the functor engine: the catalogue of pages 76 to 80 |
+| `crates/hbds-journal` | GTAD's persistence, a journal in the spirit of the print's DAYFILE |
 | `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
-| `.` (`src/main.rs`) | the `embryo-systems` command |
+| `src/main.rs` | the `embryo-systems` command |
 
-Each engine is a crate of its own, a language a crate that uses them;
-`just engines` holds each to what it may depend on
-([docs/hbds.md](docs/hbds.md), "Engines and languages").
+## Documentation
+
+- [docs/adt81.md](docs/adt81.md): the language. How the grammar was derived, every departure from the print, the checker, and running.
+- [docs/hbds.md](docs/hbds.md): the engines. The model, COND and ACTION, transactions, the journal, open questions.
+
+## Roadmap
+
+The print's other engines, each to be a crate of its own:
+
+| engine | print |
+|---|---|
+| expert systems, CHAV and HYPOCHAV, with the INFACT and INRULE functors | project 16, pages 106 to 111 |
+| simulation, the processes behind ACTIVATE and HOLD | project 17, page 112 |
+| neurons and reflexes | project 18, pages 116 to 131 |
+| dialog, the Q-Graph | project 19, pages 133 to 149 |
+| constraints: MAY, MUST, CANNOT, and the CONSTRAINT hyperclass | pages 157 to 160 |
+| SFSI and ZE, the print's own file system and exchange zone, as another persistence | project 13, pages 86 to 105 |
+| NINJAS, protection against object-oriented viruses | project 20, page 150 |
+| ADTmin, precompilers to C, Ada, Pascal and Fortran | page 161 |
 
 ## Develop
 
-`direnv allow` once, then `just` lists every recipe. `just check` is what CI runs.
+The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs, on Forgejo where the project lives and on its GitHub mirror alike:
+
+- formatting and clippy
+- every test
+- `just check-grammar`: the grammar parses each test program and 200 random ones one way only, to the Rust parser's tree
+- `just engines`: each crate depends only on what it may
+- `just docs`: every path and link in the documentation exists
+- the confusable-characters check
+
+## License
+
+The code is under the MIT license ([LICENSE](LICENSE)). The polycopié,
+its text, figures and code listings, is François Bouillé's: this
+repository quotes and cites it, page by page, and does not reproduce it.
