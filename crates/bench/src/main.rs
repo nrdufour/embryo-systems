@@ -290,7 +290,7 @@ fn main() -> ExitCode {
     let mut work_table = format!(
         "# The work each benchmark does, the same on every host, gated exactly:\n\
          # statements executed, and the store's changes, lookups, items its\n\
-         # lookups scanned and items its transactions' snapshots copied.\n\n\
+         # lookups scanned and entries its maps copied on write.\n\n\
          {:<10} {:>8} {}\n",
         "scenario",
         "size",

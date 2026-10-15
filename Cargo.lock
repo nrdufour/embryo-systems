@@ -49,6 +49,7 @@ name = "hbds-gtad"
 version = "0.1.0"
 dependencies = [
  "hbds-core",
+ "hbds-maps",
 ]
 
 [[package]]
@@ -65,6 +66,10 @@ version = "0.1.0"
 dependencies = [
  "hbds-core",
 ]
+
+[[package]]
+name = "hbds-maps"
+version = "0.1.0"
 
 [[package]]
 name = "hbds-rules"

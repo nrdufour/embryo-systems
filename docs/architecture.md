@@ -204,6 +204,15 @@ Not chosen: an ATOMIC block of several statements (syntax the print
 lacks, and a long one blocks every client; possible later); a crate at
 the heart of the store; today's maps, reads queued on the executor.
 
+As built (2026-10-15, step 2a): `crates/hbds-maps`, a B-tree of 7 to 15
+entries a node, chosen over a HAMT because the store's order shows (OBJ
+oldest first, CHAV's rules, the dump) and the indexes need ranges. A
+write copies only the nodes a snapshot still shares, so a statement that
+keeps its changes copies one path. At the top rung of `store`, 4000
+objects, the entries copied fall from 16 016 001 to 271 476 and the
+time from 3.2 s to 0.9 s here; growth stays x4, the lookups still
+scanning. Associations stay a `Vec`, which no benchmark uses.
+
 ### 8. The daemon's interface: our HTTP, one Unix socket
 
 ```mermaid

@@ -1,0 +1,10 @@
+[package]
+name = "hbds-maps"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The store's persistent maps (docs/architecture.md, decision 7). No
+# dependency.
+[dependencies]

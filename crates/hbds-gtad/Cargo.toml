@@ -8,3 +8,4 @@ license.workspace = true
 # The a.d.t. model, GTAD (project 12, pages 45 to 48).
 [dependencies]
 hbds-core = { path = "../hbds-core" }
+hbds-maps = { path = "../hbds-maps" }
