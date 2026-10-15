@@ -12,6 +12,7 @@ use std::fmt;
 pub use hbds_core::spec::Spec;
 use hbds_core::value::Value;
 pub use hbds_core::{AdtRef, Id, fold, same};
+pub use hbds_maps::PMap;
 
 /// What makes a store durable: given every change before it is applied,
 /// or a transaction's changes when it is kept.
@@ -217,11 +218,11 @@ pub fn error<T>(message: impl Into<String>) -> Stored<T> {
 #[derive(Default)]
 pub struct Store {
     next: Id,
-    pub classes: BTreeMap<Id, Class>,
-    pub attributes: BTreeMap<Id, Attribute>,
-    pub objects: BTreeMap<Id, Object>,
-    pub class_links: BTreeMap<Id, ClassLink>,
-    pub object_links: BTreeMap<Id, ObjectLink>,
+    pub classes: PMap<Id, Class>,
+    pub attributes: PMap<Id, Attribute>,
+    pub objects: PMap<Id, Object>,
+    pub class_links: PMap<Id, ClassLink>,
+    pub object_links: PMap<Id, ObjectLink>,
     pub associations: Vec<(AdtRef, AdtRef)>,
     recorder: Option<Box<dyn Recorder>>,
     transaction: Option<Transaction>,
@@ -229,8 +230,9 @@ pub struct Store {
 }
 
 /// The work a store has done, counted for the benchmarks: changes made,
-/// the scans its lookups ran and the items they walked, and the items
-/// transactions' snapshots copied. Neither journalled nor rolled back.
+/// the scans its lookups ran and the items they walked, and the entries
+/// its maps copied on write because a snapshot shared them. Neither
+/// journalled nor rolled back.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Work {
     pub changes: u64,
@@ -244,7 +246,6 @@ struct Counted {
     changes: Cell<u64>,
     lookups: Cell<u64>,
     scanned: Cell<u64>,
-    copied: Cell<u64>,
 }
 
 fn add(c: &Cell<u64>, n: usize) {
@@ -255,11 +256,11 @@ fn add(c: &Cell<u64>, n: usize) {
 #[derive(Clone)]
 struct Snapshot {
     next: Id,
-    classes: BTreeMap<Id, Class>,
-    attributes: BTreeMap<Id, Attribute>,
-    objects: BTreeMap<Id, Object>,
-    class_links: BTreeMap<Id, ClassLink>,
-    object_links: BTreeMap<Id, ObjectLink>,
+    classes: PMap<Id, Class>,
+    attributes: PMap<Id, Attribute>,
+    objects: PMap<Id, Object>,
+    class_links: PMap<Id, ClassLink>,
+    object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
 }
 
@@ -316,7 +317,11 @@ impl Store {
             changes: c.changes.get(),
             lookups: c.lookups.get(),
             scanned: c.scanned.get(),
-            copied: c.copied.get(),
+            copied: self.classes.copied()
+                + self.attributes.copied()
+                + self.objects.copied()
+                + self.class_links.copied()
+                + self.object_links.copied(),
         }
     }
 
@@ -339,13 +344,6 @@ impl Store {
     }
 
     fn snapshot(&self) -> Snapshot {
-        let items = self.classes.len()
-            + self.attributes.len()
-            + self.objects.len()
-            + self.class_links.len()
-            + self.object_links.len()
-            + self.associations.len();
-        add(&self.counted.copied, items);
         Snapshot {
             next: self.next,
             classes: self.classes.clone(),
@@ -359,11 +357,11 @@ impl Store {
 
     fn restore(&mut self, s: Snapshot) {
         self.next = s.next;
-        self.classes = s.classes;
-        self.attributes = s.attributes;
-        self.objects = s.objects;
-        self.class_links = s.class_links;
-        self.object_links = s.object_links;
+        self.classes.restore(s.classes);
+        self.attributes.restore(s.attributes);
+        self.objects.restore(s.objects);
+        self.class_links.restore(s.class_links);
+        self.object_links.restore(s.object_links);
         self.associations = s.associations;
     }
 
@@ -672,8 +670,12 @@ impl Store {
             }
             AdtRef::ClassAttribute(id) | AdtRef::ObjectAttribute(_, id) => {
                 self.attributes.remove(&id);
-                for o in self.objects.values_mut() {
-                    o.values.remove(&id);
+                let holding: Vec<Id> = (self.objects.iter())
+                    .filter(|(_, o)| o.values.contains_key(&id))
+                    .map(|(i, _)| *i)
+                    .collect();
+                for o in holding {
+                    self.objects.get_mut(&o).unwrap().values.remove(&id);
                 }
             }
             AdtRef::ClassLink(id) => {

@@ -13,8 +13,9 @@ import sys
 
 ALLOWED = {
     "hbds-core": set(),
+    "hbds-maps": set(),
     "hbds-lists": {"hbds-core"},
-    "hbds-gtad": {"hbds-core"},
+    "hbds-gtad": {"hbds-core", "hbds-maps"},
     "hbds-functors": {"hbds-core", "hbds-gtad"},
     "hbds-journal": {"hbds-core", "hbds-gtad"},
     "hbds-rules": {"hbds-core", "hbds-gtad"},

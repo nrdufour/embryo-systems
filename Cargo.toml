@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/hbds-core",
+    "crates/hbds-maps",
     "crates/hbds-lists",
     "crates/hbds-gtad",
     "crates/hbds-functors",
