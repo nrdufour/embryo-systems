@@ -12,9 +12,16 @@ pub use hbds_core::spec::Spec;
 use hbds_core::value::Value;
 pub use hbds_core::{AdtRef, Id, fold, same};
 
-/// What makes a store durable: given every change before it is applied.
+/// What makes a store durable: given every change before it is applied,
+/// or a transaction's changes when it is kept.
 pub trait Recorder: Send {
     fn record(&mut self, change: &Change) -> Result<(), String>;
+
+    /// A kept transaction's changes, in order; written at once if the
+    /// recorder can.
+    fn record_all(&mut self, changes: &[Change]) -> Result<(), String> {
+        changes.iter().try_for_each(|c| self.record(c))
+    }
 }
 
 /// Properties of an a.d.t., set by a program: pages 156 to 158.
@@ -216,6 +223,26 @@ pub struct Store {
     pub object_links: BTreeMap<Id, ObjectLink>,
     pub associations: Vec<(AdtRef, AdtRef)>,
     recorder: Option<Box<dyn Recorder>>,
+    transaction: Option<Transaction>,
+}
+
+/// The model as it was when a transaction began.
+#[derive(Clone)]
+struct Snapshot {
+    next: Id,
+    classes: BTreeMap<Id, Class>,
+    attributes: BTreeMap<Id, Attribute>,
+    objects: BTreeMap<Id, Object>,
+    class_links: BTreeMap<Id, ClassLink>,
+    object_links: BTreeMap<Id, ObjectLink>,
+    associations: Vec<(AdtRef, AdtRef)>,
+}
+
+/// Changes applied but not yet recorded: kept or refused together.
+struct Transaction {
+    depth: usize,
+    snapshot: Snapshot,
+    changes: Vec<Change>,
 }
 
 /// Results in order, without repeats.
@@ -252,10 +279,73 @@ impl Store {
 
     /// Records `change` in the journal, if there is one, then applies it.
     fn commit(&mut self, change: Change) -> Stored<()> {
-        if let Some(recorder) = &mut self.recorder {
+        if let Some(t) = &mut self.transaction {
+            t.changes.push(change.clone());
+        } else if let Some(recorder) = &mut self.recorder {
             recorder.record(&change).map_err(Error)?;
         }
         self.apply(change);
+        Ok(())
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            next: self.next,
+            classes: self.classes.clone(),
+            attributes: self.attributes.clone(),
+            objects: self.objects.clone(),
+            class_links: self.class_links.clone(),
+            object_links: self.object_links.clone(),
+            associations: self.associations.clone(),
+        }
+    }
+
+    fn restore(&mut self, s: Snapshot) {
+        self.next = s.next;
+        self.classes = s.classes;
+        self.attributes = s.attributes;
+        self.objects = s.objects;
+        self.class_links = s.class_links;
+        self.object_links = s.object_links;
+        self.associations = s.associations;
+    }
+
+    /// Begins a transaction: the changes that follow apply at once, but
+    /// are recorded only when [`end`](Store::end) keeps them. Inside one,
+    /// `begin` nests, and only the outermost `end` decides.
+    pub fn begin(&mut self) {
+        match &mut self.transaction {
+            Some(t) => t.depth += 1,
+            None => {
+                self.transaction = Some(Transaction {
+                    depth: 1,
+                    snapshot: self.snapshot(),
+                    changes: Vec::new(),
+                });
+            }
+        }
+    }
+
+    /// Ends a transaction: keeps its changes, recording them, or refuses
+    /// them, the model back as it was at `begin`. A recorder that fails
+    /// refuses them too.
+    pub fn end(&mut self, keep: bool) -> Stored<()> {
+        let t = self.transaction.as_mut().expect("end without begin");
+        if t.depth > 1 {
+            t.depth -= 1;
+            return Ok(());
+        }
+        let t = self.transaction.take().expect("a transaction");
+        if !keep {
+            self.restore(t.snapshot);
+            return Ok(());
+        }
+        if let Some(recorder) = &mut self.recorder
+            && let Err(e) = recorder.record_all(&t.changes)
+        {
+            self.restore(t.snapshot);
+            return Err(Error(e));
+        }
         Ok(())
     }
 
@@ -410,6 +500,19 @@ impl Store {
                     p.properties.insert(name, Code { language, text });
                 }
             }
+        }
+    }
+
+    /// What an a.d.t. carries: its specification, its COND and ACTION.
+    pub fn props(&self, r: AdtRef) -> Option<&Props> {
+        match r {
+            AdtRef::Class(id) => self.classes.get(&id).map(|c| &c.props),
+            AdtRef::Object(id) => self.objects.get(&id).map(|o| &o.props),
+            AdtRef::ClassAttribute(id) | AdtRef::ObjectAttribute(_, id) => {
+                self.attributes.get(&id).map(|a| &a.props)
+            }
+            AdtRef::ClassLink(id) => self.class_links.get(&id).map(|l| &l.props),
+            AdtRef::ObjectLink(_) => None,
         }
     }
 
@@ -995,6 +1098,7 @@ pub fn state_name(s: State) -> &'static str {
 mod tests {
     use super::*;
     use AdtRef::*;
+    use hbds_core::value::Value;
 
     /// TOWN, RIVER, DAM; RIVER "crosses" TOWN, reversed "crossed by";
     /// DAM "feeds" RIVER; TOWN "neighbor" TOWN, reflexive; objects.
@@ -1089,6 +1193,53 @@ mod tests {
         assert!(s.object_link(i["Rhone"], "CROSSES", i["Lyon"]).is_some());
         assert_eq!(s.describe(Class(i["TOWN"])), "TOWN");
         assert!(s.create_class("Town", ClassKind::Class).is_err());
+    }
+
+    /// Records into a shared list, or refuses everything.
+    struct Log(std::sync::Arc<std::sync::Mutex<Vec<String>>>, bool);
+
+    impl Recorder for Log {
+        fn record(&mut self, change: &Change) -> Result<(), String> {
+            if self.1 {
+                return Err("the disk is full".into());
+            }
+            self.0.lock().unwrap().push(format!("{change:?}"));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn transactions() {
+        let (mut s, i) = world();
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        s.record_to(Box::new(Log(log.clone(), false)));
+        let before = s.dump();
+        // Refused: everything undone, nothing recorded.
+        s.begin();
+        let c = s.create_class("PORT", ClassKind::Class).unwrap();
+        s.create_object(c, "Marseille").unwrap();
+        s.set(i["Vouglans"], i["VOL"], Value::integer(1)).unwrap();
+        s.end(false).unwrap();
+        assert_eq!(s.dump(), before);
+        assert!(log.lock().unwrap().is_empty());
+        // Kept, nested: recorded once, in order, by the outermost end.
+        s.begin();
+        s.create_class("PORT", ClassKind::Class).unwrap();
+        s.begin();
+        s.create_class("SEA", ClassKind::Class).unwrap();
+        s.end(true).unwrap();
+        assert!(log.lock().unwrap().is_empty());
+        s.end(true).unwrap();
+        let recorded = log.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 2);
+        assert!(recorded[0].contains("PORT") && recorded[1].contains("SEA"));
+        // A recorder that fails refuses the transaction.
+        s.record_to(Box::new(Log(log.clone(), true)));
+        let before = s.dump();
+        s.begin();
+        s.create_class("LAKE", ClassKind::Class).unwrap();
+        assert!(s.end(true).is_err());
+        assert_eq!(s.dump(), before);
     }
 
     #[test]

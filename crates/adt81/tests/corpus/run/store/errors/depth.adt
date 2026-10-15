@@ -1,0 +1,8 @@
+-- An ACTION whose change runs it again, without end. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "AREA" ; CREATE "AREA" . "n" ; CREATE "a1" [ "AREA" ] ;
+        LET "AREA" . "n" ' ACTION := "LET THIS . ""n"" := THIS . ""n"" + 1" ;
+        LET "a1" [ "AREA" ] . "n" := 0
+END ;

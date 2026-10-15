@@ -12,7 +12,7 @@ BUILD "ALPINE_RIVERS" AS "HYDROGRAPHY" ;
 CREATE "Rhone" [ "STREAM" ] ;
 LET "Rhone" [ "STREAM" ] . "FLOW" := 1700. +- 50. % 0.9 ;
 ASSERT "Rhone" [ "STREAM" ] "into" % 0.99 "Lyon" [ "CONFLUENCE" ] ;
-LET "STREAM" . "FLOW" ' COND := "THIS . FLOW >= 0." ;
+LET "STREAM" . "FLOW" ' COND := "THIS . ""FLOW"" >= 0." ;
 LET "STREAM" "joins" "STREAM" ' ACTION := "PRINT THIS" ;
 N := "Rhone" [ "STREAM" ] ' OPSC ' OFIN ' CARD ;
 CREATE "RIVER" ; INCLUDE "RIVER" INTO "WATERWAY"

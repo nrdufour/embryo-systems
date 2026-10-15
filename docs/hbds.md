@@ -64,10 +64,40 @@ Taken on 2026-10-15:
   computes their length in `FUNCTION "ARC" . "LENGTH"`, page 128 reads
   `p . "y"` beside `p . "X"` and declares `LA` beside `la`. It is the
   language's rule for names, carried over to the store.
-- **COND and ACTION are stored, not run.** LET checks that a COND parses as
-  an expression and an ACTION as statements, and keeps the text. Running
-  them waits for its own step, and for the question of what "each time the
-  a.d.t. is invoked" (page 156) means: read, write, link?
+- **COND and ACTION run on change**; see below.
+
+## COND and ACTION
+
+An a.d.t. may carry a COND, a boolean expression, and an ACTION, a list of
+statements, both strings (pages 156 to 158): "each time the a.d.t. is
+invoked, the associated condition is implicitly tested", and the action
+"is executed only if the condition is verified". Decided on 2026-10-15:
+
+- **Invoked means changed.** Three changes run them: creating an object
+  runs its class's; setting an attribute's value runs the class
+  attribute's; asserting a link between objects runs the class link's
+  (page 158: "tested any time a new link between objects will be
+  instantiated"). Then the object's own. THIS is the object concerned:
+  the one created, whose attribute is set, from which the link goes.
+  Reading runs nothing.
+- **A false COND refuses the change**, as page 158's constraints read (a
+  temperature above zero, at most six neighbors): the statement fails
+  with a runtime error naming the COND, and the store is as it was before
+  it. Its ACTION does not run (page 157).
+- **A statement is a transaction.** Its changes, and those of the
+  ACTIONs they run, are kept together or refused together: GTAD applies
+  them at once, records them only when the statement succeeds, in one
+  write, and otherwise puts the model back. A refused change never
+  reaches the journal.
+- **An ACTION's own changes run CONDs and ACTIONs in turn**, 64 deep at
+  most; past that, an error.
+- **Code runs in its language.** COND and ACTION are stored with the
+  language they are written in; ADT'81 runs its own, and says so of any
+  other.
+
+A COND names an attribute with a quote written twice inside its string,
+`"THIS . ""temp"" > 0."`; page 158's own `THIS."temp" > 0. "` is not one
+string ([adt81.md](adt81.md), "Decisions").
 
 ## The model
 
@@ -132,8 +162,6 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
   whether building one copies the embryos' attributes and links, and how
   the structure's classes are named, the print does not say. BUILD records
   the structure and its prototype.
-- **A COND cannot quote an attribute's name**, a string holding no quote:
-  page 158's `"THIS."temp" > 0."` is not one string.
 - Processes (ACTIVATE...) belong to the simulation engine (page 112).
 
 ## Files

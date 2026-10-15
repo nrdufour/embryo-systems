@@ -1,0 +1,14 @@
+-- A COND refuses a link: at most two neighbors, a third asserted. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "AREA" ;
+        CREATE "AREA" "neighbor" "AREA" REFLEXIVE ;
+        LET "AREA" "neighbor" "AREA" ' COND :=
+            "THIS ' OPSCRC(""neighbor"", ""AREA"") ' OFIN ' CARD <= 2" ;
+        CREATE "a1" [ "AREA" ], "a2" [ "AREA" ], "a3" [ "AREA" ], "a4" [ "AREA" ] ;
+        ASSERT "a1" [ "AREA" ] "neighbor" "a2" [ "AREA" ] ;
+        ASSERT "a1" [ "AREA" ] "neighbor" "a3" [ "AREA" ] ;
+        PRINT "two" ;
+        ASSERT "a1" [ "AREA" ] "neighbor" "a4" [ "AREA" ]
+END ;

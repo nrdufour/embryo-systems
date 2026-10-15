@@ -50,7 +50,7 @@ BEGIN
         CREATE "TOWN", "RIVER" ;
         CREATE "TOWN" . "INHABITANTS", "TOWN" . "TEMP" ;
         SPECIFY "TOWN" . "TEMP" : FLOAT APPR UNIT (kelvin) ;
-        LET "TOWN" . "TEMP" ' COND := "THIS . T > 0." ;
+        LET "TOWN" . "TEMP" ' COND := "THIS . ""TEMP"" > 0." ;
         CREATE "RIVER" "crosses" "TOWN" REVERSE "crossed by" ;
         CREATE "Lyon" [ "TOWN" ], "Arles" [ "TOWN" ], "Rhone" [ "RIVER" ] ;
         LET "Lyon" [ "TOWN" ] . "INHABITANTS" := 522000 ;
@@ -86,7 +86,7 @@ fn a_schema_outlives_its_run() {
     assert_eq!(run(READ, &store), READ_OUT);
     assert!(
         before.contains(
-            "attribute TEMP : FLOAT APPR UNIT (kelvin) COND (ADT'81) = \"THIS . T > 0.\""
+            "attribute TEMP : FLOAT APPR UNIT (kelvin) COND (ADT'81) = \"THIS . \"TEMP\" > 0.\""
         ),
         "{before}"
     );
@@ -131,5 +131,59 @@ fn a_corrupt_line_is_named() {
     fs::write(dir.join("journal"), "class 1 \"TOWN\" class\nclass 2\n").unwrap();
     let error = journal::open(&dir).err().expect("a corrupt journal").0;
     assert_eq!(error, "journal line 2: a term is missing");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Runs `source` on `store`; its runtime error.
+fn fails(source: &str, store: &Arc<Mutex<Store>>) -> String {
+    let program = lower::parse_program(source).unwrap();
+    let capture = Arc::new(Mutex::new(Capture::default()));
+    interp::run(program, capture, store.clone())
+        .expect_err("a runtime error")
+        .to_string()
+}
+
+#[test]
+fn a_refused_change_never_reaches_the_journal() {
+    let dir = directory("refused");
+    let (store, _) = open(&dir);
+    let error = fails(
+        r#"PROGRAM P ;
+BEGIN
+        CREATE "AREA" ; CREATE "AREA" . "temp" ; CREATE "a1" [ "AREA" ] ;
+        LET "AREA" . "temp" ' COND := "THIS . ""temp"" > 0." ;
+        LET "a1" [ "AREA" ] . "temp" := 10. ;
+        LET "a1" [ "AREA" ] . "temp" := -5.
+END ;"#,
+        &store,
+    );
+    assert!(error.contains("refuses this change"), "{error}");
+    assert!(store.lock().unwrap().dump().contains("temp = 10.0"));
+    drop(store);
+    let (store, _) = open(&dir);
+    let dump = store.lock().unwrap().dump();
+    assert!(dump.contains("temp = 10.0"), "{dump}");
+    assert!(!dump.contains("-5"), "{dump}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn code_in_another_language_is_not_run() {
+    let dir = directory("language");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("journal"),
+        "class 1 \"AREA\" class\nattribute 2 1 \"temp\"\nproperty (ca 2) \"COND\" \"PROLOG\" \"temp(X) :- X > 0.\"\nobject 3 1 \"a1\"\n",
+    )
+    .unwrap();
+    let (store, _) = open(&dir);
+    let error = fails(
+        r#"PROGRAM P ; BEGIN LET "a1" [ "AREA" ] . "temp" := 1. END ;"#,
+        &store,
+    );
+    assert_eq!(
+        error,
+        "1:19: runtime error: the COND of AREA.temp is written in PROLOG, which ADT'81 does not run"
+    );
     let _ = fs::remove_dir_all(&dir);
 }

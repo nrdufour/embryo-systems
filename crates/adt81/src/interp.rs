@@ -24,7 +24,7 @@ use super::lower;
 use super::types::{Ty, Typed};
 use super::value::{self, Ask, Computed, Fz, List, Scalar, Value};
 use hbds_core::{AdtRef, Id, fold};
-use hbds_gtad::{ClassKind, State as AdtState, Store, Stored};
+use hbds_gtad::{ClassKind, Code, State as AdtState, Store, Stored};
 
 /// The language the store's COND and ACTION are tagged with, when ADT'81
 /// writes them.
@@ -126,7 +126,7 @@ pub fn run(
             }
         }
     }
-    let Some(mut current) = program
+    let Some(current) = program
         .modules
         .iter()
         .position(|m| m.kind == ModuleKind::Program)
@@ -145,32 +145,53 @@ pub fn run(
         store,
         computed: Arc::new(computed),
     };
-    let result = loop {
-        let module = &machine.program.modules[current];
-        match machine.call(module, Vec::new(), None, None) {
-            Ok(_) | Err(Flow::Return | Flow::Stop) => break Ok(()),
-            Err(Flow::Restart) => {}
-            Err(Flow::Chain(q)) => match machine.modules.get(&q.key) {
-                Some(&i) if machine.program.modules[i].kind == ModuleKind::Program => current = i,
-                _ => {
-                    break Err(RuntimeError {
-                        span: q.span,
-                        message: format!("`{}` is not a program of this file", q.spelling),
-                    });
-                }
-            },
-            Err(Flow::Error(e)) => break Err(e),
-            Err(Flow::Exit(_) | Flow::Next(_) | Flow::Reloop(_)) => {
-                break Err(RuntimeError {
-                    span: module.span,
-                    message: "EXIT, NEXT or RELOOP outside a loop".into(),
-                });
-            }
-        }
-    };
+    // The interpreter recurses (statements, calls, CONDs and ACTIONs): it
+    // runs on a thread of its own, with the stack that takes.
+    let runner = machine.clone();
+    let result = thread::Builder::new()
+        .stack_size(STACK)
+        .spawn(move || runner.main(current))
+        .expect("a thread for the program")
+        .join()
+        .expect("the program's thread");
     // Paused coroutines wait for a RESUME that will not come: let them go.
     machine.coroutines.lock().unwrap().clear();
     result
+}
+
+/// The stack of each thread the interpreter runs on.
+const STACK: usize = 256 << 20;
+
+impl Machine {
+    /// Runs program `current`, then those it CHAINs to.
+    fn main(&self, mut current: usize) -> Result<(), RuntimeError> {
+        let machine = self;
+        loop {
+            let module = &machine.program.modules[current];
+            match machine.call(module, Vec::new(), None, None) {
+                Ok(_) | Err(Flow::Return | Flow::Stop) => break Ok(()),
+                Err(Flow::Restart) => {}
+                Err(Flow::Chain(q)) => match machine.modules.get(&q.key) {
+                    Some(&i) if machine.program.modules[i].kind == ModuleKind::Program => {
+                        current = i
+                    }
+                    _ => {
+                        break Err(RuntimeError {
+                            span: q.span,
+                            message: format!("`{}` is not a program of this file", q.spelling),
+                        });
+                    }
+                },
+                Err(Flow::Error(e)) => break Err(e),
+                Err(Flow::Exit(_) | Flow::Next(_) | Flow::Reloop(_)) => {
+                    break Err(RuntimeError {
+                        span: module.span,
+                        message: "EXIT, NEXT or RELOOP outside a loop".into(),
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// Why execution leaves the straight line.
@@ -201,6 +222,17 @@ fn error(span: Span, message: impl Into<String>) -> Flow {
 /// A computation's fault, placed at `span`.
 fn at<T>(r: Computed<T>, span: Span) -> Exec<T> {
     r.map_err(|f| error(span, f.0))
+}
+
+/// An error inside a COND or an ACTION, told from the statement whose
+/// change ran it.
+fn within(flow: Flow, kind: &str, what: &str, span: Span) -> Flow {
+    match flow {
+        // Told once, from the outermost: nested ACTIONs say no more.
+        Flow::Error(e) if e.message.starts_with("in the ") => error(span, e.message),
+        Flow::Error(e) => error(span, format!("in the {kind} of {what}: {}", e.message)),
+        flow => flow,
+    }
 }
 
 /// A store's refusal, placed at `span`.
@@ -237,8 +269,21 @@ struct Frame {
     vars: HashMap<String, Slot>,
     /// A function's RESULT.
     result: Option<Value>,
-    /// The object a computed attribute is computed for.
+    /// The object a computed attribute is computed for, or the one whose
+    /// change runs a COND or an ACTION.
     this: Option<AdtRef>,
+    /// How many COND and ACTION this frame runs within.
+    depth: usize,
+}
+
+/// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
+const DEPTH: usize = 64;
+
+/// A change that runs CONDs and ACTIONs (docs/hbds.md, "COND and ACTION").
+enum Invoked {
+    Created(Id),
+    Set(Id, Id),
+    Linked(Id),
 }
 
 /// An argument: a value for IN, the caller's variable for OUT and INOUT.
@@ -515,11 +560,12 @@ impl Machine {
                 },
             );
             let index = self.modules[&c.name.key];
-            thread::spawn(move || {
+            let spawned = thread::Builder::new().stack_size(STACK).spawn(move || {
                 let module = &machine.program.modules[index];
                 let ended = machine.call(module, args, None, None).map(|_| ());
                 let _ = link.back.send(Event::Ended(ended));
             });
+            spawned.map_err(|e| error(c.name.span, format!("no thread for the coroutine: {e}")))?;
             back
         };
         let event = back.lock().unwrap().recv();
@@ -902,10 +948,14 @@ impl Machine {
                 }
                 Ok(())
             }
-            StmtKind::Create(o) => self.create(o, ClassKind::Class, f, s.span),
+            StmtKind::Create(o) => {
+                self.atomic(s.span, |m| m.create(o, ClassKind::Class, f, s.span))
+            }
             StmtKind::Design(o) => self.create(o, ClassKind::Embryo, f, s.span),
             StmtKind::StateChange(op, o) => self.state_change(*op, o, f, s.span),
-            StmtKind::Let { target, value } => self.let_(target, value, f, s.span),
+            StmtKind::Let { target, value } => {
+                self.atomic(s.span, |m| m.let_(target, value, f, s.span))
+            }
             StmtKind::Assert(Assertion::Link {
                 from,
                 negated,
@@ -919,12 +969,15 @@ impl Machine {
                     Real::Integer(i) => *i as f64,
                     Real::Float(x) => *x,
                 });
-                let mut store = self.store.lock().unwrap();
-                if *negated {
-                    stored(store.retract_link(a, &relation.text, b), s.span)
-                } else {
-                    stored(store.assert_link(a, &relation.text, b, p), s.span).map(|_| ())
-                }
+                self.atomic(s.span, |m| {
+                    let mut store = m.store.lock().unwrap();
+                    if *negated {
+                        return stored(store.retract_link(a, &relation.text, b), s.span);
+                    }
+                    let l = stored(store.assert_link(a, &relation.text, b, p), s.span)?;
+                    drop(store);
+                    m.trigger(Invoked::Linked(l), f, s.span)
+                })
             }
             StmtKind::Assert(Assertion::Name(_)) => Err(not_yet(s.span, "ASSERT of a name")),
             StmtKind::Specify {
@@ -1485,6 +1538,125 @@ impl Machine {
         })
     }
 
+    /// Runs `body` as one transaction of the store: its changes, and those
+    /// of the ACTIONs it runs, are kept together or refused together.
+    fn atomic(&self, span: Span, body: impl FnOnce(&Self) -> Exec<()>) -> Exec<()> {
+        self.store.lock().unwrap().begin();
+        let result = body(self);
+        let ended = self.store.lock().unwrap().end(result.is_ok());
+        result?;
+        stored(ended, span)
+    }
+
+    /// The CONDs and ACTIONs a change runs: the class's, class
+    /// attribute's or class link's, then the object's own, THIS being the
+    /// object (pages 156 to 158). A false COND refuses the change.
+    fn trigger(&self, event: Invoked, f: &Frame, span: Span) -> Exec<()> {
+        let (adts, this) = {
+            let store = self.store.lock().unwrap();
+            match event {
+                Invoked::Created(o) => (vec![AdtRef::Class(store.objects[&o].class)], o),
+                Invoked::Set(o, a) => (vec![AdtRef::ClassAttribute(a)], o),
+                Invoked::Linked(l) => {
+                    let link = &store.object_links[&l];
+                    (vec![AdtRef::ClassLink(link.class_link)], link.from)
+                }
+            }
+        };
+        let adts = adts.into_iter().chain([AdtRef::Object(this)]);
+        for r in adts {
+            let (cond, action, what) = {
+                let store = self.store.lock().unwrap();
+                let props = store.props(r).map(|p| &p.properties);
+                let code = |k: &str| props.and_then(|p| p.get(k)).cloned();
+                (code("COND"), code("ACTION"), store.describe(r))
+            };
+            if cond.is_none() && action.is_none() {
+                continue;
+            }
+            if f.depth >= DEPTH {
+                return Err(error(span, "COND and ACTION nest too deep"));
+            }
+            let mut inner = Frame {
+                this: Some(AdtRef::Object(this)),
+                depth: f.depth + 1,
+                ..Frame::default()
+            };
+            if let Some(code) = cond {
+                self.ours(&code, "COND", &what, span)?;
+                let parsed = lower::parse_fragment(&format!("x := {}", code.text));
+                let value = match parsed.ok().as_ref().map(|p| p.items.as_slice()) {
+                    Some(
+                        [
+                            Item::Stmt(Stmt {
+                                kind: StmtKind::Assign { value, .. },
+                                ..
+                            }),
+                        ],
+                    ) => value.clone(),
+                    _ => return Err(error(span, format!("the COND of {what} does not parse"))),
+                };
+                let holds = self
+                    .truth(&value, &mut inner)
+                    .map_err(|flow| within(flow, "COND", &what, span))?;
+                if !holds {
+                    return Err(error(
+                        span,
+                        format!("the COND of {what} refuses this change: {}", code.text),
+                    ));
+                }
+            }
+            if let Some(code) = action {
+                self.ours(&code, "ACTION", &what, span)?;
+                let fragment = lower::parse_fragment(&code.text).map_err(|e| {
+                    error(span, format!("the ACTION of {what} does not parse: {e}"))
+                })?;
+                self.run_fragment(&fragment, &mut inner)
+                    .map_err(|flow| within(flow, "ACTION", &what, span))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Code written in ADT'81, or an error saying in what it is written.
+    fn ours(&self, code: &Code, kind: &str, what: &str, span: Span) -> Exec<()> {
+        if code.language == LANGUAGE {
+            return Ok(());
+        }
+        Err(error(
+            span,
+            format!(
+                "the {kind} of {what} is written in {}, which ADT'81 does not run",
+                code.language
+            ),
+        ))
+    }
+
+    /// An ACTION's statements, its declarations its own locals.
+    fn run_fragment(&self, fragment: &Fragment, f: &mut Frame) -> Exec<()> {
+        for item in &fragment.items {
+            match item {
+                Item::Local(d) => {
+                    let ty = Typed::of(&d.ty);
+                    for n in &d.names {
+                        let value = matches!(d.ty, DataType::List(_))
+                            .then(|| Value::List(List::new(Vec::new())));
+                        f.vars.insert(n.key.clone(), slot(value, ty.clone(), false));
+                    }
+                }
+                Item::Parameter(p) => {
+                    return Err(error(p.span, "an ACTION has no parameters"));
+                }
+                Item::Stmt(s) => match self.stmt(s, f) {
+                    Ok(()) => {}
+                    Err(Flow::Return) => return Ok(()),
+                    Err(flow) => return Err(flow),
+                },
+            }
+        }
+        Ok(())
+    }
+
     /// CREATE and DESIGN: classes (embryos for DESIGN), objects,
     /// attributes, links.
     fn create(&self, o: &Operands, kind: ClassKind, f: &mut Frame, span: Span) -> Exec<()> {
@@ -1501,7 +1673,9 @@ impl Machine {
                             let c = self.class(class, f, span)?;
                             let name = self.text(name, f, span)?;
                             let mut store = self.store.lock().unwrap();
-                            stored(store.create_object(c, &name), span)?;
+                            let o = stored(store.create_object(c, &name), span)?;
+                            drop(store);
+                            self.trigger(Invoked::Created(o), f, span)?;
                         }
                         Designation::This(at) => return Err(error(*at, "THIS exists already")),
                     }
@@ -1593,7 +1767,9 @@ impl Machine {
                 let name = self.text(attribute, f, span)?;
                 let mut store = self.store.lock().unwrap();
                 let a = stored(store.attribute(store.objects[&o].class, &name), span)?;
-                stored(store.set(o, a, v), span)
+                stored(store.set(o, a, v), span)?;
+                drop(store);
+                self.trigger(Invoked::Set(o, a), f, span)
             }
             LetTarget::Variable(n) => {
                 let r = self.read(
@@ -1605,7 +1781,8 @@ impl Machine {
                 )?;
                 match r {
                     Value::Adt(AdtRef::ObjectAttribute(o, a)) => {
-                        stored(self.store.lock().unwrap().set(o, a, v), span)
+                        stored(self.store.lock().unwrap().set(o, a, v), span)?;
+                        self.trigger(Invoked::Set(o, a), f, span)
                     }
                     _ => Err(error(
                         n.span,

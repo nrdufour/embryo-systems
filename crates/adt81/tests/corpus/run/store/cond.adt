@@ -1,0 +1,25 @@
+-- Page 158's constraints, an attribute's and a link's, and an ACTION --
+-- that counts the changes: written for the store's tests. --
+
+PROGRAM CONSTRAINTS ;
+LOCAL
+        a : OBJECT ;
+BEGIN
+        CREATE "AREA" ;
+        CREATE "AREA" . "temp", "AREA" . "changes" ;
+        SPECIFY "AREA" . "temp" : FLOAT UNIT (kelvin) ;
+        LET "AREA" . "temp" ' COND := "THIS . ""temp"" > 0." ;
+        LET "AREA" . "temp" ' ACTION := "LET THIS . ""changes"" := THIS . ""changes"" + 1" ;
+        CREATE "AREA" "neighbor" "AREA" REFLEXIVE ;
+        LET "AREA" "neighbor" "AREA" ' COND :=
+            "THIS ' OPSCRC(""neighbor"", ""AREA"") ' OFIN ' CARD <= 2" ;
+        CREATE "a1" [ "AREA" ], "a2" [ "AREA" ], "a3" [ "AREA" ] ;
+        LET "a1" [ "AREA" ] . "changes" := 0 ;
+        LET "a1" [ "AREA" ] . "temp" := 284.5 ;
+        LET "a1" [ "AREA" ] . "temp" := 290.0 ;
+        a := "AREA" ' OBJ ' FIRST ;
+        PRINT a . "temp", a . "changes" ;
+        ASSERT "a1" [ "AREA" ] "neighbor" "a2" [ "AREA" ] ;
+        ASSERT "a1" [ "AREA" ] "neighbor" "a3" [ "AREA" ] ;
+        PRINT a ' OPSCRC("neighbor", "AREA") ' OFIN
+END ;
