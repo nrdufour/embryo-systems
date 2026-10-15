@@ -1,2 +1,0 @@
-before
-6:9: runtime error: CREATE needs the HBDS store, not built yet

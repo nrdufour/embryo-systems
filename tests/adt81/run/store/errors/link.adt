@@ -1,0 +1,8 @@
+-- Store error: linking objects whose classes have no such link. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "TOWN", "RIVER" ;
+        CREATE "Lyon" [ "TOWN" ], "Rhone" [ "RIVER" ] ;
+        ASSERT "Lyon" [ "TOWN" ] "near" "Rhone" [ "RIVER" ]
+END ;

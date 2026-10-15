@@ -14,6 +14,7 @@ use std::fmt;
 use super::ast::{BinaryOp, Rank, UnaryOp};
 use super::print::float;
 use super::types::Ty;
+use crate::hbds::AdtRef;
 
 /// What went wrong, without where: the interpreter adds the position.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +72,8 @@ pub enum Value {
     Many(Vec<Fz>),
     Array(Array),
     List(List),
+    /// A class, an object, an attribute or a link, in the HBDS store.
+    Adt(AdtRef),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -669,6 +672,7 @@ fn singles(v: &Value) -> Computed<Vec<&Fz>> {
         Value::Many(fzs) => Ok(fzs.iter().collect()),
         Value::Array(_) => fault("an array takes the array operators [+] [*] [.] [^]"),
         Value::List(_) => fault("a list takes UNION, INTER, COMPL and the list functors"),
+        Value::Adt(_) => fault("an a.d.t. takes = and /=, and the functors"),
     }
 }
 
@@ -700,6 +704,9 @@ pub fn binary(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
             return Ok(Value::boolean(l.items.contains(a) == (op == In)));
         }
         ArrayAdd | ArrayMul | ArrayDot | ArrayPow => return array_op(op, a, b),
+        Eq | Ne if matches!(a, Value::Adt(_)) || matches!(b, Value::Adt(_)) => {
+            return Ok(Value::boolean((a == b) == (op == Eq)));
+        }
         _ => {}
     }
     let many = matches!(a, Value::Many(_)) || matches!(b, Value::Many(_));
@@ -905,6 +912,7 @@ impl fmt::Display for Value {
             Value::Many(fzs) => write!(f, "{{ {} }}", join_values(fzs)),
             Value::Array(a) => f.write_str(&nested(&a.dims, &a.cells)),
             Value::List(l) => write!(f, "[{}]", join_values(&l.items)),
+            Value::Adt(r) => write!(f, "{r:?}"),
         }
     }
 }

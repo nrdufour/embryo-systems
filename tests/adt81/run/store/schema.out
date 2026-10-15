@@ -1,0 +1,10 @@
+[Lyon[TOWN], Arles[TOWN]] 2
+TRUE TRUE
+Lyon[TOWN] 522000
+Arles[TOWN] 51000
+[TOWN, RIVER] [HYDROGRAPHY]
+[Lyon[TOWN]]
+[Arles[TOWN]] [Rhone[RIVER] "crosses" Arles[TOWN]]
+[Lyon[TOWN], Arles[TOWN]]
+[Rhone[RIVER] "crosses" Arles[TOWN]]
+TOWN [TOWN.NAME, TOWN.INHABITANTS]

@@ -1,0 +1,39 @@
+-- Classes, attributes, links and their reverses, objects and their --
+-- values, states, hyperclasses: written for the store's tests. --
+
+PROGRAM SCHEMA ;
+LOCAL
+        towns : LIST OF OBJECT ;
+        t : OBJECT ;
+        c : CLASS ;
+BEGIN
+        CREATE "TOWN", "RIVER", "HYDROGRAPHY" ;
+        CREATE "TOWN" . "NAME", "TOWN" . "INHABITANTS" ;
+        SPECIFY "TOWN" . "INHABITANTS" : INTEGER UNIT (people) ;
+        CREATE "RIVER" "crosses" "TOWN" REVERSE "crossed by",
+               "TOWN" "neighbor" "TOWN" REFLEXIVE ;
+        CREATE "Lyon" [ "TOWN" ], "Arles" [ "TOWN" ], "Rhone" [ "RIVER" ] ;
+        LET "Lyon" [ "TOWN" ] . "INHABITANTS" := 522000 ;
+        LET "Arles" [ "TOWN" ] . "INHABITANTS" := 51000 ;
+        ASSERT "Rhone" [ "RIVER" ] "crosses" "Lyon" [ "TOWN" ] ;
+        ASSERT "Rhone" [ "RIVER" ] "crosses" % 0.9 "Arles" [ "TOWN" ] ;
+        ASSERT "Lyon" [ "TOWN" ] "neighbor" "Arles" [ "TOWN" ] ;
+        towns := "TOWN" ' OBJ ;
+        PRINT towns, towns ' CARD ;
+        PRINT "Arles" [ "TOWN" ] "neighbor" "Lyon" [ "TOWN" ],
+              "Lyon" [ "TOWN" ] "crossed by" "Rhone" [ "RIVER" ] ;
+        EACH t OF towns DO PRINT t, t . "INHABITANTS" ENDEACH ;
+        INCLUDE "TOWN", "RIVER" INTO "HYDROGRAPHY" ;
+        PRINT "HYDROGRAPHY" ' CONT, "TOWN" ' CONTOF ;
+        HIBERN "Arles" [ "TOWN" ] ;
+        PRINT "TOWN" ' OBJ ;
+        AWAKE "Arles" [ "TOWN" ] ;
+        DESTROY "Lyon" [ "TOWN" ] ;
+        PRINT "TOWN" ' OBJ, "Rhone" [ "RIVER" ] ' OPSC ;
+        RESUR "Lyon" [ "TOWN" ] ;
+        PRINT "TOWN" ' OBJ ;
+        ASSERT "Rhone" [ "RIVER" ] NOT "crosses" "Lyon" [ "TOWN" ] ;
+        PRINT "Rhone" [ "RIVER" ] ' OPSC ;
+        c := "Lyon" [ "TOWN" ] ' OBJOF ' FIRST ;
+        PRINT c, c ' ATT
+END ;

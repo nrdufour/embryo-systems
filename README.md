@@ -15,8 +15,10 @@ parser, a typed tree, a checker and an interpreter.
 cargo run -q -- run tests/adt81/run/hello.adt    # Hello, world!
 ```
 
-`embryo-systems run FILE` checks a program and runs it, but for the a.d.t.
-statements, which wait for the HBDS store; `check FILE` only checks it,
+`embryo-systems run FILE` checks a program and runs it, its classes and
+objects lasting the run; `run --store DIR FILE` keeps them in the HBDS
+store in DIR, for the next program ([docs/hbds.md](docs/hbds.md)), and
+`store DIR` shows what it holds. `check FILE` only checks a program,
 `fmt FILE` prints it in canonical form, `parse FILE` prints its syntax
 tree. `tests/adt81/run/` holds more programs to run, with their expected
 output.

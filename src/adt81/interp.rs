@@ -3,9 +3,9 @@
 //! the semantics and the decisions behind them.
 //!
 //! A tree walk over the [`ast`](super::ast) of a program the checker has
-//! passed. The a.d.t. half (classes, objects, links, their functors,
-//! processes) needs the HBDS store, not built yet: reaching it is a
-//! runtime error that says so.
+//! passed. Classes, objects, attributes and links live in the HBDS
+//! [`Store`]; processes, and COND and ACTION, are not run yet: reaching
+//! them is a runtime error that says so.
 //!
 //! Each coroutine runs on its own thread, and control passes by channel,
 //! so that only one thread ever runs: RESUME continues a coroutine where
@@ -23,6 +23,8 @@ use super::builtins;
 use super::lower;
 use super::types::{Ty, Typed};
 use super::value::{self, Computed, Fz, List, Scalar, Value};
+use crate::hbds::store::{ClassKind, Id, State as AdtState, Stored};
+use crate::hbds::{AdtRef, Store};
 
 /// Where READ reads and PRINT writes.
 pub trait Io: Send {
@@ -44,12 +46,22 @@ impl fmt::Display for RuntimeError {
     }
 }
 
-/// Runs the file's first PROGRAM, then any it CHAINs to.
-pub fn run(program: Program, io: Arc<Mutex<dyn Io>>) -> Result<(), RuntimeError> {
+/// Runs the file's first PROGRAM, then any it CHAINs to, on `store`.
+pub fn run(
+    program: Program,
+    io: Arc<Mutex<dyn Io>>,
+    store: Arc<Mutex<Store>>,
+) -> Result<(), RuntimeError> {
     let mut modules = HashMap::new();
+    let mut computed = HashMap::new();
     for (i, m) in program.modules.iter().enumerate() {
-        if let ModuleName::Name(n) = &m.name {
-            modules.entry(n.key.clone()).or_insert(i);
+        match &m.name {
+            ModuleName::Name(n) => {
+                modules.entry(n.key.clone()).or_insert(i);
+            }
+            ModuleName::Attribute { class, attribute } => {
+                computed.insert((class.text.clone(), attribute.text.clone()), i);
+            }
         }
     }
     let Some(mut current) = program
@@ -68,10 +80,12 @@ pub fn run(program: Program, io: Arc<Mutex<dyn Io>>) -> Result<(), RuntimeError>
         io,
         coroutines: Arc::new(Mutex::new(HashMap::new())),
         link: None,
+        store,
+        computed: Arc::new(computed),
     };
     let result = loop {
         let module = &machine.program.modules[current];
-        match machine.call(module, Vec::new(), None) {
+        match machine.call(module, Vec::new(), None, None) {
             Ok(_) | Err(Flow::Return | Flow::Stop) => break Ok(()),
             Err(Flow::Restart) => {}
             Err(Flow::Chain(q)) => match machine.modules.get(&q.key) {
@@ -127,8 +141,13 @@ fn at<T>(r: Computed<T>, span: Span) -> Exec<T> {
     r.map_err(|f| error(span, f.0))
 }
 
-fn store(span: Span, what: &str) -> Flow {
-    error(span, format!("{what} needs the HBDS store, not built yet"))
+/// A store's refusal, placed at `span`.
+fn stored<T>(r: Stored<T>, span: Span) -> Exec<T> {
+    r.map_err(|e| error(span, e.0))
+}
+
+fn not_yet(span: Span, what: &str) -> Flow {
+    error(span, format!("{what}: not yet"))
 }
 
 /// A variable: its value if it has one, the type it is declared with, and
@@ -156,6 +175,8 @@ struct Frame {
     vars: HashMap<String, Slot>,
     /// A function's RESULT.
     result: Option<Value>,
+    /// The object a computed attribute is computed for.
+    this: Option<AdtRef>,
 }
 
 /// An argument: a value for IN, the caller's variable for OUT and INOUT.
@@ -196,6 +217,9 @@ struct Machine {
     coroutines: Arc<Mutex<HashMap<String, Coroutine>>>,
     /// Inside a coroutine, its way back.
     link: Option<Arc<Link>>,
+    store: Arc<Mutex<Store>>,
+    /// The functions that compute attributes, by class and attribute.
+    computed: Arc<HashMap<(String, String), usize>>,
 }
 
 /// One iteration's outcome, for the loop that runs it.
@@ -219,8 +243,17 @@ impl Machine {
 
     // Modules
 
-    fn call(&self, m: &Module, args: Vec<Arg>, prefix: Option<Value>) -> Exec<Option<Value>> {
-        let mut f = Frame::default();
+    fn call(
+        &self,
+        m: &Module,
+        args: Vec<Arg>,
+        prefix: Option<Value>,
+        this: Option<AdtRef>,
+    ) -> Exec<Option<Value>> {
+        let mut f = Frame {
+            this,
+            ..Frame::default()
+        };
         for (p, arg) in m.parameters.iter().zip(args) {
             let spec = m.specifications.iter().find(|s| s.names.contains(p));
             let ty = spec.map_or(Typed::UNKNOWN, |s| Typed::of(&s.ty));
@@ -422,7 +455,7 @@ impl Machine {
             let index = self.modules[&c.name.key];
             thread::spawn(move || {
                 let module = &machine.program.modules[index];
-                let ended = machine.call(module, args, None).map(|_| ());
+                let ended = machine.call(module, args, None, None).map(|_| ());
                 let _ = link.back.send(Event::Ended(ended));
             });
             back
@@ -643,7 +676,7 @@ impl Machine {
                 body,
             } => {
                 let Some(of) = of else {
-                    return Err(store(s.span, "EACH without OF"));
+                    return Err(not_yet(s.span, "EACH without OF"));
                 };
                 'again: loop {
                     let items = match self.eval(of, f)? {
@@ -811,18 +844,125 @@ impl Machine {
                 }
                 Ok(())
             }
-            StmtKind::Create(_) => Err(store(s.span, "CREATE")),
-            StmtKind::StateChange(..) => Err(store(s.span, "a change of state")),
-            StmtKind::Design(_) => Err(store(s.span, "DESIGN")),
-            StmtKind::Let { .. } => Err(store(s.span, "LET")),
-            StmtKind::Assert(_) => Err(store(s.span, "ASSERT")),
-            StmtKind::Specify { .. } => Err(store(s.span, "SPECIFY")),
-            StmtKind::Include { .. } => Err(store(s.span, "INCLUDE")),
-            StmtKind::Exclude { .. } => Err(store(s.span, "EXCLUDE")),
-            StmtKind::Associate(_) => Err(store(s.span, "ASSOC")),
-            StmtKind::Dissociate(_) => Err(store(s.span, "DISSOC")),
-            StmtKind::Compose { .. } => Err(store(s.span, "COMPOSE")),
-            StmtKind::Build { .. } => Err(store(s.span, "BUILD")),
+            StmtKind::Create(o) => self.create(o, ClassKind::Class, f, s.span),
+            StmtKind::Design(o) => self.create(o, ClassKind::Embryo, f, s.span),
+            StmtKind::StateChange(op, o) => self.state_change(*op, o, f, s.span),
+            StmtKind::Let { target, value } => self.let_(target, value, f, s.span),
+            StmtKind::Assert(Assertion::Link {
+                from,
+                negated,
+                relation,
+                probability,
+                to,
+            }) => {
+                let a = self.object(from, f, s.span)?;
+                let b = self.object(to, f, s.span)?;
+                let p = probability.as_ref().map(|p| match p {
+                    Real::Integer(i) => *i as f64,
+                    Real::Float(x) => *x,
+                });
+                let mut store = self.store.lock().unwrap();
+                if *negated {
+                    stored(store.retract_link(a, &relation.text, b), s.span)
+                } else {
+                    stored(store.assert_link(a, &relation.text, b, p), s.span).map(|_| ())
+                }
+            }
+            StmtKind::Assert(Assertion::Name(_)) => Err(not_yet(s.span, "ASSERT of a name")),
+            StmtKind::Specify {
+                items,
+                spec,
+                unit,
+                computed,
+            } => {
+                let text = super::print::specification(spec);
+                let text = (!text.is_empty()).then_some(text);
+                for item in items {
+                    let target = match item {
+                        Specified::Class(c) => AdtRef::Class(self.class(c, f, s.span)?),
+                        Specified::Attribute(a) => self.class_attribute(a, f, s.span)?,
+                        Specified::Link(l) => {
+                            let from = self.class(&l.from, f, s.span)?;
+                            let to = self.class(&l.to, f, s.span)?;
+                            let store = self.store.lock().unwrap();
+                            AdtRef::ClassLink(stored(
+                                store.class_link(from, &l.relation.text, to),
+                                s.span,
+                            )?)
+                        }
+                    };
+                    let unit = unit.as_ref().map(|u| u.spelling.clone());
+                    let mut store = self.store.lock().unwrap();
+                    stored(store.specify(target, text.clone(), unit, *computed), s.span)?;
+                }
+                Ok(())
+            }
+            StmtKind::Include { classes, into }
+            | StmtKind::Exclude {
+                classes,
+                from: into,
+            } => {
+                let include = matches!(s.kind, StmtKind::Include { .. });
+                let classes = self.classes(classes, f, s.span)?;
+                let hypers = self.classes(into, f, s.span)?;
+                let mut store = self.store.lock().unwrap();
+                for c in &classes {
+                    for h in &hypers {
+                        let r = if include {
+                            store.include(*c, *h)
+                        } else {
+                            store.exclude(*c, *h)
+                        };
+                        stored(r, s.span)?;
+                    }
+                }
+                Ok(())
+            }
+            StmtKind::Associate(pairs) | StmtKind::Dissociate(pairs) => {
+                let assoc = matches!(s.kind, StmtKind::Associate(_));
+                for (a, d) in pairs {
+                    let a = self.adt(a, f, s.span)?;
+                    let b = self.designate(d, f, s.span, false)?;
+                    let mut store = self.store.lock().unwrap();
+                    stored(
+                        if assoc {
+                            store.assoc(a, b)
+                        } else {
+                            store.dissoc(a, b)
+                        },
+                        s.span,
+                    )?;
+                }
+                Ok(())
+            }
+            StmtKind::Compose { class, with } => {
+                let name = self.text(class, f, s.span)?;
+                let embryos = self.classes(with, f, s.span)?;
+                let mut store = self.store.lock().unwrap();
+                stored(
+                    store.create_class(&name, ClassKind::Prototype(embryos)),
+                    s.span,
+                )
+                .map(|_| ())
+            }
+            StmtKind::Build { classes, model } => {
+                let prototype = self.class(model, f, s.span)?;
+                let mut names = Vec::new();
+                for c in classes {
+                    names.push(self.text(c, f, s.span)?);
+                }
+                let mut store = self.store.lock().unwrap();
+                if !matches!(store.classes[&prototype].kind, ClassKind::Prototype(_)) {
+                    return Err(error(s.span, "BUILD builds structures AS a prototype"));
+                }
+                for n in names {
+                    stored(
+                        store.create_class(&n, ClassKind::Structure(prototype)),
+                        s.span,
+                    )?;
+                }
+                Ok(())
+            }
             StmtKind::Activate(_)
             | StmtKind::Reactivate { .. }
             | StmtKind::Cancel(_)
@@ -830,7 +970,10 @@ impl Machine {
             | StmtKind::Delay { .. }
             | StmtKind::Hold { .. }
             | StmtKind::Passivate
-            | StmtKind::Terminate => Err(store(s.span, "a process")),
+            | StmtKind::Terminate => Err(not_yet(
+                s.span,
+                "processes come with the simulation engine (page 112)",
+            )),
             StmtKind::Chain(n) => Err(Flow::Chain(n.clone())),
             StmtKind::Call(c) => {
                 let Some(m) = self
@@ -843,7 +986,7 @@ impl Machine {
                     ));
                 };
                 let args = self.args(m, c, f)?;
-                self.call(m, args, None).map(|_| ())
+                self.call(m, args, None, None).map(|_| ())
             }
             StmtKind::Resume(c) => self.resume(c, f),
             StmtKind::Read(vs) => {
@@ -860,7 +1003,8 @@ impl Machine {
             StmtKind::Print(es) => {
                 let mut texts = Vec::new();
                 for e in es {
-                    texts.push(self.eval(e, f)?.to_string());
+                    let v = self.eval(e, f)?;
+                    texts.push(self.store.lock().unwrap().show(&v));
                 }
                 self.io.lock().unwrap().write(&(texts.join(" ") + "\n"));
                 Ok(())
@@ -979,8 +1123,19 @@ impl Machine {
                 }
                 Ok(v)
             }
-            ExprKind::Attribute(..) => Err(store(e.span, "an object's attribute")),
-            ExprKind::Link(..) => Err(store(e.span, "a link between objects")),
+            ExprKind::Attribute(object, attribute) => {
+                let o = self.object(object, f, e.span)?;
+                let name = self.text(attribute, f, e.span)?;
+                self.attribute_value(o, &name, e.span)
+            }
+            ExprKind::Link(from, relation, to) => {
+                let a = self.object(from, f, e.span)?;
+                let b = self.object(to, f, e.span)?;
+                let store = self.store.lock().unwrap();
+                Ok(Value::boolean(
+                    store.object_link(a, &relation.text, b).is_some(),
+                ))
+            }
         }
     }
 
@@ -993,7 +1148,7 @@ impl Machine {
                 ));
             }
             let args = self.args(m, c, f)?;
-            let v = self.call(m, args, None)?;
+            let v = self.call(m, args, None, None)?;
             return Ok(v.expect("a function's result"));
         }
         if !builtins::is_function(&c.name.key) {
@@ -1020,21 +1175,418 @@ impl Machine {
 
     /// A functor's prefix: a list, held by a variable (whose slot the
     /// functors that move the cursor or take an element out act on) or
-    /// computed.
+    /// computed, or an a.d.t.
     fn prefix(&self, adt: &Adt, f: &mut Frame, span: Span) -> Exec<(Value, Option<Slot>)> {
-        match (&adt.designation, &adt.part) {
+        let held = match (&adt.designation, &adt.part) {
             (Designation::Named(AdtName::Name(n)), AdtPart::None) => {
-                let v = self.read(
+                let var = Variable {
+                    name: n.clone(),
+                    indices: Vec::new(),
+                };
+                Some((self.read(&var, f)?, self.var(n, f)?))
+            }
+            (Designation::Named(AdtName::Expr(e)), AdtPart::None) => {
+                let v = self.eval(e, f)?;
+                if matches!(v, Value::List(_) | Value::Adt(_)) {
+                    return Ok((v, None));
+                }
+                None
+            }
+            _ => None,
+        };
+        match held {
+            Some((v @ Value::List(_), slot)) => Ok((v, Some(slot))),
+            Some((v @ Value::Adt(_), _)) => Ok((v, None)),
+            _ => Ok((Value::Adt(self.adt(adt, f, span)?), None)),
+        }
+    }
+
+    /// A functor of the catalogue on a.d.t.: the prefix one or a list of
+    /// them, the arguments strings.
+    fn adt_functor(&self, name: &Name, prefix: &Value, args: &[Value]) -> Exec<Value> {
+        let span = name.span;
+        let refs = match prefix {
+            Value::Adt(r) => vec![*r],
+            Value::List(l) => l
+                .items
+                .iter()
+                .map(|v| match v {
+                    Value::Adt(r) => Ok(*r),
+                    v => Err(error(
+                        span,
+                        format!("`{}` applies to a.d.t., not to {v}", name.spelling),
+                    )),
+                })
+                .collect::<Exec<_>>()?,
+            v => {
+                return Err(error(
+                    span,
+                    format!("`{}` applies to a.d.t., not to {v}", name.spelling),
+                ));
+            }
+        };
+        let args = args
+            .iter()
+            .map(|a| match a.scalar() {
+                Some(Scalar::String(s)) => Ok(s.clone()),
+                Some(Scalar::Character(c)) => Ok(c.to_string()),
+                _ => Err(error(span, format!("`{}` takes strings", name.spelling))),
+            })
+            .collect::<Exec<Vec<String>>>()?;
+        let store = self.store.lock().unwrap();
+        let result = stored(store.functor(&name.key, &refs, &args), span)?;
+        Ok(Value::List(List::new(
+            result.into_iter().map(Value::Adt).collect(),
+        )))
+    }
+
+    // A.d.t.
+
+    /// What a name in a designation gives: a string naming a class or an
+    /// object, or an a.d.t. a variable holds.
+    fn named(&self, n: &AdtName, f: &mut Frame, span: Span) -> Exec<Result<String, AdtRef>> {
+        let v = match n {
+            AdtName::String(s) => return Ok(Ok(s.text.clone())),
+            AdtName::Name(name) => self.read(
+                &Variable {
+                    name: name.clone(),
+                    indices: Vec::new(),
+                },
+                f,
+            )?,
+            AdtName::Expr(e) => self.eval(e, f)?,
+        };
+        match v {
+            Value::Adt(r) => Ok(Err(r)),
+            Value::One(Fz {
+                x: Scalar::String(s),
+                ..
+            }) => Ok(Ok(s)),
+            Value::One(Fz {
+                x: Scalar::Character(c),
+                ..
+            }) => Ok(Ok(c.to_string())),
+            v => Err(error(span, format!("{v} names no a.d.t."))),
+        }
+    }
+
+    /// A name, as a string.
+    fn text(&self, n: &AdtName, f: &mut Frame, span: Span) -> Exec<String> {
+        match self.named(n, f, span)? {
+            Ok(s) => Ok(s),
+            Err(r) => {
+                let what = self.store.lock().unwrap().describe(r);
+                Err(error(span, format!("{what} is not a name")))
+            }
+        }
+    }
+
+    /// A class, by its name or a variable holding it.
+    fn class(&self, n: &AdtName, f: &mut Frame, span: Span) -> Exec<Id> {
+        match self.named(n, f, span)? {
+            Ok(name) => stored(self.store.lock().unwrap().class(&name), span),
+            Err(AdtRef::Class(c)) => Ok(c),
+            Err(r) => {
+                let what = self.store.lock().unwrap().describe(r);
+                Err(error(span, format!("{what} is not a class")))
+            }
+        }
+    }
+
+    fn classes(&self, ns: &[AdtName], f: &mut Frame, span: Span) -> Exec<Vec<Id>> {
+        ns.iter().map(|n| self.class(n, f, span)).collect()
+    }
+
+    fn class_attribute(&self, a: &ClassAttribute, f: &mut Frame, span: Span) -> Exec<AdtRef> {
+        let c = self.class(&a.class, f, span)?;
+        let name = self.text(&a.attribute, f, span)?;
+        let store = self.store.lock().unwrap();
+        Ok(AdtRef::ClassAttribute(stored(
+            store.attribute(c, &name),
+            span,
+        )?))
+    }
+
+    /// The a.d.t. a designation names. `any` finds hibernating and
+    /// destroyed ones too, for AWAKE, RESUR and PURGE.
+    fn designate(&self, d: &Designation, f: &mut Frame, span: Span, any: bool) -> Exec<AdtRef> {
+        match d {
+            Designation::This(at) => f.this.ok_or_else(|| {
+                error(
+                    *at,
+                    "THIS is the object a computed attribute is computed for",
+                )
+            }),
+            Designation::Named(n) => match self.named(n, f, span)? {
+                Err(r) => Ok(r),
+                Ok(name) => {
+                    let store = self.store.lock().unwrap();
+                    match (any, store.find_class(&name)) {
+                        (true, Some(c)) => Ok(AdtRef::Class(c)),
+                        _ => stored(store.class(&name), span).map(AdtRef::Class),
+                    }
+                }
+            },
+            Designation::Classed { name, class } => {
+                let name = self.text(name, f, span)?;
+                let class_name = self.text(class, f, span)?;
+                let store = self.store.lock().unwrap();
+                let c = match (any, store.find_class(&class_name)) {
+                    (true, Some(c)) => c,
+                    _ => stored(store.class(&class_name), span)?,
+                };
+                match (any, store.find_object(c, &name)) {
+                    (true, Some(o)) => Ok(AdtRef::Object(o)),
+                    _ => stored(store.object(c, &name), span).map(AdtRef::Object),
+                }
+            }
+        }
+    }
+
+    fn object(&self, d: &Designation, f: &mut Frame, span: Span) -> Exec<Id> {
+        match self.designate(d, f, span, false)? {
+            AdtRef::Object(o) => Ok(o),
+            r => {
+                let what = self.store.lock().unwrap().describe(r);
+                Err(error(span, format!("{what} is not an object")))
+            }
+        }
+    }
+
+    /// A designation with its part: an attribute, or a link.
+    fn adt(&self, a: &Adt, f: &mut Frame, span: Span) -> Exec<AdtRef> {
+        let base = self.designate(&a.designation, f, span, false)?;
+        match &a.part {
+            AdtPart::None => Ok(base),
+            AdtPart::Attribute(n) => {
+                let name = self.text(n, f, span)?;
+                let store = self.store.lock().unwrap();
+                match base {
+                    AdtRef::Class(c) => Ok(AdtRef::ClassAttribute(stored(
+                        store.attribute(c, &name),
+                        span,
+                    )?)),
+                    AdtRef::Object(o) => {
+                        let c = store.objects[&o].class;
+                        Ok(AdtRef::ObjectAttribute(
+                            o,
+                            stored(store.attribute(c, &name), span)?,
+                        ))
+                    }
+                    r => Err(error(
+                        span,
+                        format!("{} has no attributes", store.describe(r)),
+                    )),
+                }
+            }
+            AdtPart::Link(relation, to) => {
+                let to = self.designate(to, f, span, false)?;
+                let store = self.store.lock().unwrap();
+                match (base, to) {
+                    (AdtRef::Class(a), AdtRef::Class(b)) => Ok(AdtRef::ClassLink(stored(
+                        store.class_link(a, &relation.text, b),
+                        span,
+                    )?)),
+                    (AdtRef::Object(a), AdtRef::Object(b)) => store
+                        .object_link(a, &relation.text, b)
+                        .map(AdtRef::ObjectLink)
+                        .ok_or_else(|| error(span, "these objects are not linked so")),
+                    _ => Err(error(span, "a link joins two classes or two objects")),
+                }
+            }
+        }
+    }
+
+    /// An object's attribute: computed by its function (pages 127 and
+    /// 128), with THIS the object, or stored.
+    fn attribute_value(&self, o: Id, name: &str, span: Span) -> Exec<Value> {
+        let (class, attribute, computed) = {
+            let store = self.store.lock().unwrap();
+            let c = store.objects[&o].class;
+            let a = stored(store.attribute(c, name), span)?;
+            (
+                store.classes[&c].name.clone(),
+                a,
+                store.attributes[&a].props.computed,
+            )
+        };
+        if let Some(&i) = self.computed.get(&(class.clone(), name.to_string())) {
+            let m = &self.program.modules[i];
+            let v = self.call(m, Vec::new(), None, Some(AdtRef::Object(o)))?;
+            return Ok(v.expect("a function's result"));
+        }
+        if computed {
+            return Err(error(
+                span,
+                format!("\"{class}\" . \"{name}\" is COMPUTED, but no FUNCTION computes it"),
+            ));
+        }
+        let store = self.store.lock().unwrap();
+        store.get(o, attribute).cloned().ok_or_else(|| {
+            let what = store.describe(AdtRef::ObjectAttribute(o, attribute));
+            error(span, format!("{what} has no value"))
+        })
+    }
+
+    /// CREATE and DESIGN: classes (embryos for DESIGN), objects,
+    /// attributes, links.
+    fn create(&self, o: &Operands, kind: ClassKind, f: &mut Frame, span: Span) -> Exec<()> {
+        match o {
+            Operands::Designations(ds) => {
+                for d in ds {
+                    match d {
+                        Designation::Named(n) => {
+                            let name = self.text(n, f, span)?;
+                            let mut store = self.store.lock().unwrap();
+                            stored(store.create_class(&name, kind.clone()), span)?;
+                        }
+                        Designation::Classed { name, class } => {
+                            let c = self.class(class, f, span)?;
+                            let name = self.text(name, f, span)?;
+                            let mut store = self.store.lock().unwrap();
+                            stored(store.create_object(c, &name), span)?;
+                        }
+                        Designation::This(at) => return Err(error(*at, "THIS exists already")),
+                    }
+                }
+            }
+            Operands::Attributes(attributes) => {
+                for a in attributes {
+                    let c = self.class(&a.class, f, span)?;
+                    let name = self.text(&a.attribute, f, span)?;
+                    let mut store = self.store.lock().unwrap();
+                    stored(store.create_attribute(c, &name), span)?;
+                }
+            }
+            Operands::Links(links) => {
+                for l in links {
+                    let from = self.class(&l.link.from, f, span)?;
+                    let to = self.class(&l.link.to, f, span)?;
+                    let reverse = match &l.reverse {
+                        Reverse::Named(n) => Some(self.text(n, f, span)?),
+                        _ => None,
+                    };
+                    let reflexive = l.reverse == Reverse::Reflexive;
+                    let mut store = self.store.lock().unwrap();
+                    let r = store.create_class_link(
+                        from,
+                        &l.link.relation.text,
+                        to,
+                        reverse.as_deref(),
+                        reflexive,
+                    );
+                    stored(r, span)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// HIBERN, AWAKE, DESTROY, RESUR, PURGE.
+    fn state_change(&self, op: StateOp, o: &Operands, f: &mut Frame, span: Span) -> Exec<()> {
+        let mut targets = Vec::new();
+        match o {
+            Operands::Designations(ds) => {
+                for d in ds {
+                    targets.push(self.designate(d, f, span, true)?);
+                }
+            }
+            Operands::Attributes(attributes) => {
+                for a in attributes {
+                    let c = self.class(&a.class, f, span)?;
+                    let name = self.text(&a.attribute, f, span)?;
+                    let store = self.store.lock().unwrap();
+                    let a = store.find_attribute(c, &name);
+                    let a = a.ok_or_else(|| error(span, format!("no attribute \"{name}\"")))?;
+                    targets.push(AdtRef::ClassAttribute(a));
+                }
+            }
+            Operands::Links(links) => {
+                for l in links {
+                    let from = self.class(&l.link.from, f, span)?;
+                    let to = self.class(&l.link.to, f, span)?;
+                    let store = self.store.lock().unwrap();
+                    let link = store.find_class_link(from, &l.link.relation.text, to);
+                    let link = link.ok_or_else(|| error(span, "no such link"))?;
+                    targets.push(AdtRef::ClassLink(link));
+                }
+            }
+        }
+        let mut store = self.store.lock().unwrap();
+        for t in targets {
+            let r = match op {
+                StateOp::Hibern => store.change_state(t, AdtState::Active, AdtState::Hibernating),
+                StateOp::Awake => store.change_state(t, AdtState::Hibernating, AdtState::Active),
+                StateOp::Destroy => store.change_state(t, AdtState::Active, AdtState::Destroyed),
+                StateOp::Resur => store.change_state(t, AdtState::Destroyed, AdtState::Active),
+                StateOp::Purge => store.purge_adt(t),
+            };
+            stored(r, span)?;
+        }
+        Ok(())
+    }
+
+    /// LET: an object's attribute, or a property (COND, ACTION), which is
+    /// stored as written, once it parses (pages 156 to 158).
+    fn let_(&self, target: &LetTarget, value: &Expr, f: &mut Frame, span: Span) -> Exec<()> {
+        let v = self.eval(value, f)?;
+        match target {
+            LetTarget::Attribute { object, attribute } => {
+                let o = self.object(object, f, span)?;
+                let name = self.text(attribute, f, span)?;
+                let mut store = self.store.lock().unwrap();
+                let a = stored(store.attribute(store.objects[&o].class, &name), span)?;
+                stored(store.set(o, a, v), span)
+            }
+            LetTarget::Variable(n) => {
+                let r = self.read(
                     &Variable {
                         name: n.clone(),
                         indices: Vec::new(),
                     },
                     f,
                 )?;
-                Ok((v, Some(self.var(n, f)?)))
+                match r {
+                    Value::Adt(AdtRef::ObjectAttribute(o, a)) => {
+                        stored(self.store.lock().unwrap().set(o, a, v), span)
+                    }
+                    _ => Err(error(
+                        n.span,
+                        format!("`{}` holds no object's attribute", n.spelling),
+                    )),
+                }
             }
-            (Designation::Named(AdtName::Expr(e)), AdtPart::None) => Ok((self.eval(e, f)?, None)),
-            _ => Err(store(span, "an a.d.t. designation")),
+            LetTarget::Property { adt, name } => {
+                let target = self.adt(adt, f, span)?;
+                let text = match v.scalar() {
+                    Some(Scalar::String(s)) => s.clone(),
+                    Some(Scalar::Character(c)) => c.to_string(),
+                    _ => {
+                        return Err(error(
+                            value.span,
+                            format!("a property is a string, not {v}"),
+                        ));
+                    }
+                };
+                let parses = match name.key.as_str() {
+                    "COND" => lower::parse_fragment(&format!("x := {text}")).map(|_| ()),
+                    "ACTION" => lower::parse_fragment(&text).map(|_| ()),
+                    _ => Ok(()),
+                };
+                if let Err(e) = parses {
+                    return Err(error(
+                        value.span,
+                        format!("this {} does not parse: {e}", name.key),
+                    ));
+                }
+                stored(
+                    self.store
+                        .lock()
+                        .unwrap()
+                        .set_property(target, &name.key, &text),
+                    span,
+                )
+            }
         }
     }
 
@@ -1048,7 +1600,7 @@ impl Machine {
                 ));
             }
             let args = self.args(m, c, f)?;
-            let v = self.call(m, args, Some(prefix))?;
+            let v = self.call(m, args, Some(prefix), None)?;
             return Ok(v.expect("a functor's result"));
         }
         let Some(functor) = builtins::functor(&c.name.key) else {
@@ -1057,14 +1609,31 @@ impl Machine {
                 format!("`{}` is not a functor of this file", c.name.spelling),
             ));
         };
-        if functor.takes != builtins::Takes::Lists {
-            return Err(store(span, &format!("the functor `{}`", c.name.spelling)));
-        }
         let args = c
             .args
             .iter()
             .map(|a| self.eval(a, f))
             .collect::<Exec<Vec<Value>>>()?;
+        if functor.takes != builtins::Takes::Lists {
+            return self.adt_functor(&c.name, &prefix, &args);
+        }
+        // SIGMA adds attributes' values (page 78).
+        let prefix = match prefix {
+            Value::List(mut l) if c.name.key == "SIGMA" => {
+                let store = self.store.lock().unwrap();
+                for item in &mut l.items {
+                    if let Value::Adt(AdtRef::ObjectAttribute(o, a)) = item {
+                        let v = store.get(*o, *a).cloned();
+                        *item = v.ok_or_else(|| {
+                            let what = store.describe(AdtRef::ObjectAttribute(*o, *a));
+                            error(span, format!("{what} has no value"))
+                        })?;
+                    }
+                }
+                Value::List(l)
+            }
+            prefix => prefix,
+        };
         let Value::List(mut list) = prefix else {
             return Err(error(
                 span,

@@ -191,6 +191,20 @@ fn data_type(t: &DataType) -> String {
     }
 }
 
+/// A SPECIFY's specification, as written: `FLOAT APPR`, `VECTOR OF ...`.
+pub fn specification(spec: &Specification) -> String {
+    match spec {
+        Specification::Scalar(s) => scalar(s),
+        Specification::Array { rank: r, element } => match element {
+            Some(e) => format!("{} OF {}", rank(*r), scalar(e)),
+            None => rank(*r).into(),
+        },
+        Specification::List(element) => list_type(element),
+        Specification::Compound => "COMPOUND".into(),
+        Specification::Fuzziness(f) => fuzziness(f),
+    }
+}
+
 fn mode(m: Mode) -> &'static str {
     match m {
         Mode::In => "IN",
@@ -903,16 +917,7 @@ impl Printer {
                     Specified::Attribute(a) => self.class_attribute(a),
                     Specified::Link(l) => self.class_link(l),
                 });
-                let spec = match spec {
-                    Specification::Scalar(s) => scalar(s),
-                    Specification::Array { rank: r, element } => match element {
-                        Some(e) => format!("{} OF {}", rank(*r), scalar(e)),
-                        None => rank(*r).into(),
-                    },
-                    Specification::List(element) => list_type(element),
-                    Specification::Compound => "COMPOUND".into(),
-                    Specification::Fuzziness(f) => fuzziness(f),
-                };
+                let spec = specification(spec);
                 let unit = match unit {
                     Some(u) => format!("UNIT ({})", u.spelling),
                     None => String::new(),

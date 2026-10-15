@@ -1,0 +1,7 @@
+-- Store error: an attribute read before it has a value. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "TOWN" ; CREATE "TOWN" . "AREA" ; CREATE "Lyon" [ "TOWN" ] ;
+        PRINT "Lyon" [ "TOWN" ] . "AREA"
+END ;

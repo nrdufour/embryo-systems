@@ -1,0 +1,34 @@
+-- Functorial expressions in the manner of pages 77 to 79, on a small --
+-- hydrography: written for the store's tests. --
+
+PROGRAM RIVERS ;
+LOCAL
+        L : LIST OF OBJECT ;
+        total : INTEGER ;
+BEGIN
+        CREATE "TOWN", "RIVER", "DAM" ;
+        CREATE "DAM" . "MAX_VOL" ;
+        CREATE "TOWN" "crossed_by" "RIVER" REVERSE "crosses",
+               "RIVER" "alimented_by" "DAM" REVERSE "feeds" ;
+        CREATE "Lyon" [ "TOWN" ], "Rhone" [ "RIVER" ], "Saone" [ "RIVER" ],
+               "Vouglans" [ "DAM" ], "Genissiat" [ "DAM" ], "Gorges" [ "DAM" ] ;
+        LET "Vouglans" [ "DAM" ] . "MAX_VOL" := 605 ;
+        LET "Genissiat" [ "DAM" ] . "MAX_VOL" := 56 ;
+        LET "Gorges" [ "DAM" ] . "MAX_VOL" := 1000 ;
+        ASSERT "Lyon" [ "TOWN" ] "crossed_by" "Rhone" [ "RIVER" ] ;
+        ASSERT "Lyon" [ "TOWN" ] "crossed_by" "Saone" [ "RIVER" ] ;
+        ASSERT "Rhone" [ "RIVER" ] "alimented_by" "Vouglans" [ "DAM" ] ;
+        ASSERT "Rhone" [ "RIVER" ] "alimented_by" "Genissiat" [ "DAM" ] ;
+        L := "Lyon" [ "TOWN" ] ' OPSCRC("crossed_by", "RIVER") ' OFIN ;
+        PRINT L ;
+        L := "Lyon" [ "TOWN" ] ' OPSCRC("crossed_by", "RIVER") ' OFIN
+             ' OPSCRC("alimented_by", "DAM") ' OFIN ;
+        PRINT L ;
+        total := "Lyon" [ "TOWN" ] ' OPSCRC("crossed_by", "RIVER") ' OFIN
+             ' OPSCRC("alimented_by", "DAM") ' OFIN ' OATTN("MAX_VOL") ' SIGMA ;
+        PRINT total ;
+        PRINT "Vouglans" [ "DAM" ] ' OPSCRC("feeds", "RIVER") ' OFIN
+              ' OPSCRC("crosses", "TOWN") ' OFIN ;
+        PRINT "DAM" ' OBJ ' OATTN("MAX_VOL") ' SIGMA, "RIVER" ' PSC, "DAM" ' NSC ;
+        PRINT "DAM" ' ATT ' VATT ' CARD, "RIVER" "alimented_by" "DAM" ' EFF ' CARD
+END ;
