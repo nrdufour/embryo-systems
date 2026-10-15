@@ -47,6 +47,7 @@ rules! {
     Function = "function",
     Coroutine = "coroutine",
     Functor = "functor",
+    ComputedAttribute = "computed_attribute",
     ModuleName = "module_name",
     FormalParameters = "formal_parameters",
     ParameterSpecifications = "parameter_specifications",
@@ -562,9 +563,11 @@ impl<'a> Parser<'a> {
 
     fn function(&mut self) -> Parse<Node<'a>> {
         let mut c = vec![self.kw("FUNCTION")?];
-        match self.attempt(Self::class_attribute) {
-            Some(attribute) => c.push(attribute),
-            None => c.push(self.module_name()?),
+        if self.is_kind(0, Kind::String) {
+            let attribute = vec![self.take(), self.sym(".")?, self.string()?];
+            c.push(node(R::ComputedAttribute, attribute));
+        } else {
+            c.push(self.module_name()?);
         }
         c.push(self.formal_parameters()?);
         c.push(self.kw("RETURNS")?);

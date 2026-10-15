@@ -36,6 +36,12 @@ it was obtained, where it departs from the print, and why.
    rule of the grammar, building the grammar's own tree. On every test
    program and on the eleven listings it builds the same tree as Lark, node
    for node, and it refuses every reject.
+8. **A typed tree.** The parser's tree is lowered to an abstract syntax
+   tree for the checker, and a printer writes it back as source. Random
+   programs, generated from that tree, check both ways: printed and read
+   back, each gives the tree it came from; and Lark reads each printed
+   program one way only, to the Rust parser's tree. That search found one
+   more statement the grammar read two ways, settled below.
 
 ## The print's notation
 
@@ -167,6 +173,12 @@ The print leaves these open; they were decided on 2026-10-14.
     writes `"P" [ "POINT" ]`: `CREATE p ["C"]` creates the object `p` of
     class `"C"`. A class named by an indexed variable is written
     `CREATE (T[i])`.
+- **A function named after a computed attribute is named by two string
+  literals**, `FUNCTION "ARC" . "LENGTH"`, as every listing writes it
+  (decided 2026-10-15). A heading is read before anything runs, so a
+  computed name has nothing to compute it with; allowed, it also made
+  `FUNCTION "A" . p (x)` read two ways: the attribute `p` with a parameter
+  `x`, or the attribute named by the call `p(x)`.
 - **`EXIT`, `NEXT`, `RELOOP` take an optional count**, one by default. Page
   22 always writes it.
 
@@ -189,8 +201,12 @@ legal; a functor's prefix being an a.d.t.
 | `tools/check_grammar.py` | the gate: `just check-grammar` |
 | `src/adt81/lexer.rs` | the Rust lexer; its tests keep its keywords and symbols in step with the grammar |
 | `src/adt81/parser.rs` | the Rust parser; its tests keep its rules in step with the grammar |
+| `src/adt81/ast.rs`, `lower.rs` | the typed tree, and the parser's tree lowered to it |
+| `src/adt81/print.rs` | the typed tree written back as source, `embryo-systems fmt` |
+| `src/adt81/sample.rs`, `examples/sample.rs` | random programs, for the tests and the gate |
+| `tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |
 
-`just check` runs the gate with the rest: every test program parses one way
-only and to the same tree in Rust, every reject is refused by both, every
-rule is reachable. `tools/check_grammar.py --tree FILE` prints Lark's tree
+`just check` runs the gate with the rest: every test program, and 200
+random ones, parses one way only and to the same tree in Rust, every reject
+is refused by both, every rule is reachable. `tools/check_grammar.py --tree FILE` prints Lark's tree
 as `embryo-systems parse --fragment FILE` prints the parser's.
