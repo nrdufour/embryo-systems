@@ -1,0 +1,24 @@
+-- HYPOCHAV (page 107): from a hypothetical fact, what follows is tried --
+-- first, whatever the priorities, and printed; then the store is as it --
+-- was. Written for the expert-system tests. --
+
+PROGRAM HYPOTHESES ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "temperature", "PLANT" . "alarm" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        LET "boiler" [ "PLANT" ] . "temperature" := 20 ;
+        LET "boiler" [ "PLANT" ] . "alarm" := FALSE ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "busy" [ "STEPS" ], "hot" [ "STEPS" ] ;
+        LET "busy" [ "STEPS" ] . "PRIORITY" := 9 ;
+        LET "busy" [ "STEPS" ] ' YES := "PRINT ""busy""" ;
+        LET "hot" [ "STEPS" ] ' PREMISES :=
+            """boiler"" [ ""PLANT"" ] . ""temperature"" > 100" ;
+        LET "hot" [ "STEPS" ] ' YES :=
+            "LET ""boiler"" [ ""PLANT"" ] . ""alarm"" := TRUE" ;
+        CALL HYPOCHAV("LET ""boiler"" [ ""PLANT"" ] . ""temperature"" := 120",
+                      "STEPS") ;
+        PRINT "boiler" [ "PLANT" ] . "temperature", "boiler" [ "PLANT" ] . "alarm"
+END ;

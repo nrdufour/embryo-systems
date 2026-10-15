@@ -227,12 +227,15 @@ fragments are excerpts, with no module to declare their names.
   type: page 76 declares `LOCAL C : CLASS` for `FUNCTOR C'COUPLE(D)`.
 - `CALL` names a subroutine, `RESUME` a coroutine, `CHAIN` a program, a
   call in an expression a function, `'` a functor. The wrong kind is an
-  error; an unknown subroutine, coroutine or program too.
+  error; an unknown subroutine, coroutine or program too. CHAV and
+  HYPOCHAV are subroutines without a module: the expert-system engines
+  ([hbds.md](hbds.md), "Expert systems").
 - An unknown function, functor or property (`LET ... ' COND`) is only a
   warning (decided 2026-10-15): the engines catalogue the functors of
-  pages 76 to 80 (`crates/hbds-functors`, `crates/hbds-lists`) and the
-  properties of pages 156 to 158 (`crates/hbds-gtad`), but the print says
-  its lists are partial, and lists no function.
+  pages 76 to 80 (`crates/hbds-functors`, `crates/hbds-lists`,
+  `crates/hbds-rules`), the properties of pages 156 to 158
+  (`crates/hbds-gtad`) and those of rules and facts (`crates/hbds-rules`),
+  but the print says its lists are partial, and lists no function.
 - Not checked: unit names (`UNIT (m3s)`), which the print does not list,
   and `THIS`.
 
@@ -292,8 +295,9 @@ finds errors, then runs its first PROGRAM: READ reads standard input, a
 line per variable (a literal, fuzzy ones included, or text as it is),
 PRINT writes its values on one line. A runtime error stops it, with its
 position. Classes, objects, attributes and links live in the HBDS store,
-where COND and ACTION run as they change ([hbds.md](hbds.md)); processes,
-the simulation engine's, are not there yet, and say so.
+where COND and ACTION run as they change, and rules as CHAV and HYPOCHAV
+chain them ([hbds.md](hbds.md)); processes, the simulation engine's, are
+not there yet, and say so.
 
 Decided on 2026-10-15:
 
@@ -303,8 +307,8 @@ Decided on 2026-10-15:
   is computed "likewise".
 - **A computed probability is the product of the operands'**, as for
   independent events, an operand without one being certain. Page 152 has
-  the law given by rules, which come with the expert system; this is the
-  default until then.
+  the law given by rules: what a rule establishes takes its reliability
+  times its premises' ([hbds.md](hbds.md), "Expert systems").
 - **Coroutines** run each on a thread of its own, handing control over by
   channel, so that only one ever runs: RESUME continues a coroutine where
   it paused, its "Local Sequence Counter" (page 112), PAUSE gives control
@@ -365,6 +369,7 @@ expression written as a string), and fragments.
 | `crates/adt81/src/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |
 | `crates/adt81/tests/types.rs` | kinds and types, rule by rule |
 | `crates/adt81/src/value.rs`, `interp.rs` | values and their fuzzy arithmetic, and the interpreter |
+| `crates/adt81/src/uses.rs` | what a rule's code reads or writes, compiled when it is written, for SES |
 | `crates/adt81/tests/corpus/run/` | programs with their input and expected output, runtime errors included |
 | `crates/adt81/tests/run.rs` | runs them |
 | `crates/adt81/tests/ast.rs` | lowering, precedence, and the round trip, on the corpus and on random programs |

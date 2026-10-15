@@ -11,6 +11,7 @@ dependencies = [
  "hbds-gtad",
  "hbds-journal",
  "hbds-lists",
+ "hbds-rules",
 ]
 
 [[package]]
@@ -54,4 +55,12 @@ name = "hbds-lists"
 version = "0.1.0"
 dependencies = [
  "hbds-core",
+]
+
+[[package]]
+name = "hbds-rules"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
+ "hbds-gtad",
 ]

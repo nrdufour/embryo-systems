@@ -44,6 +44,7 @@ cargo run -q -- store /tmp/hydro                                   # what the st
   - an interpreter, covering every number type (Gauss integers and quaternions included), fuzzy arithmetic, lists, arrays, modules, functors and coroutines
 - **The HBDS store:** classes, objects, attributes, links and their reverses, states, hyperclasses, every functor of the catalogue, and computed attributes. It is in memory, and made durable by a journal.
 - **COND and ACTION:** the constraints and actions a.d.t. carry run when the a.d.t. changes. A statement is a transaction: it is kept whole, or refused whole.
+- **Expert systems:** rules are objects of classes in the hyperclass RULE, their premises and consequents code compiled when written; CHAV chains them forward, HYPOCHAV from hypotheses, with the print's ten parameters (priority, reliabilities, askability, activation and inhibition among them), and INRULE, OUTRULE, INFACT and OUTFACT walk them.
 - **The polycopié's own code runs:** pages 127-128's computed attributes ARC.LENGTH and AREA.PERIMETER give the right answers on a test schema, once three print errors are corrected.
 
 Every departure from the print, and every decision the print left open, is recorded with its page in [docs/adt81.md](docs/adt81.md) and [docs/hbds.md](docs/hbds.md).
@@ -60,6 +61,7 @@ flowchart LR
     interp --> gtad["GTAD: a.d.t."]
     interp --> lists["list engine"]
     interp --> functors["functor engine"]
+    interp --> rules["expert systems"]
     gtad -- "each change, through Recorder" --> journal[(journal)]
     grammar["grammar.lark"] -. "the parser builds Lark's tree" .-> parser
 ```
@@ -75,7 +77,10 @@ flowchart BT
     functors --> core
     journal["hbds-journal<br/>persistence, project 13"] --> gtad
     journal --> core
+    rules["hbds-rules<br/>expert systems, project 16"] --> gtad
+    rules --> core
     adt81["adt81<br/>the language"] --> lists
+    adt81 --> rules
     adt81 --> functors
     adt81 --> gtad
     cli["embryo-systems<br/>the command"] --> adt81
@@ -89,13 +94,14 @@ flowchart BT
 | `crates/hbds-lists` | the list engine: cursors, circular lists, list functors |
 | `crates/hbds-functors` | the functor engine: the catalogue of pages 76 to 80 |
 | `crates/hbds-journal` | GTAD's persistence, a journal in the spirit of the print's DAYFILE |
+| `crates/hbds-rules` | the expert systems: rules and facts, SES's four functors, CHAV and HYPOCHAV |
 | `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
 | `src/main.rs` | the `embryo-systems` command |
 
 ## Documentation
 
 - [docs/adt81.md](docs/adt81.md): the language. How the grammar was derived, every departure from the print, the checker, and running.
-- [docs/hbds.md](docs/hbds.md): the engines. The model, COND and ACTION, transactions, the journal, open questions.
+- [docs/hbds.md](docs/hbds.md): the engines. The model, inheritance, COND and ACTION, transactions, the expert systems, the journal, open questions.
 
 ## Roadmap
 
@@ -103,7 +109,6 @@ The print's other engines, each to be a crate of its own:
 
 | engine | print |
 |---|---|
-| expert systems, CHAV and HYPOCHAV, with the INFACT and INRULE functors | project 16, pages 106 to 111 |
 | simulation, the processes behind ACTIVATE and HOLD | project 17, page 112 |
 | neurons and reflexes | project 18, pages 116 to 131 |
 | dialog, the Q-Graph | project 19, pages 133 to 149 |

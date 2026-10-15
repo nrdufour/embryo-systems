@@ -1,0 +1,7 @@
+[FIRE_HYDRANT.state] [SECONDARY_PIPE.pressure]
+[hydrant[NETWORK_RULES]] [boost[NETWORK_RULES]] [output[NETWORK_RULES]]
+P1[SECONDARY_PIPE].pressure = 4.0 % 0.9, by hydrant[NETWORK_RULES]: the hydrant sets the pipe's pressure
+4.0 % 0.9
+P1[SECONDARY_PIPE].pressure = 2.5 % 0.9, by hydrant[NETWORK_RULES]: the hydrant sets the pipe's pressure
+S1[SURPRESSOR].output pressure = 6.0 % 0.45, by output[NETWORK_RULES]
+2.5 % 0.9 TRUE % 0.45 6.0 % 0.45 2

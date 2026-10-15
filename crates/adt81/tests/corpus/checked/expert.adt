@@ -1,0 +1,29 @@
+-- Every name the expert-system engines add: CHAV and HYPOCHAV, a rule's --
+-- five parts, a fact's three parameters, and SES's four functors. --
+-- Written for the checker's tests. --
+
+PROGRAM EXPERT ;
+LOCAL
+        l : LIST ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "temperature" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        LET "PLANT" . "temperature" ' ASKABLE := "TRUE" ;
+        LET "PLANT" . "temperature" ' EDITABLE := "TRUE" ;
+        LET "PLANT" . "temperature" ' MODIFIABLE := "TRUE" ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "r" [ "STEPS" ] ;
+        LET "r" [ "STEPS" ] ' PROLOGUE := "PRINT ""trying""" ;
+        LET "r" [ "STEPS" ] ' PREMISES := """boiler"" [ ""PLANT"" ] . ""temperature"" > 100" ;
+        LET "r" [ "STEPS" ] ' YES := "PRINT ""hot""" ;
+        LET "r" [ "STEPS" ] ' NO := "PRINT ""cold""" ;
+        LET "r" [ "STEPS" ] ' EPILOGUE := "PRINT ""tried""" ;
+        l := "r" [ "STEPS" ] ' INRULE ;
+        l := "r" [ "STEPS" ] ' OUTRULE ;
+        l := "PLANT" . "temperature" ' INFACT ;
+        l := "PLANT" . "temperature" ' OUTFACT ;
+        CALL CHAV("STEPS") ;
+        CALL HYPOCHAV("LET ""boiler"" [ ""PLANT"" ] . ""temperature"" := 120", "STEPS")
+END ;

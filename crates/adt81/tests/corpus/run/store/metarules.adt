@@ -1,0 +1,19 @@
+-- Rules are facts (figure 47, RULE included in FACT): a metarule raises --
+-- another rule's priority, and so changes the order rules fire in. --
+-- Written for the expert-system tests. --
+
+PROGRAM METARULES ;
+BEGIN
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        PRINT "STEPS" ' CONTOF, "RULE" ' CONTOF ;
+        CREATE "first" [ "STEPS" ], "second" [ "STEPS" ], "meta" [ "STEPS" ] ;
+        LET "first" [ "STEPS" ] . "PRIORITY" := 1 ;
+        LET "first" [ "STEPS" ] ' YES := "PRINT ""first""" ;
+        LET "second" [ "STEPS" ] ' YES := "PRINT ""second""" ;
+        CALL CHAV("STEPS") ;
+        LET "meta" [ "STEPS" ] . "PRIORITY" := 9 ;
+        LET "meta" [ "STEPS" ] ' YES :=
+            "LET ""second"" [ ""STEPS"" ] . ""PRIORITY"" := 5" ;
+        CALL CHAV("STEPS")
+END ;

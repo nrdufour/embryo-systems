@@ -3,7 +3,8 @@
 //! applies to and what it gives, and their implementation on GTAD. The
 //! list functors are the list engine's (hbds-lists). The print calls its
 //! lists partial ("there are many other multifunctors", page 77): a
-//! language decides what an unknown name means.
+//! language decides what an unknown name means. The expert-system
+//! functors of page 80 are the expert-system engine's (hbds-rules).
 
 use hbds_core::{AdtRef, AdtType, Functor, Gives, Id, Takes, same};
 use hbds_gtad::{Error, ObjectLink, Store, Stored, error, push_new};
@@ -62,11 +63,6 @@ pub const FUNCTORS: &[Functor] = &[
     f("OPSCRC", 77, Objects, ListOf(AdtType::ObjectLink)),
     f("ONSCRC", 77, Objects, ListOf(AdtType::ObjectLink)),
     f("OATTN", 77, Objects, ListOf(AdtType::ObjectAttribute)),
-    // Expert system functors, page 80.
-    f("INFACT", 80, Any, Unknown),
-    f("OUTFACT", 80, Any, Unknown),
-    f("INRULE", 80, Any, Unknown),
-    f("OUTRULE", 80, Any, Unknown),
 ];
 
 pub fn functor(key: &str) -> Option<&'static Functor> {

@@ -1,0 +1,67 @@
+-- Figure 49's water network as forward chaining: an open fire hydrant --
+-- lowers a secondary pipe's pressure, which starts a surpressor, which --
+-- then gives its nominal output pressure. Written for the expert-system --
+-- tests; reliabilities by hand: the hydrant rule's 0.9 on what it sets, --
+-- then 0.5 x 0.9 = 0.45 for the boost and what follows from it. --
+
+PROGRAM NETWORK ;
+BEGIN
+        CREATE "FIRE_HYDRANT", "SECONDARY_PIPE", "SURPRESSOR" ;
+        CREATE "FIRE_HYDRANT" . "state", "SECONDARY_PIPE" . "pressure",
+               "SURPRESSOR" . "running", "SURPRESSOR" . "output pressure",
+               "SURPRESSOR" . "nominal output pressure" ;
+        CREATE "H1" [ "FIRE_HYDRANT" ], "P1" [ "SECONDARY_PIPE" ],
+               "S1" [ "SURPRESSOR" ] ;
+        LET "S1" [ "SURPRESSOR" ] . "nominal output pressure" := 6.0 ;
+        LET "H1" [ "FIRE_HYDRANT" ] . "state" := "closed" ;
+        LET "SECONDARY_PIPE" . "pressure" ' EDITABLE := "TRUE" ;
+        LET "SURPRESSOR" . "output pressure" ' EDITABLE := "TRUE" ;
+
+        CREATE "NETWORK_RULES" ;
+        INCLUDE "NETWORK_RULES" INTO "RULE" ;
+        CREATE "NETWORK_RULES" . "tries" ;
+        -- Created last first: their priorities, not their age, order them. --
+        CREATE "output" [ "NETWORK_RULES" ], "boost" [ "NETWORK_RULES" ],
+               "hydrant" [ "NETWORK_RULES" ] ;
+        LET "hydrant" [ "NETWORK_RULES" ] . "PRIORITY" := 3 ;
+        LET "hydrant" [ "NETWORK_RULES" ] . "RELIABILITY" := 0.9 ;
+        LET "hydrant" [ "NETWORK_RULES" ] . "EXPLANATION" :=
+            "the hydrant sets the pipe's pressure" ;
+        LET "hydrant" [ "NETWORK_RULES" ] ' PREMISES :=
+            """H1"" [ ""FIRE_HYDRANT"" ] . ""state"" = ""open""" ;
+        LET "hydrant" [ "NETWORK_RULES" ] ' YES :=
+            "LET ""P1"" [ ""SECONDARY_PIPE"" ] . ""pressure"" := 2.5" ;
+        LET "hydrant" [ "NETWORK_RULES" ] ' NO :=
+            "LET ""P1"" [ ""SECONDARY_PIPE"" ] . ""pressure"" := 4.0" ;
+        LET "boost" [ "NETWORK_RULES" ] . "PRIORITY" := 2 ;
+        LET "boost" [ "NETWORK_RULES" ] . "RELIABILITY" := 0.5 ;
+        LET "boost" [ "NETWORK_RULES" ] . "tries" := 0 ;
+        LET "boost" [ "NETWORK_RULES" ] ' PROLOGUE :=
+            "LET THIS . ""tries"" := THIS . ""tries"" + 1" ;
+        LET "boost" [ "NETWORK_RULES" ] ' PREMISES :=
+            """P1"" [ ""SECONDARY_PIPE"" ] . ""pressure"" < 3.0" ;
+        LET "boost" [ "NETWORK_RULES" ] ' YES :=
+            "LET ""S1"" [ ""SURPRESSOR"" ] . ""running"" := TRUE" ;
+        LET "output" [ "NETWORK_RULES" ] . "PRIORITY" := 1 ;
+        LET "output" [ "NETWORK_RULES" ] ' PREMISES :=
+            """S1"" [ ""SURPRESSOR"" ] . ""running""" ;
+        LET "output" [ "NETWORK_RULES" ] ' YES :=
+            "LET ""S1"" [ ""SURPRESSOR"" ] . ""output pressure"" := ""S1"" [ ""SURPRESSOR"" ] . ""nominal output pressure""" ;
+
+        -- What the rules consume and produce, compiled when written. --
+        PRINT "hydrant" [ "NETWORK_RULES" ] ' INRULE,
+              "hydrant" [ "NETWORK_RULES" ] ' OUTRULE ;
+        PRINT "P1" [ "SECONDARY_PIPE" ] . "pressure" ' INFACT,
+              "SECONDARY_PIPE" . "pressure" ' OUTFACT,
+              "SURPRESSOR" . "running" ' OUTFACT ;
+
+        -- Closed: the pressure stays up, the surpressor's state unknown. --
+        CALL CHAV("NETWORK_RULES") ;
+        PRINT "P1" [ "SECONDARY_PIPE" ] . "pressure" ;
+        LET "H1" [ "FIRE_HYDRANT" ] . "state" := "open" ;
+        CALL CHAV("NETWORK_RULES") ;
+        PRINT "P1" [ "SECONDARY_PIPE" ] . "pressure",
+              "S1" [ "SURPRESSOR" ] . "running",
+              "S1" [ "SURPRESSOR" ] . "output pressure",
+              "boost" [ "NETWORK_RULES" ] . "tries"
+END ;

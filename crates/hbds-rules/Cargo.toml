@@ -1,0 +1,11 @@
+[package]
+name = "hbds-rules"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The expert-system engine (project 16, pages 106 to 111), on GTAD.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-gtad = { path = "../hbds-gtad" }

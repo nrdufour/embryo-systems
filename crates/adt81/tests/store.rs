@@ -187,3 +187,82 @@ fn code_in_another_language_is_not_run() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+const KNOWLEDGE: &str = r#"
+PROGRAM KNOWLEDGE ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "temperature", "PLANT" . "alarm" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        LET "boiler" [ "PLANT" ] . "temperature" := 20 ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "hot" [ "STEPS" ] ;
+        LET "hot" [ "STEPS" ] ' PREMISES := """boiler"" [ ""PLANT"" ] . ""temperature"" > 100" ;
+        LET "hot" [ "STEPS" ] ' YES := "LET ""boiler"" [ ""PLANT"" ] . ""alarm"" := TRUE" ;
+        LET "hot" [ "STEPS" ] ' NO := "LET ""boiler"" [ ""PLANT"" ] . ""alarm"" := FALSE"
+END ;
+"#;
+
+const REASON: &str = r#"
+PROGRAM REASON ;
+BEGIN
+        PRINT "hot" [ "STEPS" ] ' INRULE, "hot" [ "STEPS" ] ' OUTRULE ;
+        CALL CHAV ;
+        PRINT "boiler" [ "PLANT" ] . "alarm" ;
+        LET "boiler" [ "PLANT" ] . "temperature" := 120 ;
+        CALL CHAV("STEPS") ;
+        PRINT "boiler" [ "PLANT" ] . "alarm"
+END ;
+"#;
+
+#[test]
+fn a_knowledge_base_outlives_its_run() {
+    let dir = directory("knowledge");
+    let (store, _) = open(&dir);
+    assert_eq!(run(KNOWLEDGE, &store), "");
+    drop(store);
+    // Its rules, stored as code, are compiled again in the next run.
+    let (store, warnings) = open(&dir);
+    assert!(warnings.is_empty());
+    assert_eq!(
+        run(REASON, &store),
+        "[PLANT.temperature] [PLANT.alarm]\nFALSE\nTRUE\n"
+    );
+    drop(store);
+    let (store, _) = open(&dir);
+    let out = run(
+        r#"PROGRAM P ; BEGIN PRINT "boiler" [ "PLANT" ] . "alarm" END ;"#,
+        &store,
+    );
+    assert_eq!(out, "TRUE\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_rule_in_another_language_is_not_run() {
+    let dir = directory("rule-language");
+    let (store, _) = open(&dir);
+    run(KNOWLEDGE, &store);
+    {
+        let mut s = store.lock().unwrap();
+        let steps = s.find_class("STEPS").unwrap();
+        let hot = s.find_object(steps, "hot").unwrap();
+        let rule = hbds_core::AdtRef::Object(hot);
+        s.set_property(
+            rule,
+            "PREMISES",
+            "PROLOG",
+            "hot :- temperature(T), T > 100.",
+        )
+        .unwrap();
+    }
+    drop(store);
+    let (store, _) = open(&dir);
+    let error = fails(r#"PROGRAM P ; BEGIN CALL CHAV END ;"#, &store);
+    assert_eq!(
+        error,
+        "1:19: runtime error: the PREMISES of hot[STEPS] is written in PROLOG, which ADT'81 does not run"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

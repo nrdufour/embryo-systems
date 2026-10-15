@@ -1,13 +1,29 @@
 //! The names ADT'81 knows: the functors of the engines, on a.d.t.
-//! (hbds-functors) and on lists (hbds-lists), the properties GTAD keeps,
-//! and the functions of a real number, which are ADT'81's own.
+//! (hbds-functors), on lists (hbds-lists) and on rules and facts
+//! (hbds-rules), the properties GTAD and SES keep, the expert-system
+//! engines, and the functions of a real number, which are ADT'81's own.
 
 pub use hbds_core::{Functor, Gives, Takes};
-pub use hbds_gtad::{PROPERTIES, is_property};
+pub use hbds_gtad::PROPERTIES;
 
-/// A functor of either engine's catalogue.
+/// A functor of an engine's catalogue.
 pub fn functor(key: &str) -> Option<&'static Functor> {
-    hbds_functors::functor(key).or_else(|| hbds_lists::functor(key))
+    (hbds_functors::functor(key))
+        .or_else(|| hbds_lists::functor(key))
+        .or_else(|| hbds_rules::functor(key))
+}
+
+/// COND and ACTION (GTAD's), a rule's parts and a fact's parameters
+/// (SES's).
+pub fn is_property(key: &str) -> bool {
+    hbds_gtad::is_property(key) || hbds_rules::is_property(key)
+}
+
+/// The expert-system engines, CALLed as subroutines (page 106).
+pub const SUBROUTINES: &[&str] = &["CHAV", "HYPOCHAV"];
+
+pub fn is_subroutine(key: &str) -> bool {
+    SUBROUTINES.contains(&key)
 }
 
 pub fn is_functor(key: &str) -> bool {

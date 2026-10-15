@@ -1,0 +1,22 @@
+-- Askability (page 106): a value the PREMISES need, and lack, is asked --
+-- if the fact is ASKABLE; otherwise it is not known, and the PREMISES do --
+-- not hold. Written for the expert-system tests. --
+
+PROGRAM ASKABLE ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "temperature", "PLANT" . "pressure" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        LET "PLANT" . "temperature" ' ASKABLE := "TRUE" ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "hot" [ "STEPS" ], "high" [ "STEPS" ] ;
+        LET "hot" [ "STEPS" ] ' PREMISES :=
+            """boiler"" [ ""PLANT"" ] . ""temperature"" > 100" ;
+        LET "hot" [ "STEPS" ] ' YES := "PRINT ""too hot""" ;
+        LET "high" [ "STEPS" ] ' PREMISES :=
+            """boiler"" [ ""PLANT"" ] . ""pressure"" > 2" ;
+        LET "high" [ "STEPS" ] ' NO := "PRINT ""pressure not known""" ;
+        CALL CHAV("STEPS") ;
+        PRINT "boiler" [ "PLANT" ] . "temperature"
+END ;

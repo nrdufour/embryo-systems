@@ -1,0 +1,14 @@
+-- An error in a rule's code stops CHAV, and says in which part of which --
+-- rule. Written for the expert-system tests. --
+
+PROGRAM RULE ;
+BEGIN
+        CREATE "PLANT" ;
+        CREATE "PLANT" . "valve" ;
+        CREATE "boiler" [ "PLANT" ] ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "read" [ "STEPS" ] ;
+        LET "read" [ "STEPS" ] ' YES := "PRINT ""boiler"" [ ""PLANT"" ] . ""valve""" ;
+        CALL CHAV
+END ;

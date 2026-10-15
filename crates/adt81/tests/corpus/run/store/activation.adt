@@ -1,0 +1,20 @@
+-- A rule that fires activates another, which is tried again, and --
+-- inhibits a third, which is not tried at all (figure 46). Written for --
+-- the expert-system tests. --
+
+PROGRAM ACTIVATION ;
+BEGIN
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "siren" [ "STEPS" ], "alarm" [ "STEPS" ], "quiet" [ "STEPS" ] ;
+        LET "siren" [ "STEPS" ] . "PRIORITY" := 3 ;
+        LET "siren" [ "STEPS" ] ' YES := "PRINT ""siren""" ;
+        LET "alarm" [ "STEPS" ] . "PRIORITY" := 2 ;
+        LET "alarm" [ "STEPS" ] ' YES := "PRINT ""alarm""" ;
+        LET "quiet" [ "STEPS" ] . "PRIORITY" := 1 ;
+        LET "quiet" [ "STEPS" ] ' YES := "PRINT ""quiet""" ;
+        ASSERT "alarm" [ "STEPS" ] "activates" "siren" [ "STEPS" ] ;
+        ASSERT "alarm" [ "STEPS" ] "inhibits" "quiet" [ "STEPS" ] ;
+        CALL CHAV ;
+        PRINT "siren" [ "STEPS" ] "activated by" "alarm" [ "STEPS" ]
+END ;
