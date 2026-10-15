@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use adt81::diagnostic::Severity;
 use adt81::{interp, lexer, lower, parser};
-use hbds::{Store, journal};
+use hbds_gtad::Store;
+use hbds_journal as journal;
 
 const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE

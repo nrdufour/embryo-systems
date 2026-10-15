@@ -3,5 +3,12 @@ name = "adt81"
 version = "0.1.0"
 edition = "2024"
 
+# A language: it uses the engines and wires them together.
 [dependencies]
-hbds = { path = "../hbds" }
+hbds-core = { path = "../hbds-core" }
+hbds-functors = { path = "../hbds-functors" }
+hbds-gtad = { path = "../hbds-gtad" }
+hbds-lists = { path = "../hbds-lists" }
+
+[dev-dependencies]
+hbds-journal = { path = "../hbds-journal" }

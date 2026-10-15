@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use adt81::diagnostic::Severity;
 use adt81::interp::{self, Io};
 use adt81::lower;
-use hbds::Store;
+use hbds_gtad::Store;
 
 #[derive(Default)]
 struct Capture {

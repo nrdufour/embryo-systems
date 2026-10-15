@@ -10,35 +10,38 @@ layers:
 - **SFSI**, an indexed-sequential file system, with its catalogue,
   granules, index blocks and DAYFILE journal (pages 86 to 102).
 
-`crates/hbds` is the first layer, made durable by a journal in the DAYFILE's
-spirit. A faithful SFSI and ZE are a project of their own, as they are in
+`crates/hbds-gtad` is the first layer, made durable by a journal in the
+DAYFILE's spirit (`crates/hbds-journal`). A faithful SFSI and ZE are a project of their own, as they are in
 the print (project 13); they can come later behind the same interface.
 
-## Languages
+## Engines and languages
 
-HBDS is an engine; ADT'81 is its first language, not its only one. The
-workspace keeps them apart, and the compiler keeps them so:
+The print builds HBDS as engines (*moteurs*), each a project of its own,
+for a team of its own: GTAD (project 12), SFSI and ZE (13), the list
+engine (14), the functor engine (15), the expert systems (16), the
+simulation (17), the neurons (18), the dialog (19). So does this
+repository: each engine is a crate, as independent as it can be, and a
+language is a crate that uses them. Decided on 2026-10-15.
 
-- **`crates/hbds`** depends on nothing. It offers the store (classes,
-  objects, attributes, links, states, hyperclasses, associations), the
-  values the store keeps (`value.rs`: numbers of every kind, fuzziness,
-  lists, arrays, a.d.t.), specifications (`spec.rs`), the functors of the
-  catalogue (`functors.rs`), and the journal. It names no language.
-- **`crates/adt81`** depends on `hbds`: its grammar, parser, checker and
-  interpreter, and what is ADT'81's own: the arithmetic of values and how
-  fuzziness propagates through it, the math functions, the meaning of an
-  unknown name.
-- **A next language** is a crate beside `adt81`, depending on `hbds`. The
-  code an a.d.t. carries (COND, ACTION) is stored with the name of the
-  language it is written in, `ADT'81` for ours, so that a store may hold
-  the code of several, and each runs its own.
-- **The CLI**, `embryo-systems`, depends on both, and picks the language
-  by the file's extension: `.adt` for ADT'81.
+| crate | what | depends on |
+|---|---|---|
+| `hbds-core` | the shared vocabulary: values (numbers of every kind, fuzziness, lists, arrays, a.d.t.), a.d.t. references, types and kinds, specifications, functor signatures; data, no logic | nothing |
+| `hbds-lists` | the list engine (project 14, page 80): cursors, circular lists, the list functors, union, intersection, complement | core |
+| `hbds-gtad` | the a.d.t. engine (project 12): the model, its changes, lookups, states; persistence behind its `Recorder` trait | core |
+| `hbds-functors` | the functor engine (project 15): the catalogue on a.d.t. and its implementation on GTAD | core, gtad |
+| `hbds-journal` | GTAD's persistence, a `Recorder`: the journal below; SFSI and ZE would be another | core, gtad |
+| `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (arithmetic and fuzzy propagation, math functions, what an unknown name means); it wires the engines together | the engines |
+| `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal |
 
-Decided on 2026-10-15: the boundary is the workspace's, not a convention:
-`hbds` cannot name `adt81`, which depends on it (cargo refuses the cycle).
-Journals written before that day do not open: a property record gained
-its language.
+The rules: an engine depends on the core and on as few engines as it
+needs, never on a language; a language never on another language.
+`tools/check_engines.py`, run by `just check`, holds what each crate may
+use, and fails on anything else, or on a crate it does not list.
+
+The code an a.d.t. carries (COND, ACTION) is stored with the name of the
+language it is written in, `ADT'81` for ours, so that a store may hold
+the code of several, and each runs its own. Journals written before
+2026-10-15 do not open: a property record gained its language.
 
 ## Decisions
 
@@ -137,10 +140,11 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 
 | path | what |
 |---|---|
-| `crates/hbds/src/store.rs` | the model, its changes, lookups |
-| `crates/hbds/src/functors.rs` | the catalogue of functors, and their implementation |
-| `crates/hbds/src/value.rs`, `spec.rs` | values and specifications, as the store keeps them |
-| `crates/hbds/src/journal.rs` | the journal's format, recording and replay |
+| `crates/hbds-gtad` | the model, its changes, lookups |
+| `crates/hbds-functors`, `crates/hbds-lists` | the functors on a.d.t., and the list engine |
+| `crates/hbds-core` | values, specifications, the vocabulary |
+| `crates/hbds-journal` | the journal's format, recording and replay |
+| `tools/check_engines.py` | what each crate may depend on |
 | `crates/adt81/src/interp.rs` | the a.d.t. statements and expressions, on the store |
 | `crates/adt81/tests/corpus/run/store/` | programs on the store, with their expected output |
 | `tests/store.rs` | the store across runs, a torn journal, a corrupt one |

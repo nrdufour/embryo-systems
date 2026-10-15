@@ -1,0 +1,9 @@
+[package]
+name = "hbds-journal"
+version = "0.1.0"
+edition = "2024"
+
+# Persistence of GTAD (project 13 is SFSI and ZE; this is the journal).
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-gtad = { path = "../hbds-gtad" }

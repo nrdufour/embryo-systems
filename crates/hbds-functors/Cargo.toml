@@ -1,0 +1,9 @@
+[package]
+name = "hbds-functors"
+version = "0.1.0"
+edition = "2024"
+
+# The functor engine (project 15, pages 71 to 84), on GTAD.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-gtad = { path = "../hbds-gtad" }

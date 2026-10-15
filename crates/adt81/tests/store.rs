@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use adt81::interp::{self, Io};
 use adt81::lower;
-use hbds::{Store, journal};
+use hbds_gtad::Store;
+use hbds_journal as journal;
 
 #[derive(Default)]
 struct Capture(String);

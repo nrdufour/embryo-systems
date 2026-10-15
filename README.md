@@ -27,12 +27,17 @@ output.
 
 | crate | what |
 |---|---|
-| `crates/hbds` | the HBDS engine: store, values, functors, journal; depends on nothing |
-| `crates/adt81` | ADT'81: grammar, parser, checker, interpreter; depends on `hbds` |
+| `crates/hbds-core` | the vocabulary the engines share: values, a.d.t., specs |
+| `crates/hbds-gtad` | the a.d.t. engine |
+| `crates/hbds-lists` | the list engine |
+| `crates/hbds-functors` | the functor engine |
+| `crates/hbds-journal` | GTAD's persistence |
+| `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
 | `.` (`src/main.rs`) | the `embryo-systems` command |
 
-A language is a crate on top of `hbds`; ADT'81 is the first
-([docs/hbds.md](docs/hbds.md), "Languages").
+Each engine is a crate of its own, a language a crate that uses them;
+`just engines` holds each to what it may depend on
+([docs/hbds.md](docs/hbds.md), "Engines and languages").
 
 ## Develop
 

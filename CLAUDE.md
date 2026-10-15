@@ -15,6 +15,13 @@ Rebuilding François Bouillé's HBDS system from the 1995 polycopié, in Rust
 - **The grammar leads.** `crates/adt81/grammar.lark` defines ADT'81; the Rust code
   follows it, and a change to the language is made there first, with its
   reason in `docs/adt81.md`.
+- **Each engine is a crate of its own, as independent as it can be.** As
+  in the print, where each engine (*moteur*) is a project of its own: an
+  engine depends on `hbds-core`, the shared vocabulary, and on as few
+  engines as it needs, never on a language; a language depends on
+  engines, never on another language. `just engines` checks every crate
+  against `tools/check_engines.py`, where a new crate states what it may
+  use.
 
 ## Commands
 

@@ -26,6 +26,10 @@ check-grammar:
     cargo build --quiet --workspace --bins --examples
     python3 tools/check_grammar.py
 
+# Each crate depends only on what tools/check_engines.py allows it.
+engines:
+    python3 tools/check_engines.py
+
 # Format every tracked Rust and Nix file in place.
 fmt:
     cargo fmt --all
@@ -37,7 +41,7 @@ fmt-check:
     nixfmt --check $(git ls-files '*.nix')
 
 # What CI runs, so a red build is reproducible in one command.
-check: fmt-check lint test check-grammar confusables
+check: fmt-check lint test check-grammar engines confusables
 
 # Characters that render like ASCII, or render as nothing at all, but compare
 # unequal. CI runs this in its own workflow, without a path filter, so it

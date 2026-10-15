@@ -157,7 +157,7 @@ impl Typed {
     }
 }
 
-pub use hbds::AdtKind;
+pub use hbds_core::AdtKind;
 
 /// What an a.d.t. type is: the store's kind of it.
 pub fn kind(t: AdtType) -> AdtKind {
@@ -165,8 +165,8 @@ pub fn kind(t: AdtType) -> AdtKind {
 }
 
 /// An a.d.t. type as the store names it.
-pub fn hbds_type(t: AdtType) -> hbds::AdtType {
-    use hbds::AdtType as H;
+pub fn hbds_type(t: AdtType) -> hbds_core::AdtType {
+    use hbds_core::AdtType as H;
     match t {
         AdtType::Class => H::Class,
         AdtType::CAttribute => H::ClassAttribute,
@@ -184,8 +184,8 @@ pub fn hbds_type(t: AdtType) -> hbds::AdtType {
 }
 
 /// The store's a.d.t. type as ADT'81 names it.
-pub fn adt_type(t: hbds::AdtType) -> AdtType {
-    use hbds::AdtType as H;
+pub fn adt_type(t: hbds_core::AdtType) -> AdtType {
+    use hbds_core::AdtType as H;
     match t {
         H::Class => AdtType::Class,
         H::ClassAttribute => AdtType::CAttribute,

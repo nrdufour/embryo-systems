@@ -1,0 +1,8 @@
+[package]
+name = "hbds-lists"
+version = "0.1.0"
+edition = "2024"
+
+# The list engine (project 14, page 80).
+[dependencies]
+hbds-core = { path = "../hbds-core" }

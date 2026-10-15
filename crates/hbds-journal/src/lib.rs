@@ -1,8 +1,10 @@
-//! The journal: every [`Change`] of a store, one line each, appended to
-//! `DIR/journal` and synced before the statement that made it goes on, as
-//! the print's exchange zone forces its writes (page 103) and its file
-//! system keeps a DAYFILE (page 86). Opening a store replays its journal
-//! through the same [`Store::apply`] that recorded it.
+//! The journal, GTAD's persistence: every [`Change`] of a store, one line
+//! each, appended to `DIR/journal` and synced before the statement that
+//! made it goes on, as the print's exchange zone forces its writes (page
+//! 103) and its file system keeps a DAYFILE (page 86). Opening a store
+//! replays its journal into a fresh one, then records what follows. The
+//! print's own persistence, SFSI and ZE (project 13), would be another
+//! [`Recorder`].
 //!
 //! A line is a sequence of terms: words, numbers, quoted strings, and
 //! parenthesised lists of terms. `class 1 "TOWN" class`, `set 7 3 (f 2.5)`.
@@ -11,20 +13,21 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-use super::store::{AdtRef, Change, ClassKind, Error, Id, State, Store, Stored};
-use crate::value::{Array, Fz, List, Rank, Scalar, Value};
+use hbds_core::value::{Array, Fz, List, Rank, Scalar, Value};
+use hbds_core::{AdtRef, Id};
+use hbds_gtad::{Change, ClassKind, Error, Recorder, State, Store, state_name};
 
 pub struct Journal {
     file: File,
 }
 
-impl Journal {
-    pub(super) fn record(&mut self, change: &Change) -> Stored<()> {
+impl Recorder for Journal {
+    fn record(&mut self, change: &Change) -> Result<(), String> {
         let line = encode(change) + "\n";
         self.file
             .write_all(line.as_bytes())
             .and_then(|_| self.file.sync_data())
-            .map_err(|e| Error(format!("the journal cannot be written: {e}")))
+            .map_err(|e| format!("the journal cannot be written: {e}"))
     }
 }
 
@@ -44,7 +47,7 @@ pub fn open(dir: &Path) -> Result<(Store, Vec<String>), Error> {
     let mut store = Store::memory();
     for (n, line) in text[..complete].lines().enumerate() {
         let change = decode(line).map_err(|e| Error(format!("journal line {}: {e}", n + 1)))?;
-        store.apply(change);
+        store.replay(change);
     }
     if complete < text.len() {
         warnings.push(format!(
@@ -58,9 +61,8 @@ pub fn open(dir: &Path) -> Result<(Store, Vec<String>), Error> {
         .open(&path)
         .map_err(io)?;
     file.set_len(complete as u64).map_err(io)?;
-    let mut journaled = Store::journaled(Journal { file });
-    journaled.take(store);
-    Ok((journaled, warnings))
+    store.record_to(Box::new(Journal { file }));
+    Ok((store, warnings))
 }
 
 // Terms
@@ -247,7 +249,7 @@ fn value(v: &Value) -> Term {
 }
 
 fn state_word(s: State) -> Term {
-    word(super::store::state_name(s))
+    word(state_name(s))
 }
 
 fn encode(change: &Change) -> String {
