@@ -1,0 +1,8 @@
+-- Runtime error: assigning a constant. --
+
+PROGRAM E ;
+LOCAL y : FLOAT CONSTANTE = 2.5 ;
+BEGIN
+        PRINT y ;
+        y := 1.0
+END ;

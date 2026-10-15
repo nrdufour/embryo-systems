@@ -1,0 +1,9 @@
+-- Runtime error: division by zero. --
+
+PROGRAM E ;
+LOCAL n : INTEGER ;
+BEGIN
+        n := 0 ;
+        PRINT "before" ;
+        PRINT 1 / n
+END ;

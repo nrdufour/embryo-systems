@@ -1,0 +1,8 @@
+-- Runtime error: an index outside the declared bounds. --
+
+PROGRAM E ;
+LOCAL v : VECTOR [1:3] OF INTEGER ;
+BEGIN
+        v[3] := 1 ;
+        v[4] := 1
+END ;

@@ -12,7 +12,8 @@ decision taken on it. `src/adt81` is the Rust implementation, a lexer, a
 parser and a typed tree so far: `embryo-systems parse FILE` prints a
 program's syntax tree, `embryo-systems fmt FILE` the program in canonical
 form, `embryo-systems check FILE` its undeclared and misused names and
-its type errors.
+its type errors, and `embryo-systems run FILE` runs it, but for the a.d.t.
+statements, which wait for the HBDS store.
 
 ## Develop
 

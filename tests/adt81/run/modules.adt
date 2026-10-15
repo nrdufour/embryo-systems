@@ -1,0 +1,77 @@
+-- Parameter modes and aliasing, functions, recursion, a functor's --
+-- result, CHAIN: written for the interpreter's tests. --
+
+PROGRAM MODULES ;
+LOCAL
+        a, b, c : INTEGER ;
+        x : FLOAT ;
+        L : LIST OF INTEGER ;
+BEGIN
+        a := 1 ; b := 2 ;
+        CALL SWAP (a, b) ;
+        PRINT a, b ;
+        c := 5 ;
+        CALL TWICE (c, c) ;
+        PRINT c ;
+        CALL BUMP (a, a) ;
+        PRINT a ;
+        PRINT FACT(10), FIB(15) ;
+        x := HALF(3) ;
+        PRINT x ;
+        INSERT (1), (2), (3) INTO L ;
+        PRINT L ' FIRSTTWO, L ' FIRSTTWO ' CARD ;
+        CHAIN SECOND ;
+        PRINT "never"
+END ;
+
+PROGRAM SECOND ;
+BEGIN
+        PRINT "chained"
+END ;
+
+SUBROUTINE SWAP (u, v) ;
+        u, v : INTEGER INOUT ;
+LOCAL
+        t : INTEGER ;
+BEGIN
+        t := u ; u := v ; v := t
+END ;
+
+SUBROUTINE TWICE (p, r) ;
+        p : INTEGER IN ;
+        r : INTEGER OUT ;
+BEGIN
+        r := p * 2
+END ;
+
+SUBROUTINE BUMP (u, v) ;
+        u, v : INTEGER INOUT ;
+BEGIN
+        u := u + 1 ; v := v + 10
+END ;
+
+FUNCTION FACT (n) RETURNS INTEGER ;
+        n : INTEGER IN ;
+BEGIN
+        IF n <= 1 THEN RESULT 1 ELSE RESULT n * FACT(n - 1) ENDIF
+END ;
+
+FUNCTION FIB (n) RETURNS INTEGER ;
+        n : INTEGER IN ;
+BEGIN
+        IF n < 2 THEN RESULT n ENDIF ;
+        RESULT FIB(n - 1) + FIB(n - 2)
+END ;
+
+FUNCTION HALF (n) RETURNS FLOAT ;
+        n : INTEGER IN ;
+BEGIN
+        RESULT n / 2.0
+END ;
+
+FUNCTOR L ' FIRSTTWO RETURNS LIST OF INTEGER ;
+LOCAL
+        L : LIST OF INTEGER ;
+BEGIN
+        FIRSTTWO := L ' SUBLIST(1, 2)
+END ;

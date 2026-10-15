@@ -1,0 +1,16 @@
+-- READ of each type, fuzzy values included, and PRINT's formats: --
+-- written for the interpreter's tests. --
+
+PROGRAM IO ;
+LOCAL
+        n : INTEGER ;
+        x : FLOAT APPR ;
+        b : BOOLEAN ;
+        s : STRING ;
+        z : COMPLEX ;
+        r : RATIONAL ;
+BEGIN
+        READ n, x, b, s, z, r ;
+        PRINT n * 2, x, b, s, z, r ;
+        PRINT { 1, -2 }, "two words", 2.5 % 0.5 @"guess"
+END ;

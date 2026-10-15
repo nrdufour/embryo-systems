@@ -1,0 +1,13 @@
+-- Runtime error: a function that ends without a RESULT. --
+
+PROGRAM E ;
+LOCAL n : INTEGER ;
+BEGIN
+        n := F(1)
+END ;
+
+FUNCTION F (u) RETURNS INTEGER ;
+        u : INTEGER IN ;
+BEGIN
+        IF u > 1 THEN RESULT u ENDIF
+END ;

@@ -1,0 +1,7 @@
+-- Runtime error: an a.d.t. statement, before the HBDS store exists. --
+
+PROGRAM E ;
+BEGIN
+        PRINT "before" ;
+        CREATE "TOWN"
+END ;

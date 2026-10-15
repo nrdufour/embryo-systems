@@ -1,0 +1,34 @@
+-- The milestone: statistics.adt's MOMENTS, run on a known sample read --
+-- from the input. 2 4 4 4 5 5 7 9: mean 5, standard deviation sqrt(32/7). --
+
+PROGRAM SAMPLE ;
+LOCAL
+        x : VECTOR [1:8] OF FLOAT ;
+        i : INTEGER ;
+        m, d : FLOAT ;
+BEGIN
+        LOOP FOR i : 1 TO 8 DO READ x[i] ENDLOOP ;
+        CALL MOMENTS (x, 8, m, d) ;
+        PRINT "mean", m ;
+        PRINT "sd", d
+END ;
+
+SUBROUTINE MOMENTS (x, n, mean, sd) ;
+        x : VECTOR OF FLOAT IN ;
+        n : INTEGER IN ;
+        mean, sd : FLOAT OUT ;
+LOCAL
+        s, s2 : FLOAT INIT 0. ;
+        i : INTEGER ;
+BEGIN
+        IF n < 2 THEN
+                mean := 0. ; sd := 0. ;
+                RETURN
+        ENDIF ;
+        LOOP FOR i : 1 TO n DO
+                s := s + x[i] ;
+                s2 := s2 + x[i] ^ 2
+        ENDLOOP ;
+        mean := s / n ;
+        sd := SQRT ((s2 - n * mean ^ 2) / (n - 1))
+END ;

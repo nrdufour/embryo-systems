@@ -145,6 +145,7 @@ def main():
         targets = [(f.name, "program", read(f)) for f in sorted((TESTS / "programs").glob("*.adt"))]
         targets += [(f.name, "fragment", read(f)) for f in sorted((TESTS / "fragments").glob("*.adt"))]
         targets += [(f.name, "program", read(f)) for f in sorted((TESTS / "checked").glob("*.adt"))]
+        targets += [(f.name, "program", read(f)) for f in sorted((TESTS / "run").glob("**/*.adt"))]
         targets += samples(0, SAMPLES)
         rejects = [
             line
