@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::Path;
 
-use embryo_systems::adt81::diagnostic::Diagnostic;
-use embryo_systems::adt81::{lower, names, sample, typeck};
+use adt81::diagnostic::Diagnostic;
+use adt81::{lower, names, sample, typeck};
 
 /// Both layers, as `embryo-systems check` runs them.
 fn diagnostics(source: &str) -> Vec<Diagnostic> {
@@ -349,7 +349,7 @@ fn unknown_values_pass() {
 
 #[test]
 fn clean_programs() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus");
     for entry in fs::read_dir(root.join("checked")).unwrap() {
         let path = entry.unwrap().path();
         let source = fs::read_to_string(&path).unwrap();

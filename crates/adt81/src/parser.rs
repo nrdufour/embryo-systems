@@ -1,4 +1,4 @@
-//! The ADT'81 parser: tokens to a syntax tree, by `adt81/grammar.lark`.
+//! The ADT'81 parser: tokens to a syntax tree, by `crates/adt81/grammar.lark`.
 //!
 //! Recursive descent, one function per rule. The tree is the grammar's own:
 //! a node per rule, named as the grammar names it, holding every token, so
@@ -1757,7 +1757,7 @@ mod tests {
 
     #[test]
     fn rules_match_the_grammar() {
-        let grammar = include_str!("../../adt81/grammar.lark");
+        let grammar = include_str!("../grammar.lark");
         let mut defined: Vec<&str> = grammar
             .lines()
             .filter_map(|l| l.trim_start_matches('?').split_once(':'))

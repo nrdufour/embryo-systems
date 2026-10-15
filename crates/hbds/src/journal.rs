@@ -12,8 +12,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::store::{AdtRef, Change, ClassKind, Error, Id, State, Store, Stored};
-use crate::adt81::ast::Rank;
-use crate::adt81::value::{Array, Fz, List, Scalar, Value};
+use crate::value::{Array, Fz, List, Rank, Scalar, Value};
 
 pub struct Journal {
     file: File,
@@ -318,7 +317,7 @@ fn encode(change: &Change) -> String {
         } => vec![
             word("specify"),
             adt_ref(*target),
-            optional(spec.as_deref().map(text)),
+            optional(spec.map(|s| text(&s.to_string()))),
             optional(unit.as_deref().map(text)),
             word(computed),
         ],
@@ -333,8 +332,15 @@ fn encode(change: &Change) -> String {
         Change::Property {
             target,
             name,
+            language,
             text: t,
-        } => vec![word("property"), adt_ref(*target), text(name), text(t)],
+        } => vec![
+            word("property"),
+            adt_ref(*target),
+            text(name),
+            text(language),
+            text(t),
+        ],
     };
     let mut out = String::new();
     for (i, t) in terms.iter().enumerate() {
@@ -592,7 +598,7 @@ fn decode(line: &str) -> Result<Change, String> {
         },
         "specify" => Change::Specify {
             target: r.adt_ref()?,
-            spec: r.optional(|r| r.text())?,
+            spec: r.optional(|r| r.text()?.parse())?,
             unit: r.optional(|r| r.text())?,
             computed: r.parse()?,
         },
@@ -622,6 +628,7 @@ fn decode(line: &str) -> Result<Change, String> {
         "property" => Change::Property {
             target: r.adt_ref()?,
             name: r.text()?,
+            language: r.text()?,
             text: r.text()?,
         },
         w => return Err(format!("{w:?} is not a change")),
@@ -633,7 +640,6 @@ fn decode(line: &str) -> Result<Change, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adt81::ast::Rank;
 
     fn values() -> Vec<Value> {
         let fz = |x| Fz::exact(x);
@@ -796,7 +802,7 @@ mod tests {
             },
             Change::Specify {
                 target: AdtRef::ObjectAttribute(1, 2),
-                spec: Some("FLOAT APPR".into()),
+                spec: Some("FLOAT APPR".parse().unwrap()),
                 unit: None,
                 computed: true,
             },
@@ -807,6 +813,7 @@ mod tests {
             Change::Property {
                 target: AdtRef::ClassAttribute(2),
                 name: "COND".into(),
+                language: "ADT'81".into(),
                 text: "THIS . \"temp\" > 0.".into(),
             },
         ];

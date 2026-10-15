@@ -3,11 +3,11 @@ _default:
 
 # Compile in debug mode.
 build:
-    cargo build
+    cargo build --workspace
 
 # Build the release binary.
 release:
-    cargo build --release
+    cargo build --workspace --release
 
 # Run from source.
 run *args:
@@ -15,25 +15,25 @@ run *args:
 
 # Run the tests.
 test:
-    cargo test
+    cargo test --workspace
 
 # clippy with warnings as errors.
 lint:
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
-# adt81/grammar.lark: every test program, and random ones, parse one way, to Lark's tree in Rust.
+# crates/adt81/grammar.lark: every test program, and random ones, parse one way, to Lark's tree in Rust.
 check-grammar:
-    cargo build --quiet --bins --examples
+    cargo build --quiet --workspace --bins --examples
     python3 tools/check_grammar.py
 
 # Format every tracked Rust and Nix file in place.
 fmt:
-    cargo fmt
+    cargo fmt --all
     nixfmt $(git ls-files '*.nix')
 
 # Fail if anything needs formatting.
 fmt-check:
-    cargo fmt --check
+    cargo fmt --all --check
     nixfmt --check $(git ls-files '*.nix')
 
 # What CI runs, so a red build is reproducible in one command.

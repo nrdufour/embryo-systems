@@ -2,9 +2,9 @@ use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
-use embryo_systems::adt81::diagnostic::Severity;
-use embryo_systems::adt81::{self as adt81, interp, lexer, lower, parser};
-use embryo_systems::hbds::{Store, journal};
+use adt81::diagnostic::Severity;
+use adt81::{interp, lexer, lower, parser};
+use hbds::{Store, journal};
 
 const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE
@@ -90,6 +90,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // The language, by the file's extension: ADT'81 is the only one yet.
+    if path != "-" && !path.ends_with(".adt") {
+        eprintln!("{path}: no language for this file; ADT'81 files end in .adt");
+        return ExitCode::FAILURE;
+    }
     let source = if path == "-" {
         let mut source = String::new();
         std::io::stdin().read_to_string(&mut source).map(|_| source)

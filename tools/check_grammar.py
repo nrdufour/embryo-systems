@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Gate for adt81/grammar.lark.
+"""Gate for crates/adt81/grammar.lark.
 
 - the grammar loads, and every rule is reachable from `start` (Lark
   ignores a rule nothing refers to);
-- every file in tests/adt81/programs parses as `program`, every file in
-  tests/adt81/fragments as `fragment`, each in exactly one way;
-- every line of tests/adt81/reject.txt (blank lines and # comments aside)
+- every file in crates/adt81/tests/corpus/programs parses as `program`, every file in
+  crates/adt81/tests/corpus/fragments as `fragment`, each in exactly one way;
+- every line of crates/adt81/tests/corpus/reject.txt (blank lines and # comments aside)
   is refused as a `fragment`;
 - the Rust parser (`embryo-systems parse`) gives the same tree as Lark for
   every test file, and refuses every reject;
@@ -29,8 +29,8 @@ from lark import Lark, Tree
 from lark.exceptions import LarkError
 
 ROOT = Path(__file__).resolve().parent.parent
-GRAMMAR = ROOT / "adt81" / "grammar.lark"
-TESTS = ROOT / "tests" / "adt81"
+GRAMMAR = ROOT / "crates" / "adt81" / "grammar.lark"
+TESTS = ROOT / "crates" / "adt81" / "tests" / "corpus"
 RULE = re.compile(r"^\??([a-z_]+):(.*?)(?=^\??[a-z_]+:|^[A-Z_]+:|\Z)", re.M | re.S)
 
 

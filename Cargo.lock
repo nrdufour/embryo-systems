@@ -3,5 +3,20 @@
 version = 4
 
 [[package]]
+name = "adt81"
+version = "0.1.0"
+dependencies = [
+ "hbds",
+]
+
+[[package]]
 name = "embryo-systems"
+version = "0.1.0"
+dependencies = [
+ "adt81",
+ "hbds",
+]
+
+[[package]]
+name = "hbds"
 version = "0.1.0"

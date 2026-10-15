@@ -22,9 +22,72 @@ use super::ast::*;
 use super::builtins;
 use super::lower;
 use super::types::{Ty, Typed};
-use super::value::{self, Computed, Fz, List, Scalar, Value};
-use crate::hbds::store::{ClassKind, Id, State as AdtState, Stored, fold};
-use crate::hbds::{AdtRef, Store};
+use super::value::{self, Ask, Computed, Fz, List, Scalar, Value};
+use hbds::fold;
+use hbds::store::{ClassKind, Id, State as AdtState, Stored};
+use hbds::{AdtRef, Store};
+
+/// The language the store's COND and ACTION are tagged with, when ADT'81
+/// writes them.
+pub const LANGUAGE: &str = "ADT'81";
+
+/// A SPECIFY's specification, as the store keeps it.
+fn specification(s: &Specification) -> hbds::spec::Spec {
+    use hbds::spec::{Base, Fuzziness as Z, Scalar as S, Spec};
+    let fuzz = |f: &Fuzziness| match *f {
+        Fuzziness::Fuzzy => Z {
+            appr: true,
+            prob: true,
+            subj: true,
+            mult: true,
+        },
+        Fuzziness::Kinds {
+            appr,
+            prob,
+            subj,
+            mult,
+        } => Z {
+            appr,
+            prob,
+            subj,
+            mult,
+        },
+    };
+    let scalar = |t: &ScalarType| {
+        let (base, long) = match t.base {
+            BaseType::Numeric { kind, long } => (
+                match kind {
+                    NumericKind::Integer => Base::Integer,
+                    NumericKind::Float => Base::Float,
+                    NumericKind::Complex => Base::Complex,
+                    NumericKind::Gauss => Base::Gauss,
+                    NumericKind::Quaternion => Base::Quaternion,
+                    NumericKind::Rational => Base::Rational,
+                },
+                long,
+            ),
+            BaseType::Boolean => (Base::Boolean, false),
+            BaseType::Character => (Base::Character, false),
+            BaseType::String => (Base::String, false),
+            BaseType::Adt(a) => (Base::Adt(super::types::hbds_type(a)), false),
+        };
+        S {
+            base,
+            long,
+            fuzziness: fuzz(&t.fuzziness),
+        }
+    };
+    match s {
+        Specification::Scalar(t) => Spec::Scalar(scalar(t)),
+        Specification::Array { rank, element } => Spec::Array {
+            rank: value::rank(*rank),
+            element: element.as_ref().map(scalar),
+        },
+        Specification::List(element) => Spec::List(element.as_ref().map(scalar)),
+        Specification::Compound => Spec::Compound,
+        Specification::Fuzziness(f) => Spec::Fuzziness(fuzz(f)),
+    }
+}
 
 /// Where READ reads and PRINT writes.
 pub trait Io: Send {
@@ -351,7 +414,7 @@ impl Machine {
             dims.iter().product()
         };
         Ok(Value::Array(value::Array {
-            rank: shape.rank,
+            rank: value::rank(shape.rank),
             lows,
             dims,
             cells: vec![fill; size],
@@ -875,8 +938,7 @@ impl Machine {
                 unit,
                 computed,
             } => {
-                let text = super::print::specification(spec);
-                let text = (!text.is_empty()).then_some(text);
+                let text = Some(specification(spec));
                 for item in items {
                     let target = match item {
                         Specified::Class(c) => AdtRef::Class(self.class(c, f, s.span)?),
@@ -893,7 +955,7 @@ impl Machine {
                     };
                     let unit = unit.as_ref().map(|u| u.spelling.clone());
                     let mut store = self.store.lock().unwrap();
-                    stored(store.specify(target, text.clone(), unit, *computed), s.span)?;
+                    stored(store.specify(target, text, unit, *computed), s.span)?;
                 }
                 Ok(())
             }
@@ -1579,13 +1641,8 @@ impl Machine {
                         format!("this {} does not parse: {e}", name.key),
                     ));
                 }
-                stored(
-                    self.store
-                        .lock()
-                        .unwrap()
-                        .set_property(target, &name.key, &text),
-                    span,
-                )
+                let mut store = self.store.lock().unwrap();
+                stored(store.set_property(target, &name.key, LANGUAGE, &text), span)
             }
         }
     }

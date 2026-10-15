@@ -6,6 +6,7 @@
 use std::fmt;
 
 use super::ast::*;
+use hbds::value::float;
 
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -210,20 +211,6 @@ fn mode(m: Mode) -> &'static str {
         Mode::In => "IN",
         Mode::InOut => "INOUT",
         Mode::Out => "OUT",
-    }
-}
-
-pub(super) fn float(x: f64) -> String {
-    let text = x.abs().to_string();
-    let text = if text.contains('.') {
-        text
-    } else {
-        text + ".0"
-    };
-    if x.is_sign_negative() {
-        format!("-{text}")
-    } else {
-        text
     }
 }
 

@@ -12,7 +12,7 @@ Rebuilding François Bouillé's HBDS system from the 1995 polycopié, in Rust
   review: this repository quotes and cites pages, never copies a scan, a
   transcription or a listing. Test programs are written for the purpose. The
   sources live in the private `embryo-systems-archive`.
-- **The grammar leads.** `adt81/grammar.lark` defines ADT'81; the Rust code
+- **The grammar leads.** `crates/adt81/grammar.lark` defines ADT'81; the Rust code
   follows it, and a change to the language is made there first, with its
   reason in `docs/adt81.md`.
 

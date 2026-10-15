@@ -836,7 +836,7 @@ impl<'c> Checker<'c> {
             return Ty::Unknown;
         }
         match f.gives {
-            Gives::ListOf(t) => Ty::List(Box::new(Ty::Adt(t))),
+            Gives::ListOf(t) => Ty::List(Box::new(Ty::Adt(super::types::adt_type(t)))),
             Gives::Integer => Ty::Integer,
             Gives::Element => list_element(prefix).unwrap_or(Ty::Unknown),
             Gives::Same => prefix.clone(),

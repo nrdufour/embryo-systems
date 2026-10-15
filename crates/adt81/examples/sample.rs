@@ -2,7 +2,7 @@
 //! COUNT of them, programs and fragments in turn, each after a line
 //! `-- sample N program --` or `-- sample N fragment --`.
 
-use embryo_systems::adt81::sample;
+use adt81::sample;
 
 fn main() {
     let args: Vec<u64> = std::env::args()

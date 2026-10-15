@@ -4,15 +4,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use embryo_systems::adt81::{lexer, parser};
+use adt81::{lexer, parser};
 
 fn corpus(dir: &str) -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus");
     let files: Vec<_> = fs::read_dir(root.join(dir))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect();
-    assert!(!files.is_empty(), "no files in tests/adt81/{dir}");
+    assert!(!files.is_empty(), "no files in tests/corpus/{dir}");
     files
 }
 
@@ -45,7 +45,7 @@ fn corpus_parses() {
 
 #[test]
 fn rejects_are_refused() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81/reject.txt");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/reject.txt");
     let rejects = fs::read_to_string(path).unwrap();
     let lines = rejects
         .lines()

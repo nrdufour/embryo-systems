@@ -157,64 +157,48 @@ impl Typed {
     }
 }
 
-/// What an a.d.t. is, whatever its exact type: hyperclasses, embryos and
-/// prototypes are classes, and so on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AdtKind {
-    Class,
-    Object,
-    ClassAttribute,
-    ObjectAttribute,
-    ClassLink,
-    ObjectLink,
+pub use hbds::AdtKind;
+
+/// What an a.d.t. type is: the store's kind of it.
+pub fn kind(t: AdtType) -> AdtKind {
+    hbds_type(t).kind()
 }
 
-impl AdtKind {
-    pub fn of(t: AdtType) -> AdtKind {
-        match t {
-            AdtType::Class
-            | AdtType::HClass
-            | AdtType::Embryo
-            | AdtType::Prototype
-            | AdtType::Structure => AdtKind::Class,
-            AdtType::Object => AdtKind::Object,
-            AdtType::CAttribute | AdtType::HAttribute => AdtKind::ClassAttribute,
-            AdtType::OAttribute => AdtKind::ObjectAttribute,
-            AdtType::CLink | AdtType::HLink => AdtKind::ClassLink,
-            AdtType::OLink => AdtKind::ObjectLink,
-        }
+/// An a.d.t. type as the store names it.
+pub fn hbds_type(t: AdtType) -> hbds::AdtType {
+    use hbds::AdtType as H;
+    match t {
+        AdtType::Class => H::Class,
+        AdtType::CAttribute => H::ClassAttribute,
+        AdtType::CLink => H::ClassLink,
+        AdtType::Object => H::Object,
+        AdtType::OAttribute => H::ObjectAttribute,
+        AdtType::OLink => H::ObjectLink,
+        AdtType::HClass => H::HyperClass,
+        AdtType::HAttribute => H::HyperAttribute,
+        AdtType::HLink => H::HyperLink,
+        AdtType::Embryo => H::Embryo,
+        AdtType::Prototype => H::Prototype,
+        AdtType::Structure => H::Structure,
     }
 }
 
-impl AdtKind {
-    /// With its article: "a class", "an object".
-    pub fn a(&self) -> String {
-        match self {
-            AdtKind::Object | AdtKind::ObjectAttribute | AdtKind::ObjectLink => {
-                format!("an {self}")
-            }
-            _ => format!("a {self}"),
-        }
-    }
-
-    pub fn plural(&self) -> String {
-        match self {
-            AdtKind::Class => "classes".into(),
-            _ => format!("{self}s"),
-        }
-    }
-}
-
-impl fmt::Display for AdtKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            AdtKind::Class => "class",
-            AdtKind::Object => "object",
-            AdtKind::ClassAttribute => "class attribute",
-            AdtKind::ObjectAttribute => "object attribute",
-            AdtKind::ClassLink => "class link",
-            AdtKind::ObjectLink => "object link",
-        })
+/// The store's a.d.t. type as ADT'81 names it.
+pub fn adt_type(t: hbds::AdtType) -> AdtType {
+    use hbds::AdtType as H;
+    match t {
+        H::Class => AdtType::Class,
+        H::ClassAttribute => AdtType::CAttribute,
+        H::ClassLink => AdtType::CLink,
+        H::Object => AdtType::Object,
+        H::ObjectAttribute => AdtType::OAttribute,
+        H::ObjectLink => AdtType::OLink,
+        H::HyperClass => AdtType::HClass,
+        H::HyperAttribute => AdtType::HAttribute,
+        H::HyperLink => AdtType::HLink,
+        H::Embryo => AdtType::Embryo,
+        H::Prototype => AdtType::Prototype,
+        H::Structure => AdtType::Structure,
     }
 }
 
@@ -267,7 +251,7 @@ impl Ty {
     /// The a.d.t. kind, or of the elements of a list of a.d.t.
     pub fn adt_kind(&self) -> Option<AdtKind> {
         match self {
-            Ty::Adt(t) => Some(AdtKind::of(*t)),
+            Ty::Adt(t) => Some(kind(*t)),
             Ty::List(e) => e.adt_kind(),
             _ => None,
         }

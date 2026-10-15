@@ -1,0 +1,7 @@
+[package]
+name = "hbds"
+version = "0.1.0"
+edition = "2024"
+
+# The engine depends on no language: languages depend on it.
+[dependencies]

@@ -10,9 +10,35 @@ layers:
 - **SFSI**, an indexed-sequential file system, with its catalogue,
   granules, index blocks and DAYFILE journal (pages 86 to 102).
 
-`src/hbds` is the first layer, made durable by a journal in the DAYFILE's
+`crates/hbds` is the first layer, made durable by a journal in the DAYFILE's
 spirit. A faithful SFSI and ZE are a project of their own, as they are in
 the print (project 13); they can come later behind the same interface.
+
+## Languages
+
+HBDS is an engine; ADT'81 is its first language, not its only one. The
+workspace keeps them apart, and the compiler keeps them so:
+
+- **`crates/hbds`** depends on nothing. It offers the store (classes,
+  objects, attributes, links, states, hyperclasses, associations), the
+  values the store keeps (`value.rs`: numbers of every kind, fuzziness,
+  lists, arrays, a.d.t.), specifications (`spec.rs`), the functors of the
+  catalogue (`functors.rs`), and the journal. It names no language.
+- **`crates/adt81`** depends on `hbds`: its grammar, parser, checker and
+  interpreter, and what is ADT'81's own: the arithmetic of values and how
+  fuzziness propagates through it, the math functions, the meaning of an
+  unknown name.
+- **A next language** is a crate beside `adt81`, depending on `hbds`. The
+  code an a.d.t. carries (COND, ACTION) is stored with the name of the
+  language it is written in, `ADT'81` for ours, so that a store may hold
+  the code of several, and each runs its own.
+- **The CLI**, `embryo-systems`, depends on both, and picks the language
+  by the file's extension: `.adt` for ADT'81.
+
+Decided on 2026-10-15: the boundary is the workspace's, not a convention:
+`hbds` cannot name `adt81`, which depends on it (cargo refuses the cycle).
+Journals written before that day do not open: a property record gained
+its language.
 
 ## Decisions
 
@@ -87,7 +113,7 @@ set 7 3 (i 522000)
 set 7 4 (fz (f 284.5) 0.5 - -)
 objectlink 9 10 5 8 7 0.9
 specify (ca 4) "FLOAT APPR" "kelvin" false
-property (ca 4) "COND" "THIS . T > 0."
+property (ca 4) "COND" "ADT'81" "THIS . T > 0."
 state (o 8) destroyed
 ```
 
@@ -111,8 +137,10 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 
 | path | what |
 |---|---|
-| `src/hbds/store.rs` | the model, its changes, lookups, functors |
-| `src/hbds/journal.rs` | the journal's format, recording and replay |
-| `src/adt81/interp.rs` | the a.d.t. statements and expressions, on the store |
-| `tests/adt81/run/store/` | programs on the store, with their expected output |
+| `crates/hbds/src/store.rs` | the model, its changes, lookups |
+| `crates/hbds/src/functors.rs` | the catalogue of functors, and their implementation |
+| `crates/hbds/src/value.rs`, `spec.rs` | values and specifications, as the store keeps them |
+| `crates/hbds/src/journal.rs` | the journal's format, recording and replay |
+| `crates/adt81/src/interp.rs` | the a.d.t. statements and expressions, on the store |
+| `crates/adt81/tests/corpus/run/store/` | programs on the store, with their expected output |
 | `tests/store.rs` | the store across runs, a torn journal, a corrupt one |

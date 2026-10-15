@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-use embryo_systems::adt81::{lower, names, sample};
+use adt81::{lower, names, sample};
 
 fn check(source: &str) -> Vec<String> {
     let program = lower::parse_program(source).unwrap_or_else(|e| panic!("{e}\n{source}"));
@@ -168,7 +168,7 @@ fn units_are_not_checked() {
 
 #[test]
 fn clean_programs() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus");
     for entry in fs::read_dir(root.join("checked")).unwrap() {
         let path = entry.unwrap().path();
         let source = fs::read_to_string(&path).unwrap();
