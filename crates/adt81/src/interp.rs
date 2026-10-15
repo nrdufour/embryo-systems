@@ -188,7 +188,7 @@ pub fn run_counted(
     // 112), the sequencing set gone with the run.
     let mut store = machine.store.lock().unwrap();
     for (p, state, clock) in machine.sim.lock().unwrap().processes() {
-        if store.objects.contains_key(&p) {
+        if store.objects().contains_key(&p) {
             hbds_simulation::record(&mut store, p, state, clock).map_err(|e| RuntimeError {
                 span: Span { line: 1, column: 1 },
                 message: e.0,
@@ -1237,7 +1237,7 @@ impl Machine {
                     names.push(self.text(c, f, s.span)?);
                 }
                 let mut store = self.store.lock().unwrap();
-                if !matches!(store.classes[&prototype].kind, ClassKind::Prototype(_)) {
+                if !matches!(store.classes()[&prototype].kind, ClassKind::Prototype(_)) {
                     return Err(error(s.span, "BUILD builds structures AS a prototype"));
                 }
                 for n in names {
@@ -1466,7 +1466,7 @@ impl Machine {
                 let store = self.store.lock().unwrap();
                 let link = store.object_link(a, &relation.text, b);
                 if let Some(l) = link {
-                    self.read_fact(store.object_links[&l].probability);
+                    self.read_fact(store.object_links()[&l].probability);
                 }
                 Ok(Value::boolean(link.is_some()))
             }
@@ -1712,7 +1712,7 @@ impl Machine {
                         span,
                     )?)),
                     AdtRef::Object(o) => {
-                        let c = store.objects[&o].class;
+                        let c = store.objects()[&o].class;
                         Ok(AdtRef::ObjectAttribute(
                             o,
                             stored(store.attribute(c, &name), span)?,
@@ -1747,12 +1747,12 @@ impl Machine {
     fn attribute_value(&self, o: Id, name: &str, span: Span) -> Exec<Value> {
         let (class, attribute, computed) = {
             let store = self.store.lock().unwrap();
-            let c = store.objects[&o].class;
+            let c = store.objects()[&o].class;
             let a = stored(store.attribute(c, name), span)?;
             (
-                store.classes[&c].name.clone(),
+                store.classes()[&c].name.clone(),
                 a,
-                store.attributes[&a].props.computed,
+                store.attributes()[&a].props.computed,
             )
         };
         if let Some(&i) = self.computed.get(&(fold(&class), fold(name))) {
@@ -1898,7 +1898,8 @@ impl Machine {
             if !hbds_simulation::is_live(&store, attribute) {
                 return None;
             }
-            let state = hbds_core::same(&store.attributes[&attribute].name, hbds_simulation::STATE);
+            let state =
+                hbds_core::same(&store.attributes()[&attribute].name, hbds_simulation::STATE);
             (state, store.get(o, attribute).cloned())
         };
         let sim = self.sim.lock().unwrap();
@@ -1973,13 +1974,13 @@ impl Machine {
     /// hyperclass's.
     fn body(&self, p: Id, span: Span) -> Exec<usize> {
         let store = self.store.lock().unwrap();
-        let class = store.objects[&p].class;
+        let class = store.objects()[&p].class;
         for c in store.lineage(class) {
-            if let Some(&i) = self.bodies.get(&fold(&store.classes[&c].name)) {
+            if let Some(&i) = self.bodies.get(&fold(&store.classes()[&c].name)) {
                 return Ok(i);
             }
         }
-        let name = store.classes[&class].name.clone();
+        let name = store.classes()[&class].name.clone();
         Err(error(
             span,
             format!("\"{name}\" has no body: COROUTINE \"{name}\" gives it one"),
@@ -2153,10 +2154,10 @@ impl Machine {
         let (adts, this) = {
             let store = self.store.lock().unwrap();
             match event {
-                Invoked::Created(o) => (vec![AdtRef::Class(store.objects[&o].class)], o),
+                Invoked::Created(o) => (vec![AdtRef::Class(store.objects()[&o].class)], o),
                 Invoked::Set(o, a) => (vec![AdtRef::ClassAttribute(a)], o),
                 Invoked::Linked(l) => {
-                    let link = &store.object_links[&l];
+                    let link = &store.object_links()[&l];
                     (vec![AdtRef::ClassLink(link.class_link)], link.from)
                 }
             }
@@ -2378,7 +2379,7 @@ impl Machine {
                 let name = self.text(attribute, f, span)?;
                 let v = self.stamped(v);
                 let mut store = self.store.lock().unwrap();
-                let a = stored(store.attribute(store.objects[&o].class, &name), span)?;
+                let a = stored(store.attribute(store.objects()[&o].class, &name), span)?;
                 if hbds_simulation::is_live(&store, a) {
                     return Err(error(span, format!("{name} is the simulation engine's")));
                 }

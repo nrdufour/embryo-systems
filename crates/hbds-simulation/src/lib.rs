@@ -36,7 +36,7 @@ pub fn install(store: &mut Store) -> Stored<()> {
 
 /// Whether an object is a process: of a class in PROCESS, at any depth.
 pub fn is_process(store: &Store, o: Id) -> bool {
-    let (Some(process), Some(object)) = (store.find_class(PROCESS), store.objects.get(&o)) else {
+    let (Some(process), Some(object)) = (store.find_class(PROCESS), store.objects().get(&o)) else {
         return false;
     };
     store.lineage(object.class).contains(&process)
@@ -286,7 +286,7 @@ impl Sequencing {
 /// STATE and CLOCK as the store keeps them, at the end of a run: a
 /// process not terminated is passive, the sequencing set gone with it.
 pub fn record(store: &mut Store, p: Id, state: State, clock: f64) -> Stored<()> {
-    let class = store.objects[&p].class;
+    let class = store.objects()[&p].class;
     let state = match state {
         State::Terminated => State::Terminated,
         _ => State::Passive,
@@ -308,7 +308,7 @@ pub fn record(store: &mut Store, p: Id, state: State, clock: f64) -> Stored<()> 
 
 /// A process's STATE or CLOCK as the store kept it, if it did.
 pub fn stored(store: &Store, p: Id, name: &str) -> Option<Value> {
-    let a = store.find_attribute(store.objects.get(&p)?.class, name)?;
+    let a = store.find_attribute(store.objects().get(&p)?.class, name)?;
     store.get(p, a).cloned()
 }
 
@@ -317,7 +317,7 @@ pub fn is_live(store: &Store, attribute: Id) -> bool {
     let Some(process) = store.find_class(PROCESS) else {
         return false;
     };
-    let a = &store.attributes[&attribute];
+    let a = &store.attributes()[&attribute];
     a.class == process && (same(&a.name, STATE) || same(&a.name, CLOCK))
 }
 

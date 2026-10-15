@@ -16,7 +16,7 @@ struct Fake {
 }
 
 fn object(store: &Store, name: &str) -> Id {
-    let found = store.objects.iter().find(|(_, o)| o.name == name);
+    let found = store.objects().iter().find(|(_, o)| o.name == name);
     *found.unwrap_or_else(|| panic!("no object {name}")).0
 }
 
@@ -56,7 +56,7 @@ impl Host for Fake {
             }
             let o = object(&store, &c[1]);
             let a = store
-                .find_attribute(store.objects[&o].class, &c[2])
+                .find_attribute(store.objects()[&o].class, &c[2])
                 .unwrap();
             match store.get(o, a) {
                 Some(Value::One(fz)) => reliability = reliability.min(fz.prob.unwrap_or(1.0)),
@@ -76,7 +76,7 @@ impl Host for Fake {
             }
             let o = object(&store, &c[1]);
             let a = store
-                .find_attribute(store.objects[&o].class, &c[2])
+                .find_attribute(store.objects()[&o].class, &c[2])
                 .unwrap();
             let n = match c[0].as_str() {
                 "inc" => match store.get(o, a).and_then(|v| v.scalar()) {
@@ -139,7 +139,7 @@ impl Fake {
     fn set(&mut self, rule: Id, attribute: &str, v: Value) {
         let mut store = self.store.lock().unwrap();
         let a = store
-            .find_attribute(store.objects[&rule].class, attribute)
+            .find_attribute(store.objects()[&rule].class, attribute)
             .unwrap();
         store.set(rule, a, v).unwrap();
     }
@@ -152,13 +152,15 @@ impl Fake {
     fn value(&self, o: &str, a: &str) -> Option<Value> {
         let store = self.store.lock().unwrap();
         let o = object(&store, o);
-        let a = store.find_attribute(store.objects[&o].class, a).unwrap();
+        let a = store.find_attribute(store.objects()[&o].class, a).unwrap();
         store.get(o, a).cloned()
     }
 
     fn names(&self, ids: &[Id]) -> Vec<String> {
         let store = self.store.lock().unwrap();
-        ids.iter().map(|i| store.objects[i].name.clone()).collect()
+        ids.iter()
+            .map(|i| store.objects()[i].name.clone())
+            .collect()
     }
 
     fn attribute(&self, name: &str) -> AdtRef {
@@ -179,7 +181,7 @@ fn install_is_idempotent_and_rule_is_a_fact() {
         store.find_class(RULE).unwrap(),
         store.find_class(FACT).unwrap(),
     );
-    assert!(store.classes[&rule].hyper.contains(&fact));
+    assert!(store.classes()[&rule].hyper.contains(&fact));
     assert!(store.find_attribute(rule, PRIORITY).is_some());
     assert!(store.find_class_link(rule, "inhibited by", rule).is_some());
 }

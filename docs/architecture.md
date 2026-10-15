@@ -289,6 +289,18 @@ locals lost.
 - **Large values are shared**: lists, arrays and strings behind a
   reference count, copied only when one that is shared changes.
 
+As built (2026-10-15, step 2b): the indexes are `PMap`s inside the
+store, in its snapshots, kept by `apply` and `purge` alone through one
+put and one drop per kind of entry, so a replay rebuilds them. Beside
+decision 11's list, the class links by end (PSC, NSC) and the object
+links by class link (EFF). The model's maps are read-only outside GTAD.
+`Store::verify` rebuilds every index and checks that nothing dangles;
+the corpus and the store tests call it after each program, and a random
+test after each of 3000 changes. Every scenario but `chav` is linear now:
+store 4000 in 71 ms here, from 916. `chav` stays near x3 because CHAV's
+`pick` reads every rule's PRIORITY for each try, n squared lookups: the
+engine's, not the store's, left for later.
+
 ### 12. Benchmarks at the print's scale
 
 - **Scenarios**: the store and functors (a million objects, lookups,

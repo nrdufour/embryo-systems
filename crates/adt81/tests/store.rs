@@ -37,6 +37,7 @@ fn run(source: &str, store: &Arc<Mutex<Store>>) -> String {
     let program = lower::parse_program(source).unwrap();
     let capture = Arc::new(Mutex::new(Capture::default()));
     interp::run(program, capture.clone(), store.clone()).unwrap();
+    store.lock().unwrap().verify().unwrap();
     capture.lock().unwrap().0.clone()
 }
 
