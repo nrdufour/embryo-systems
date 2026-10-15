@@ -43,7 +43,13 @@ procedure: "SUBROUTINE"i module_name formal_parameters ";" parameter_specificati
 
 // listing: pages 49-50 and 127-128 name the algorithm of a computed
 // attribute after the attribute, FUNCTION "ARC"."LENGTH".
-function: "FUNCTION"i (module_name | class_attribute) formal_parameters "RETURNS"i type fuzziness ";" parameter_specifications locals externals body
+function: "FUNCTION"i (module_name | computed_attribute) formal_parameters "RETURNS"i type fuzziness ";" parameter_specifications locals externals body
+
+// decision: the class and the attribute are string literals, as every
+// listing writes them: a heading is read before anything runs. A computed
+// name would also make FUNCTION "A" . p (x) read two ways, the attribute p
+// with a parameter, or the attribute p(x).
+computed_attribute: STRING "." STRING
 
 coroutine: "COROUTINE"i module_name formal_parameters ";" parameter_specifications locals externals body
 

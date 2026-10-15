@@ -8,7 +8,10 @@
 - every line of tests/adt81/reject.txt (blank lines and # comments aside)
   is refused as a `fragment`;
 - the Rust parser (`embryo-systems parse`) gives the same tree as Lark for
-  every test file, and refuses every reject.
+  every test file, and refuses every reject;
+- so for random programs (`cargo run --example sample`): each parses one
+  way, to the Rust parser's tree. Random programs find what no test
+  program thought of, such as a statement the grammar reads two ways.
 
 `check_grammar.py FILE...` parses other files as fragments, for trying
 things; `--program` before them parses them as programs; `--tree` prints
@@ -49,10 +52,13 @@ def dump(node, depth=0):
     return [f"{pad}- {node}"]
 
 
-def parse(parser, path, start):
-    """The tree's dump if the file parses one way, else what went wrong."""
+SAMPLES = 200
+
+
+def parse(parser, text, start):
+    """The tree's dump if `text` parses one way, else what went wrong."""
     try:
-        tree = parser.parse(path.read_text(encoding="utf-8"), start=start)
+        tree = parser.parse(text, start=start)
     except LarkError as e:
         lines = str(e).strip().splitlines()
         return None, "\n    ".join(lines[:3])
@@ -65,8 +71,8 @@ def parse(parser, path, start):
 
 
 @functools.cache
-def parser_binary():
-    """The debug build's path, wherever cargo puts it (CI sets CARGO_TARGET_DIR)."""
+def debug_build():
+    """Where cargo puts the debug build (CI sets CARGO_TARGET_DIR)."""
     meta = subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps"],
         cwd=ROOT,
@@ -74,12 +80,28 @@ def parser_binary():
         text=True,
         check=True,
     )
-    return Path(json.loads(meta.stdout)["target_directory"]) / "debug" / "embryo-systems"
+    return Path(json.loads(meta.stdout)["target_directory"]) / "debug"
 
 
-def rust(start, path=None, text=None):
+def parser_binary():
+    return debug_build() / "embryo-systems"
+
+
+def samples(seed, count):
+    """Random programs and fragments: (label, start, text)."""
+    run = subprocess.run(
+        [str(debug_build() / "examples" / "sample"), str(seed), str(count)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    parts = re.split(r"^-- sample (\d+) (program|fragment) --\n", run.stdout, flags=re.M)
+    return [(f"sample {n}", start, text) for n, start, text in zip(parts[1::3], parts[2::3], parts[3::3])]
+
+
+def rust(start, text):
     """`embryo-systems parse`'s output lines, and whether it succeeded."""
-    args = [str(parser_binary()), "parse", f"--{start}", str(path) if path else "-"]
+    args = [str(parser_binary()), "parse", f"--{start}", "-"]
     run = subprocess.run(args, input=text, capture_output=True, text=True)
     return run.stdout.splitlines(), run.returncode == 0
 
@@ -110,42 +132,46 @@ def main():
     files = [Path(a) for a in args if not a.startswith("--")]
     if tree:
         for path in files:
-            lines, err = parse(parser, path, start)
+            lines, err = parse(parser, path.read_text(encoding="utf-8"), start)
             print("\n".join(lines) if lines else f"{path}: {err}")
         return
+    def read(path):
+        return path.read_text(encoding="utf-8")
+
     if files:
-        targets = [(path, start) for path in files]
+        targets = [(path.name, start, read(path)) for path in files]
         rejects = []
     else:
-        targets = [(f, "program") for f in sorted((TESTS / "programs").glob("*.adt"))]
-        targets += [(f, "fragment") for f in sorted((TESTS / "fragments").glob("*.adt"))]
+        targets = [(f.name, "program", read(f)) for f in sorted((TESTS / "programs").glob("*.adt"))]
+        targets += [(f.name, "fragment", read(f)) for f in sorted((TESTS / "fragments").glob("*.adt"))]
+        targets += samples(0, SAMPLES)
         rejects = [
             line
             for line in (TESTS / "reject.txt").read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.startswith("#")
         ]
     problems = [f"grammar.lark: {r} is never used" for r in unreachable(grammar)]
-    for path, start in targets:
-        lines, err = parse(parser, path, start)
+    for label, start, text in targets:
+        lines, err = parse(parser, text, start)
         if err:
-            problems.append(f"{path.name}: {err}")
+            problems.append(f"{label}: {err}")
             continue
-        ours, ok = rust(start, path=path)
+        ours, ok = rust(start, text=text)
         err = differ(ours, lines) if ok else "the Rust parser refuses it"
         if err:
-            problems.append(f"{path.name}: {err}")
+            problems.append(f"{label}: {err}")
     for text in rejects:
         try:
             parser.parse(text, start="fragment")
             problems.append(f"reject.txt: accepted {text!r}")
         except LarkError:
             pass
-        if rust("fragment", text=text)[1]:
+        if rust("fragment", text)[1]:
             problems.append(f"reject.txt: the Rust parser accepts {text!r}")
     if problems:
         print("\n".join(problems))
         sys.exit(1)
-    print(f"grammar: {len(targets)} file(s) parse one way, as in Rust; {len(rejects)} reject(s) refused")
+    print(f"grammar: {len(targets)} programs parse one way, as in Rust; {len(rejects)} rejects refused")
 
 
 if __name__ == "__main__":
