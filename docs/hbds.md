@@ -28,6 +28,13 @@ Taken on 2026-10-15:
   FILE` opens, or creates, a persistent one**, so that what a program
   builds is there for the next. `embryo-systems store DIR` prints what a
   store holds.
+- **A.d.t. names compare case-insensitively** (decided on the same day):
+  classes, objects, attributes and link relationships are kept as written
+  and found folded, `"arc"` and `"ARC"` being one class. The polycopié's
+  code needs it: page 127 reaches arcs by `OPSCRC("direct", "arc")` and
+  computes their length in `FUNCTION "ARC" . "LENGTH"`, page 128 reads
+  `p . "y"` beside `p . "X"` and declares `LA` beside `la`. It is the
+  language's rule for names, carried over to the store.
 - **COND and ACTION are stored, not run.** LET checks that a COND parses as
   an expression and an ACTION as statements, and keeps the text. Running
   them waits for its own step, and for the question of what "each time the
@@ -96,11 +103,6 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
   whether building one copies the embryos' attributes and links, and how
   the structure's classes are named, the print does not say. BUILD records
   the structure and its prototype.
-- **Whether a.d.t. names compare case-insensitively.** Strings keep their
-  case, and so do class names. But the polycopié's own code mixes cases:
-  page 127 reaches arcs by `OPSCRC("direct", "arc")` and computes their
-  length in `FUNCTION "ARC" . "LENGTH"`, which only meet if names compare
-  folded. Its listings run as written only then.
 - **A COND cannot quote an attribute's name**, a string holding no quote:
   page 158's `"THIS."temp" > 0."` is not one string.
 - Processes (ACTIVATE...) belong to the simulation engine (page 112).

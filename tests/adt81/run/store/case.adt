@@ -1,0 +1,24 @@
+-- A.d.t. names compare folded, as the polycopie's code needs: written --
+-- for the store's tests. --
+
+PROGRAM FOLDED ;
+LOCAL
+        a : OBJECT ;
+BEGIN
+        CREATE "ARC", "Vertex" ;
+        CREATE "arc" . "length", "VERTEX" . "x" ;
+        CREATE "Arc" "Initial" "vertex" ;
+        CREATE "a1" [ "arc" ], "V1" [ "vertex" ] ;
+        LET "v1" [ "VERTEX" ] . "X" := 2.5 ;
+        ASSERT "A1" [ "ARC" ] "initial" "v1" [ "Vertex" ] ;
+        a := "ARC" ' OBJ ' FIRST ;
+        PRINT a, a . "LENGTH", a ' OPSCRC("INITIAL", "VERTEX") ' OFIN
+END ;
+
+FUNCTION "Arc" . "Length" RETURNS FLOAT ;
+LOCAL
+        v : OBJECT ;
+BEGIN
+        v := THIS ' OPSCRC("initial", "vertex") ' OFIN ' FIRST ;
+        RESULT 2.0 * v . "x"
+END ;

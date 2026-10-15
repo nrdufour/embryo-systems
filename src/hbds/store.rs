@@ -543,7 +543,7 @@ impl Store {
     pub fn find_class(&self, name: &str) -> Option<Id> {
         self.classes
             .iter()
-            .find(|(_, c)| c.name == name)
+            .find(|(_, c)| same(&c.name, name))
             .map(|(i, _)| *i)
     }
 
@@ -558,7 +558,7 @@ impl Store {
 
     pub fn find_object(&self, class: Id, name: &str) -> Option<Id> {
         (self.objects.iter())
-            .find(|(_, o)| o.class == class && o.name == name)
+            .find(|(_, o)| o.class == class && same(&o.name, name))
             .map(|(i, _)| *i)
     }
 
@@ -575,7 +575,7 @@ impl Store {
 
     pub fn find_attribute(&self, class: Id, name: &str) -> Option<Id> {
         (self.attributes.iter())
-            .find(|(_, a)| a.class == class && a.name == name)
+            .find(|(_, a)| a.class == class && same(&a.name, name))
             .map(|(i, _)| *i)
     }
 
@@ -591,7 +591,11 @@ impl Store {
 
     pub fn find_class_link(&self, from: Id, relation: &str, to: Id) -> Option<Id> {
         (self.class_links.iter())
-            .find(|(_, l)| l.from == from && l.to == to && l.relation.as_deref() == Some(relation))
+            .find(|(_, l)| {
+                l.from == from
+                    && l.to == to
+                    && l.relation.as_deref().is_some_and(|r| same(r, relation))
+            })
             .map(|(i, _)| *i)
     }
 
@@ -903,22 +907,22 @@ impl Store {
             ("OINV", ObjectLink(l)) => vec![ObjectLink(self.object_links[&l].reverse)],
             ("OPSCR", Object(o)) => {
                 let r = arg(0)?;
-                links(&|l| l.from == o && relation(l).as_deref() == Some(r))
+                links(&|l| l.from == o && relation(l).is_some_and(|x| same(&x, r)))
             }
             ("OPSCRC", Object(o)) => {
                 let (r, c) = (arg(0)?, arg(1)?);
                 links(&|l| {
                     l.from == o
-                        && relation(l).as_deref() == Some(r)
-                        && class_of(l.to).as_deref() == Some(c)
+                        && relation(l).is_some_and(|x| same(&x, r))
+                        && class_of(l.to).is_some_and(|x| same(&x, c))
                 })
             }
             ("ONSCRC", Object(o)) => {
                 let (r, c) = (arg(0)?, arg(1)?);
                 links(&|l| {
                     l.to == o
-                        && relation(l).as_deref() == Some(r)
-                        && class_of(l.from).as_deref() == Some(c)
+                        && relation(l).is_some_and(|x| same(&x, r))
+                        && class_of(l.from).is_some_and(|x| same(&x, c))
                 })
             }
             ("OATTN", Object(o)) => {
@@ -1082,6 +1086,18 @@ impl Store {
             v => v.to_string(),
         }
     }
+}
+
+/// Whether two a.d.t. names are one: they compare folded, as the
+/// polycopié's own code needs (`"arc"` reaching `FUNCTION "ARC" .
+/// "LENGTH"`, page 127), and are kept as written.
+pub fn same(a: &str, b: &str) -> bool {
+    a == b || a.to_uppercase() == b.to_uppercase()
+}
+
+/// A name folded, for keys.
+pub fn fold(name: &str) -> String {
+    name.to_uppercase()
 }
 
 fn involves(a: AdtRef, r: AdtRef) -> bool {
@@ -1270,6 +1286,26 @@ mod tests {
             ]
         );
         assert!(s.object(i["TOWN"], "Lyon").is_err());
+    }
+
+    #[test]
+    fn names_compare_folded() {
+        let (mut s, i) = world();
+        assert_eq!(s.class("town"), Ok(i["TOWN"]));
+        assert_eq!(s.object(i["TOWN"], "LYON"), Ok(i["Lyon"]));
+        assert_eq!(s.attribute(i["TOWN"], "Area"), Ok(i["AREA"]));
+        assert!(s.object_link(i["Rhone"], "CROSSES", i["Lyon"]).is_some());
+        assert_eq!(
+            apply(&s, "OPSCRC", &[Object(i["Rhone"])], &["Crosses", "town"]).len(),
+            2
+        );
+        assert_eq!(
+            apply(&s, "OATTN", &[Object(i["Vouglans"])], &["vol"]),
+            ["Vouglans[DAM].VOL"]
+        );
+        // Kept as written; one name, whatever the case.
+        assert_eq!(s.describe(Class(i["TOWN"])), "TOWN");
+        assert!(s.create_class("Town", ClassKind::Class).is_err());
     }
 
     #[test]

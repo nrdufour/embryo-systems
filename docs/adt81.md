@@ -158,8 +158,9 @@ The print leaves these open; they were decided on 2026-10-14.
   parses the same as before, and ours keep the print's upper-case keywords.
   Considered and rejected: keywords in upper case only (the trap above), and
   keywords reserved in every case but required in upper case (stricter than
-  any reader needs). Strings keep their case: `"ARC"` and `"arc"` are two
-  class names.
+  any reader needs). Strings keep their case, but the names of a.d.t. that
+  strings give compare folded too: `"ARC"` and `"arc"` are one class
+  (docs/hbds.md).
 - **A designation names an a.d.t. by one term**: a name, a string, a call
   or a parenthesised expression, where page 23 allows any string
   expression. Writing the parser showed three statements the grammar read

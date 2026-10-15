@@ -23,7 +23,7 @@ use super::builtins;
 use super::lower;
 use super::types::{Ty, Typed};
 use super::value::{self, Computed, Fz, List, Scalar, Value};
-use crate::hbds::store::{ClassKind, Id, State as AdtState, Stored};
+use crate::hbds::store::{ClassKind, Id, State as AdtState, Stored, fold};
 use crate::hbds::{AdtRef, Store};
 
 /// Where READ reads and PRINT writes.
@@ -60,7 +60,7 @@ pub fn run(
                 modules.entry(n.key.clone()).or_insert(i);
             }
             ModuleName::Attribute { class, attribute } => {
-                computed.insert((class.text.clone(), attribute.text.clone()), i);
+                computed.insert((fold(&class.text), fold(&attribute.text)), i);
             }
         }
     }
@@ -1410,7 +1410,7 @@ impl Machine {
                 store.attributes[&a].props.computed,
             )
         };
-        if let Some(&i) = self.computed.get(&(class.clone(), name.to_string())) {
+        if let Some(&i) = self.computed.get(&(fold(&class), fold(name))) {
             let m = &self.program.modules[i];
             let v = self.call(m, Vec::new(), None, Some(AdtRef::Object(o)))?;
             return Ok(v.expect("a function's result"));
