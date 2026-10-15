@@ -117,8 +117,9 @@ computed attribute's algorithm named after the attribute
 (pages 49, 51); `SPECIFY` with a colon, `COMPUTED`, a `UNIT`, and on classes
 and links (pages 49, 154, 158); properties of an a.d.t. such as `COND` and
 `ACTION` (pages 156-158); array operators `[+] [*] [.] [^]` (page 153);
-fuzzy values (pages 152-154, below); declarations and statements quoted
-outside any module (the `fragment` start symbol).
+fuzzy values (pages 152-154, below); `HOLD FOR dt` without an object
+(page 125, where the BNF's page 25 names one); declarations and
+statements quoted outside any module (the `fragment` start symbol).
 
 ### Structure
 
@@ -198,6 +199,12 @@ The print leaves these open; they were decided on 2026-10-14.
   computed name has nothing to compute it with; allowed, it also made
   `FUNCTION "A" . p (x)` read two ways: the attribute `p` with a parameter
   `x`, or the attribute named by the call `p(x)`.
+- **A process class's body is a coroutine named by the class's string**,
+  `COROUTINE "PUMP"` (decided 2026-10-15): figure 51 gives every process
+  class a BODY "of type coroutine", and the print no way to write one;
+  named so, as a computed attribute's function is. `HOLD x FOR dt` holds
+  the running process only, which page 125's `HOLD FOR dt` names
+  implicitly.
 - **A quote written twice inside a string is a quote**, `"say ""hi"""`,
   as in Pascal and Ada (decided 2026-10-15). A string held no quote
   before, so a COND could not name an attribute: page 158's
@@ -295,9 +302,9 @@ finds errors, then runs its first PROGRAM: READ reads standard input, a
 line per variable (a literal, fuzzy ones included, or text as it is),
 PRINT writes its values on one line. A runtime error stops it, with its
 position. Classes, objects, attributes and links live in the HBDS store,
-where COND and ACTION run as they change, and rules as CHAV and HYPOCHAV
-chain them ([hbds.md](hbds.md)); processes, the simulation engine's, are
-not there yet, and say so.
+where COND and ACTION run as they change, rules as CHAV and HYPOCHAV
+chain them, and processes as the main program holds
+([hbds.md](hbds.md)).
 
 Decided on 2026-10-15:
 

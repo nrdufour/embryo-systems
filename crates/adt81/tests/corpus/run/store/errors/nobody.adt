@@ -1,0 +1,10 @@
+-- A process class needs a body, COROUTINE "lonely". Written for the --
+-- simulation tests. --
+
+PROGRAM NOBODY ;
+BEGIN
+        CREATE "lonely" ;
+        INCLUDE "lonely" INTO "PROCESS" ;
+        CREATE "l" [ "lonely" ] ;
+        ACTIVATE "l" [ "lonely" ]
+END ;

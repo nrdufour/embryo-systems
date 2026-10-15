@@ -1,0 +1,155 @@
+//! The sequencing set and figure 52's transitions, legal and not.
+
+use hbds_simulation::*;
+
+fn d(a: Agent) -> String {
+    match a {
+        Agent::Main => "the main program".into(),
+        Agent::Process(id) => format!("p{id}"),
+    }
+}
+
+const P: Agent = Agent::Process(1);
+const Q: Agent = Agent::Process(2);
+const R: Agent = Agent::Process(3);
+
+fn names(s: &Sequencing) -> Vec<(f64, String)> {
+    s.due().into_iter().map(|(t, a)| (t, d(a))).collect()
+}
+
+#[test]
+fn first_in_first_out_among_equal_times() {
+    let mut s = Sequencing::new();
+    for p in [P, Q, R] {
+        s.reactivate(p, When::Now, &d).unwrap();
+    }
+    s.hold(0.0).unwrap();
+    let order: Vec<Agent> = std::iter::from_fn(|| s.advance()).collect();
+    assert_eq!(order, [P, Q, R, Agent::Main]);
+}
+
+#[test]
+fn hold_moves_time_on() {
+    let mut s = Sequencing::new();
+    s.reactivate(P, When::Now, &d).unwrap();
+    s.hold(5.0).unwrap();
+    assert_eq!(s.advance(), Some(P));
+    assert_eq!(s.now(), 0.0);
+    s.hold(2.5).unwrap();
+    assert_eq!(s.state(P), State::Hold);
+    assert_eq!(s.clock(P), 2.5);
+    assert_eq!(s.advance(), Some(P));
+    assert_eq!(s.now(), 2.5);
+    assert_eq!(s.state(P), State::Active);
+    assert_eq!(s.advance(), Some(Agent::Main));
+    assert_eq!(s.now(), 5.0);
+    assert_eq!(
+        s.hold(-1.0).unwrap_err(),
+        "HOLD for -1: a duration is not negative"
+    );
+}
+
+#[test]
+fn reactivate_at_before_and_after() {
+    let mut s = Sequencing::new();
+    s.reactivate(P, When::At(4.0), &d).unwrap();
+    s.reactivate(Q, When::Before(P), &d).unwrap();
+    s.reactivate(R, When::After(P), &d).unwrap();
+    assert_eq!(
+        names(&s),
+        [(4.0, "p2".into()), (4.0, "p1".into()), (4.0, "p3".into())]
+    );
+    assert_eq!(s.clock(Q), 4.0);
+    s.hold(10.0).unwrap();
+    assert_eq!(s.advance(), Some(Q));
+    let e = s
+        .reactivate(Agent::Process(9), When::At(1.0), &d)
+        .unwrap_err();
+    assert_eq!(e, "1 is past: the time is 4");
+    let e = s
+        .reactivate(Agent::Process(9), When::Before(Q), &d)
+        .unwrap_err();
+    assert_eq!(e, "p2 is ACTIVE, not HOLD");
+}
+
+#[test]
+fn cancel_delay_and_kill() {
+    let mut s = Sequencing::new();
+    s.reactivate(P, When::At(1.0), &d).unwrap();
+    s.reactivate(Q, When::At(2.0), &d).unwrap();
+    s.reactivate(R, When::At(3.0), &d).unwrap();
+    s.cancel(Q, &d).unwrap();
+    assert_eq!(s.state(Q), State::Passive);
+    s.delay(P, 5.0, &d).unwrap();
+    assert_eq!(names(&s), [(3.0, "p3".into()), (6.0, "p1".into())]);
+    s.kill(R, &d).unwrap();
+    s.kill(Q, &d).unwrap();
+    assert_eq!(s.state(Q), State::Terminated);
+    assert_eq!(names(&s), [(6.0, "p1".into())]);
+    assert_eq!(s.cancel(Q, &d).unwrap_err(), "p2 is TERMINATED, not HOLD");
+    assert_eq!(
+        s.kill(R, &d).unwrap_err(),
+        "p3 is TERMINATED, not HOLD or PASSIVE"
+    );
+    assert_eq!(
+        s.reactivate(R, When::Now, &d).unwrap_err(),
+        "p3 is TERMINATED, not PASSIVE"
+    );
+    assert_eq!(
+        s.delay(P, -7.0, &d).unwrap_err(),
+        "p1 would be due at -1, which is past"
+    );
+}
+
+#[test]
+fn passivate_and_terminate_the_running_process() {
+    let mut s = Sequencing::new();
+    assert!(
+        s.passivate()
+            .unwrap_err()
+            .starts_with("the main program is not passivated")
+    );
+    assert!(
+        s.terminate()
+            .unwrap_err()
+            .starts_with("the main program is not terminated")
+    );
+    s.reactivate(P, When::Now, &d).unwrap();
+    s.reactivate(Q, When::Now, &d).unwrap();
+    s.hold(1.0).unwrap();
+    assert_eq!(s.advance(), Some(P));
+    s.passivate().unwrap();
+    assert_eq!(s.state(P), State::Passive);
+    assert_eq!(s.advance(), Some(Q));
+    assert_eq!(
+        s.reactivate(Q, When::Now, &d).unwrap_err(),
+        "p2 is ACTIVE, not PASSIVE"
+    );
+    s.terminate().unwrap();
+    assert_eq!(s.state(Q), State::Terminated);
+    // P, passive, waits for a REACTIVATE: the main program is next.
+    assert_eq!(s.advance(), Some(Agent::Main));
+    assert_eq!(s.advance(), None);
+}
+
+#[test]
+fn processes_known_and_recorded() {
+    let mut store = hbds_gtad::Store::memory();
+    install(&mut store).unwrap();
+    install(&mut store).unwrap();
+    let process = store.find_class(PROCESS).unwrap();
+    let pump = store
+        .create_class("PUMP", hbds_gtad::ClassKind::Class)
+        .unwrap();
+    store.include(pump, process).unwrap();
+    let p = store.create_object(pump, "p").unwrap();
+    let town = store
+        .create_class("TOWN", hbds_gtad::ClassKind::Class)
+        .unwrap();
+    let t = store.create_object(town, "t").unwrap();
+    assert!(is_process(&store, p));
+    assert!(!is_process(&store, t));
+    record(&mut store, p, State::Hold, 7.5).unwrap();
+    assert_eq!(stored(&store, p, STATE).unwrap().to_string(), "PASSIVE");
+    assert_eq!(stored(&store, p, CLOCK).unwrap().to_string(), "7.5");
+}

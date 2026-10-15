@@ -1,0 +1,50 @@
+-- Figure 52's primitives: REACTIVATE AT, BEFORE and AFTER, ACTIVATE, --
+-- KILL, DELAY, CANCEL, PASSIVATE and a REACTIVATE that resumes the body --
+-- where it stopped (its LSC), a body that ends, TERMINATE. Written for --
+-- the simulation tests; the order traced by hand. --
+
+PROGRAM PRIMITIVES ;
+BEGIN
+        CREATE "worker", "quitter" ;
+        INCLUDE "worker", "quitter" INTO "PROCESS" ;
+        CREATE "worker" . "tag", "quitter" . "tag" ;
+        CREATE "a" [ "worker" ], "b" [ "worker" ], "c" [ "worker" ],
+               "d" [ "worker" ], "e" [ "worker" ], "q" [ "quitter" ] ;
+        LET "a" [ "worker" ] . "tag" := "a" ; LET "b" [ "worker" ] . "tag" := "b" ;
+        LET "c" [ "worker" ] . "tag" := "c" ; LET "d" [ "worker" ] . "tag" := "d" ;
+        LET "q" [ "quitter" ] . "tag" := "q" ;
+        REACTIVATE "a" [ "worker" ] AT 2 ;
+        REACTIVATE "b" [ "worker" ] BEFORE "a" [ "worker" ] ;
+        REACTIVATE "c" [ "worker" ] AFTER "b" [ "worker" ] ;
+        ACTIVATE "d" [ "worker" ] ;
+        ACTIVATE "e" [ "worker" ] ;
+        KILL "e" [ "worker" ] ;
+        DELAY "c" [ "worker" ] FOR 3 ;
+        HOLD FOR 1 ;
+        PRINT "d" [ "worker" ] . "STATE" ;
+        REACTIVATE "d" [ "worker" ] AT 4 ;
+        CANCEL "a" [ "worker" ] ;
+        HOLD FOR 9 ;
+        PRINT "a" [ "worker" ] . "STATE", "b" [ "worker" ] . "STATE",
+              "c" [ "worker" ] . "STATE", "d" [ "worker" ] . "STATE",
+              "e" [ "worker" ] . "STATE" ;
+        ACTIVATE "q" [ "quitter" ] ;
+        HOLD FOR 0 ;
+        PRINT "q" [ "quitter" ] . "STATE"
+END ;
+
+COROUTINE "worker" ;
+BEGIN
+        PRINT THIS . "tag", "starts at", THIS . "CLOCK" ;
+        PASSIVATE ;
+        PRINT THIS . "tag", "resumes at", THIS . "CLOCK" ;
+        HOLD FOR 1 ;
+        PRINT THIS . "tag", "ends at", THIS . "CLOCK"
+END ;
+
+COROUTINE "quitter" ;
+BEGIN
+        PRINT THIS . "tag", "quits" ;
+        TERMINATE ;
+        PRINT THIS . "tag", "never"
+END ;

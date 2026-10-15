@@ -1,0 +1,7 @@
+-- The main program is not passivated: nothing could reactivate it. --
+-- Written for the simulation tests. --
+
+PROGRAM MAIN ;
+BEGIN
+        PASSIVATE
+END ;

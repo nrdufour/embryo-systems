@@ -1,0 +1,9 @@
+d starts at 0.0
+PASSIVE
+b starts at 2.0
+d resumes at 4.0
+c starts at 5.0
+d ends at 5.0
+PASSIVE PASSIVE PASSIVE TERMINATED TERMINATED
+q quits
+TERMINATED

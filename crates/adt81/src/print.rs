@@ -607,6 +607,7 @@ impl Printer {
             ModuleName::Attribute { class, attribute } => {
                 format!("{} . {}", quoted(&class.text), quoted(&attribute.text))
             }
+            ModuleName::Body(class) => quoted(&class.text),
         };
         let parameters = if m.parameters.is_empty() {
             String::new()
@@ -970,11 +971,14 @@ impl Printer {
                 self.designation(object),
                 self.expr_text(duration, 0)
             ),
-            StmtKind::Hold { object, duration } => format!(
-                "HOLD {} FOR {}",
-                self.designation(object),
-                self.expr_text(duration, 0)
-            ),
+            StmtKind::Hold { object, duration } => match object {
+                Some(o) => format!(
+                    "HOLD {} FOR {}",
+                    self.designation(o),
+                    self.expr_text(duration, 0)
+                ),
+                None => format!("HOLD FOR {}", self.expr_text(duration, 0)),
+            },
             StmtKind::Passivate => "PASSIVATE".into(),
             StmtKind::Terminate => "TERMINATE".into(),
             StmtKind::Chain(n) => format!("CHAIN {}", n.spelling),

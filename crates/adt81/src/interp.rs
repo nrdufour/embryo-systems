@@ -6,9 +6,9 @@
 //! passed. Classes, objects, attributes and links live in the HBDS
 //! [`Store`], whose COND and ACTION run when they change, a statement
 //! being a transaction; the expert-system engines (hbds-rules) run rules
-//! through it, CALLed as CHAV and HYPOCHAV. Processes, the simulation
-//! engine's, are not there yet: reaching them is a runtime error that
-//! says so.
+//! through it, CALLed as CHAV and HYPOCHAV. Processes are the simulation
+//! engine's (hbds-simulation): each body runs as a coroutine, and the
+//! main program, a process too, runs the sequencing set when it holds.
 //!
 //! Each coroutine runs on its own thread, and control passes by channel,
 //! so that only one thread ever runs: RESUME continues a coroutine where
@@ -29,6 +29,7 @@ use super::uses::{self, Part};
 use super::value::{self, Ask, Computed, Fz, List, Scalar, Value};
 use hbds_core::{AdtRef, Id, fold};
 use hbds_gtad::{ClassKind, Code, State as AdtState, Store, Stored};
+use hbds_simulation::{Agent, Sequencing, State as Lifecycle, When as Due};
 
 /// The language the store's COND and ACTION are tagged with, when ADT'81
 /// writes them.
@@ -120,6 +121,7 @@ pub fn run(
 ) -> Result<(), RuntimeError> {
     let mut modules = HashMap::new();
     let mut computed = HashMap::new();
+    let mut bodies = HashMap::new();
     for (i, m) in program.modules.iter().enumerate() {
         match &m.name {
             ModuleName::Name(n) => {
@@ -127,6 +129,9 @@ pub fn run(
             }
             ModuleName::Attribute { class, attribute } => {
                 computed.insert((fold(&class.text), fold(&attribute.text)), i);
+            }
+            ModuleName::Body(class) => {
+                bodies.insert(fold(&class.text), i);
             }
         }
     }
@@ -149,6 +154,10 @@ pub fn run(
         store,
         computed: Arc::new(computed),
         ses: Arc::new(Mutex::new(Ses::default())),
+        bodies: Arc::new(bodies),
+        sim: Arc::new(Mutex::new(Sequencing::new())),
+        processes: Arc::new(Mutex::new(HashMap::new())),
+        role: Role::Main,
     };
     // The interpreter recurses (statements, calls, CONDs and ACTIONs): it
     // runs on a thread of its own, with the stack that takes.
@@ -161,7 +170,20 @@ pub fn run(
         .expect("the program's thread");
     // Paused coroutines wait for a RESUME that will not come: let them go.
     machine.coroutines.lock().unwrap().clear();
-    result
+    machine.processes.lock().unwrap().clear();
+    result?;
+    // The processes as the run leaves them: implicitly persistent (page
+    // 112), the sequencing set gone with the run.
+    let mut store = machine.store.lock().unwrap();
+    for (p, state, clock) in machine.sim.lock().unwrap().processes() {
+        if store.objects.contains_key(&p) {
+            hbds_simulation::record(&mut store, p, state, clock).map_err(|e| RuntimeError {
+                span: Span { line: 1, column: 1 },
+                message: e.0,
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// The stack of each thread the interpreter runs on.
@@ -347,6 +369,22 @@ struct Machine {
     /// The functions that compute attributes, by class and attribute.
     computed: Arc<HashMap<(String, String), usize>>,
     ses: Arc<Mutex<Ses>>,
+    /// The bodies of process classes, by class (page 112).
+    bodies: Arc<HashMap<String, usize>>,
+    sim: Arc<Mutex<Sequencing>>,
+    /// Each process's body, a coroutine, once it started.
+    processes: Arc<Mutex<HashMap<Id, Coroutine>>>,
+    /// Who this thread runs for.
+    role: Role,
+}
+
+/// Who a thread of the interpreter runs for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Main,
+    Process(Id),
+    /// A coroutine RESUME started.
+    Coroutine,
 }
 
 /// The expert-system engines' way into ADT'81: they decide what runs
@@ -668,6 +706,7 @@ impl Machine {
             });
             let mut machine = self.clone();
             machine.link = Some(link.clone());
+            machine.role = Role::Coroutine;
             self.coroutines.lock().unwrap().insert(
                 c.name.key.clone(),
                 Coroutine {
@@ -986,6 +1025,9 @@ impl Machine {
             }
             StmtKind::Return => Err(Flow::Return),
             StmtKind::Reproc => Err(error(s.span, "the meaning of REPROC is not established")),
+            StmtKind::Pause if matches!(self.role, Role::Process(_)) => {
+                Err(error(s.span, "PAUSE in a process: it HOLDs or PASSIVATEs"))
+            }
             StmtKind::Pause => self.pause(),
             StmtKind::Stop => Err(Flow::Stop),
             StmtKind::Restart => Err(Flow::Restart),
@@ -1191,17 +1233,49 @@ impl Machine {
                 }
                 Ok(())
             }
-            StmtKind::Activate(_)
-            | StmtKind::Reactivate { .. }
-            | StmtKind::Cancel(_)
-            | StmtKind::Kill(_)
-            | StmtKind::Delay { .. }
-            | StmtKind::Hold { .. }
-            | StmtKind::Passivate
-            | StmtKind::Terminate => Err(not_yet(
-                s.span,
-                "processes come with the simulation engine (page 112)",
-            )),
+            StmtKind::Activate(o) => self.reactivate(o, None, f, s.span),
+            StmtKind::Reactivate { object, when } => {
+                self.reactivate(object, when.as_ref(), f, s.span)
+            }
+            StmtKind::Cancel(o) => {
+                let p = self.process(o, f, s.span)?;
+                self.sim_op(s.span, |sim, d| sim.cancel(p, d))
+            }
+            StmtKind::Kill(o) => {
+                let p = self.process(o, f, s.span)?;
+                self.sim_op(s.span, |sim, d| sim.kill(p, d))
+            }
+            StmtKind::Delay { object, duration } => {
+                let p = self.process(object, f, s.span)?;
+                let dt = self.time(duration, f)?;
+                self.sim_op(s.span, |sim, d| sim.delay(p, dt, d))
+            }
+            StmtKind::Hold { object, duration } => {
+                let running = self.running(s.span)?;
+                if let Some(o) = object
+                    && self.process(o, f, s.span)? != running
+                {
+                    let what = self.describe(self.designate(o, f, s.span, false)?);
+                    return Err(error(
+                        s.span,
+                        format!("HOLD holds the running process, not {what}"),
+                    ));
+                }
+                let dt = self.time(duration, f)?;
+                self.sim_op(s.span, |sim, _| sim.hold(dt))?;
+                self.give_way(s.span)
+            }
+            StmtKind::Passivate => {
+                self.running(s.span)?;
+                self.sim_op(s.span, |sim, _| sim.passivate())?;
+                self.give_way(s.span)
+            }
+            StmtKind::Terminate => {
+                self.running(s.span)?;
+                self.sim_op(s.span, |sim, _| sim.terminate())?;
+                // The body stops here; its thread ends.
+                Err(Flow::Stop)
+            }
             StmtKind::Chain(n) => Err(Flow::Chain(n.clone())),
             StmtKind::Call(c)
                 if self.module(&c.name).is_none() && builtins::is_subroutine(&c.name.key) =>
@@ -1667,6 +1741,9 @@ impl Machine {
                 format!("\"{class}\" . \"{name}\" is COMPUTED, but no FUNCTION computes it"),
             ));
         }
+        if let Some(v) = self.live(o, attribute) {
+            return Ok(v);
+        }
         let found = self.store.lock().unwrap().get(o, attribute).cloned();
         match found {
             Some(v) => {
@@ -1772,14 +1849,213 @@ impl Machine {
 
     /// FACT and RULE, created the first time a program names them.
     fn system(&self, name: &str, span: Span) -> Exec<()> {
-        if !hbds_rules::is_system(name) {
+        let rules = hbds_rules::is_system(name);
+        if !rules && !hbds_simulation::is_system(name) {
             return Ok(());
         }
         let mut store = self.store.lock().unwrap();
         if store.find_class(name).is_some() {
             return Ok(());
         }
-        stored(hbds_rules::install(&mut store), span)
+        match rules {
+            true => stored(hbds_rules::install(&mut store), span),
+            false => stored(hbds_simulation::install(&mut store), span),
+        }
+    }
+
+    // Processes (pages 112 to 115, 125)
+
+    /// STATE and CLOCK as the engine has them, while the run lasts; as the
+    /// store kept them otherwise; passive at 0 for a process never run.
+    fn live(&self, o: Id, attribute: Id) -> Option<Value> {
+        let (state, kept) = {
+            let store = self.store.lock().unwrap();
+            if !hbds_simulation::is_live(&store, attribute) {
+                return None;
+            }
+            let state = hbds_core::same(&store.attributes[&attribute].name, hbds_simulation::STATE);
+            (state, store.get(o, attribute).cloned())
+        };
+        let sim = self.sim.lock().unwrap();
+        let p = Agent::Process(o);
+        if !sim.knows(p) && kept.is_some() {
+            return kept;
+        }
+        Some(if state {
+            let name = hbds_simulation::state_name(sim.state(p));
+            Value::exact(Scalar::String(name.into()))
+        } else {
+            Value::exact(Scalar::Float(sim.clock(p)))
+        })
+    }
+
+    /// How an agent is named in an error.
+    fn agent_name(&self, a: Agent) -> String {
+        match a {
+            Agent::Main => "the main program".into(),
+            Agent::Process(p) => self.describe(AdtRef::Object(p)),
+        }
+    }
+
+    /// An operation of the sequencing set, its refusal placed at `span`.
+    fn sim_op(
+        &self,
+        span: Span,
+        op: impl FnOnce(&mut Sequencing, hbds_simulation::Describe) -> Result<(), String>,
+    ) -> Exec<()> {
+        let mut sim = self.sim.lock().unwrap();
+        op(&mut sim, &|a| self.agent_name(a)).map_err(|m| error(span, m))
+    }
+
+    /// A process a designation names.
+    fn process(&self, d: &Designation, f: &mut Frame, span: Span) -> Exec<Agent> {
+        let o = self.object(d, f, span)?;
+        if hbds_simulation::is_process(&self.store.lock().unwrap(), o) {
+            return Ok(Agent::Process(o));
+        }
+        let what = self.describe(AdtRef::Object(o));
+        Err(error(
+            span,
+            format!("{what} is not a process: its class is not in PROCESS"),
+        ))
+    }
+
+    /// Who runs here: the main program or a process; a coroutine does not
+    /// hold, passivate nor terminate.
+    fn running(&self, span: Span) -> Exec<Agent> {
+        match self.role {
+            Role::Main => Ok(Agent::Main),
+            Role::Process(p) => Ok(Agent::Process(p)),
+            Role::Coroutine => Err(error(
+                span,
+                "a coroutine RESUME started is not a process: it does not HOLD, PASSIVATE nor TERMINATE",
+            )),
+        }
+    }
+
+    /// A duration or a time, as a number.
+    fn time(&self, e: &Expr, f: &mut Frame) -> Exec<f64> {
+        let v = self.eval(e, f)?;
+        match v.scalar() {
+            Some(Scalar::Integer(i)) => Ok(*i as f64),
+            Some(Scalar::Float(x)) => Ok(*x),
+            Some(Scalar::Rational(n, d)) => Ok(*n as f64 / *d as f64),
+            _ => Err(error(e.span, format!("a time is a real number, not {v}"))),
+        }
+    }
+
+    /// The body of a process: its class's coroutine, or the nearest
+    /// hyperclass's.
+    fn body(&self, p: Id, span: Span) -> Exec<usize> {
+        let store = self.store.lock().unwrap();
+        let class = store.objects[&p].class;
+        for c in store.lineage(class) {
+            if let Some(&i) = self.bodies.get(&fold(&store.classes[&c].name)) {
+                return Ok(i);
+            }
+        }
+        let name = store.classes[&class].name.clone();
+        Err(error(
+            span,
+            format!("\"{name}\" has no body: COROUTINE \"{name}\" gives it one"),
+        ))
+    }
+
+    /// ACTIVATE, and REACTIVATE AT, BEFORE or AFTER.
+    fn reactivate(
+        &self,
+        o: &Designation,
+        when: Option<&When>,
+        f: &mut Frame,
+        span: Span,
+    ) -> Exec<()> {
+        let p = self.process(o, f, span)?;
+        let Agent::Process(id) = p else {
+            unreachable!("a process")
+        };
+        let i = self.body(id, span)?;
+        if !self.program.modules[i].parameters.is_empty() {
+            return Err(error(span, "a process's body takes no parameters"));
+        }
+        let due = match when {
+            None => Due::Now,
+            Some(When::At(e)) => Due::At(self.time(e, f)?),
+            Some(When::Before(q)) => Due::Before(self.process(q, f, span)?),
+            Some(When::After(q)) => Due::After(self.process(q, f, span)?),
+        };
+        self.sim_op(span, |sim, d| sim.reactivate(p, due, d))
+    }
+
+    /// After HOLD or PASSIVATE: a body gives control back to the
+    /// sequencing set; the main program runs it until it is due again.
+    fn give_way(&self, span: Span) -> Exec<()> {
+        if let Role::Process(_) = self.role {
+            return self.pause();
+        }
+        loop {
+            let next = self.sim.lock().unwrap().advance();
+            match next {
+                Some(Agent::Process(p)) => self.run_process(p, span)?,
+                Some(Agent::Main) | None => return Ok(()),
+            }
+        }
+    }
+
+    /// Runs a process's body from where it stopped, its LSC, until it
+    /// holds, passivates or ends.
+    fn run_process(&self, p: Id, span: Span) -> Exec<()> {
+        let started = self.processes.lock().unwrap().contains_key(&p);
+        let back = if started {
+            let map = self.processes.lock().unwrap();
+            let co = &map[&p];
+            co.go
+                .send(())
+                .map_err(|_| error(span, "the process is gone"))?;
+            co.back.clone()
+        } else {
+            let index = self.body(p, span)?;
+            let (go, go_rx) = channel();
+            let (back_tx, back) = channel();
+            let back = Arc::new(Mutex::new(back));
+            let link = Arc::new(Link {
+                back: back_tx,
+                go: Mutex::new(go_rx),
+            });
+            let mut machine = self.clone();
+            machine.link = Some(link.clone());
+            machine.role = Role::Process(p);
+            self.processes.lock().unwrap().insert(
+                p,
+                Coroutine {
+                    go,
+                    back: back.clone(),
+                    state: State::Running,
+                },
+            );
+            let spawned = thread::Builder::new().stack_size(STACK).spawn(move || {
+                let module = &machine.program.modules[index];
+                let ended = machine.call(module, Vec::new(), None, Some(AdtRef::Object(p)));
+                let _ = link.back.send(Event::Ended(ended.map(|_| ())));
+            });
+            spawned.map_err(|e| error(span, format!("no thread for the process: {e}")))?;
+            back
+        };
+        let event = back.lock().unwrap().recv();
+        match event {
+            Ok(Event::Paused) => Ok(()),
+            Ok(Event::Ended(ended)) => {
+                self.processes.lock().unwrap().remove(&p);
+                let terminated =
+                    self.sim.lock().unwrap().state(Agent::Process(p)) == Lifecycle::Terminated;
+                match ended {
+                    // TERMINATE, or the end of the body.
+                    Err(Flow::Stop) if terminated => Ok(()),
+                    Ok(()) | Err(Flow::Return) => self.sim_op(span, |sim, _| sim.terminate()),
+                    Err(flow) => Err(flow),
+                }
+            }
+            Err(_) => Err(Flow::Stop),
+        }
     }
 
     /// CALL CHAV(rule classes) and CALL HYPOCHAV(hypotheses, rule
@@ -2078,6 +2354,9 @@ impl Machine {
                 let v = self.stamped(v);
                 let mut store = self.store.lock().unwrap();
                 let a = stored(store.attribute(store.objects[&o].class, &name), span)?;
+                if hbds_simulation::is_live(&store, a) {
+                    return Err(error(span, format!("{name} is the simulation engine's")));
+                }
                 stored(store.set(o, a, v), span)?;
                 drop(store);
                 self.trigger(Invoked::Set(o, a), f, span)

@@ -1,4 +1,4 @@
--- Runtime error: a process, before the simulation engine exists. --
+-- Runtime error: ACTIVATE of an object whose class is not in PROCESS. --
 
 PROGRAM E ;
 BEGIN

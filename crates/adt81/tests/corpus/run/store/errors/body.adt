@@ -1,0 +1,18 @@
+-- An error in a body stops the program, where it happened. Written for --
+-- the simulation tests. --
+
+PROGRAM FAULTY ;
+BEGIN
+        CREATE "worker" ;
+        CREATE "worker" . "load" ;
+        INCLUDE "worker" INTO "PROCESS" ;
+        CREATE "w" [ "worker" ] ;
+        ACTIVATE "w" [ "worker" ] ;
+        HOLD FOR 1 ;
+        PRINT "never"
+END ;
+
+COROUTINE "worker" ;
+BEGIN
+        PRINT THIS . "load"
+END ;

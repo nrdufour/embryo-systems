@@ -51,7 +51,12 @@ function: "FUNCTION"i (module_name | computed_attribute) formal_parameters "RETU
 // with a parameter, or the attribute p(x).
 computed_attribute: STRING "." STRING
 
-coroutine: "COROUTINE"i module_name formal_parameters ";" parameter_specifications locals externals body
+// decision: a process class's BODY is a coroutine (page 112, figure 51:
+// "the class PUMP ... BODY (coroutine)"), named by the class's string, as
+// FUNCTION "ARC"."LENGTH" names a computed attribute's algorithm.
+coroutine: "COROUTINE"i (module_name | process_class) formal_parameters ";" parameter_specifications locals externals body
+
+process_class: STRING
 
 // listing: page 76 names the prefix the functor applies to,
 // FUNCTOR C'COUPLE(D).
@@ -250,8 +255,12 @@ build: "BUILD"i class_list "AS"i class
 process_statement: "ACTIVATE"i object
     | "REACTIVATE"i object ("AT"i expression | "BEFORE"i object | "AFTER"i object)?
     | "CANCEL"i object | "KILL"i object
-    | "DELAY"i object "FOR"i expression | "HOLD"i object "FOR"i expression
+    | "DELAY"i object "FOR"i expression | hold
     | "PASSIVATE"i | "TERMINATE"i
+
+// listing: page 125 holds the current process with HOLD FOR dt; the BNF's
+// object, page 25, is optional, and when given is the current process.
+hold: "HOLD"i object? "FOR"i expression
 
 call: "CHAIN"i module_name | "CALL"i invocation | "RESUME"i invocation
 

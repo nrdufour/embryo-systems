@@ -44,6 +44,7 @@ cargo run -q -- store /tmp/hydro                                   # what the st
   - an interpreter, covering every number type (Gauss integers and quaternions included), fuzzy arithmetic, lists, arrays, modules, functors and coroutines
 - **The HBDS store:** classes, objects, attributes, links and their reverses, states, hyperclasses, every functor of the catalogue, and computed attributes. It is in memory, and made durable by a journal.
 - **COND and ACTION:** the constraints and actions a.d.t. carry run when the a.d.t. changes. A statement is a transaction: it is kept whole, or refused whole.
+- **Discrete simulation:** processes, objects of classes in the hyperclass PROCESS, run their bodies as coroutines, ordered by a sequencing set as in SIMULA 67; the main program's HOLD lets them run, and ACTIVATE, REACTIVATE, CANCEL, DELAY, KILL, PASSIVATE and TERMINATE move them as figure 52 has it.
 - **Expert systems:** rules are objects of classes in the hyperclass RULE, their premises and consequents code compiled when written; CHAV chains them forward, HYPOCHAV from hypotheses, with the print's ten parameters (priority, reliabilities, askability, activation and inhibition among them), and INRULE, OUTRULE, INFACT and OUTFACT walk them.
 - **The polycopié's own code runs:** pages 127-128's computed attributes ARC.LENGTH and AREA.PERIMETER give the right answers on a test schema, once three print errors are corrected.
 
@@ -62,6 +63,7 @@ flowchart LR
     interp --> lists["list engine"]
     interp --> functors["functor engine"]
     interp --> rules["expert systems"]
+    interp --> sim["simulation"]
     gtad -- "each change, through Recorder" --> journal[(journal)]
     grammar["grammar.lark"] -. "the parser builds Lark's tree" .-> parser
 ```
@@ -79,7 +81,10 @@ flowchart BT
     journal --> core
     rules["hbds-rules<br/>expert systems, project 16"] --> gtad
     rules --> core
+    sim["hbds-simulation<br/>simulation, project 17"] --> gtad
+    sim --> core
     adt81["adt81<br/>the language"] --> lists
+    adt81 --> sim
     adt81 --> rules
     adt81 --> functors
     adt81 --> gtad
@@ -95,13 +100,14 @@ flowchart BT
 | `crates/hbds-functors` | the functor engine: the catalogue of pages 76 to 80 |
 | `crates/hbds-journal` | GTAD's persistence, a journal in the spirit of the print's DAYFILE |
 | `crates/hbds-rules` | the expert systems: rules and facts, SES's four functors, CHAV and HYPOCHAV |
+| `crates/hbds-simulation` | the discrete simulation: PROCESS, the sequencing set, figure 52's primitives |
 | `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
 | `src/main.rs` | the `embryo-systems` command |
 
 ## Documentation
 
 - [docs/adt81.md](docs/adt81.md): the language. How the grammar was derived, every departure from the print, the checker, and running.
-- [docs/hbds.md](docs/hbds.md): the engines. The model, inheritance, COND and ACTION, transactions, the expert systems, the journal, open questions.
+- [docs/hbds.md](docs/hbds.md): the engines. The model, inheritance, COND and ACTION, transactions, the expert systems, the simulation, the journal, open questions.
 
 ## Roadmap
 
@@ -109,7 +115,6 @@ The print's other engines, each to be a crate of its own:
 
 | engine | print |
 |---|---|
-| simulation, the processes behind ACTIVATE and HOLD | project 17, page 112 |
 | neurons and reflexes | project 18, pages 116 to 131 |
 | dialog, the Q-Graph | project 19, pages 133 to 149 |
 | constraints: MAY, MUST, CANNOT, and the CONSTRAINT hyperclass | pages 157 to 160 |

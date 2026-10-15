@@ -31,6 +31,7 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-gtad` | the a.d.t. engine (project 12): the model, its changes, lookups, states; persistence behind its `Recorder` trait | core |
 | `hbds-functors` | the functor engine (project 15): the catalogue on a.d.t. and its implementation on GTAD | core, gtad |
 | `hbds-journal` | GTAD's persistence, a `Recorder`: the journal below; SFSI and ZE would be another | core, gtad |
+| `hbds-simulation` | the discrete simulation (project 17): PROCESS, the sequencing set and figure 52's transitions; a language runs the bodies | core, gtad |
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (arithmetic and fuzzy propagation, math functions, what an unknown name means); it wires the engines together | the engines |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal |
@@ -212,6 +213,74 @@ The ten parameters page 106 asks the algorithm to take into account:
 | activation | the "activates" links of a rule that fires |
 | inhibition | its "inhibits" links |
 
+## Simulation
+
+The discrete simulation engine (project 17, pages 112 to 115 and 125),
+SIMULA 67's, which the print names: processes are objects of classes
+included in the system hyperclass PROCESS, created the first time a
+program names it (figure 51). PROCESS has STATE and CLOCK; a process's
+BODY is a coroutine, and its LSC, the "Local Sequence Counter", the place
+the coroutine stopped. A sequencing set orders the processes by the time
+they are due; the engine keeps it, and the time. Decided on 2026-10-15:
+
+- **A class's body is `COROUTINE "PUMP"`**, named by the class's string
+  ([adt81.md](adt81.md), "Decisions"); a class without one inherits its
+  nearest hyperclass's. A body takes no parameters; THIS is the process,
+  and each process has its own locals, its LSC being where its thread
+  stopped.
+- **The main program is a process**, as in SIMULA: it runs first, at time
+  0, and its `HOLD FOR t` lets the others run until it is due again. When
+  it ends, the simulation ends, whatever is still due. It is neither
+  passivated nor terminated: nothing could reactivate it.
+- **`HOLD FOR dt` holds the running process** (page 125); `HOLD x FOR dt`
+  only if x is the one running.
+- **First in, first out among equal times**: a process due when others
+  are goes behind them (page 114, REACTIVATE).
+- **STATE and CLOCK are the engine's while the run lasts**, and LET does
+  not set them. CLOCK is when a process is due while it holds, when it
+  last ran otherwise. A body reads the time as `THIS . "CLOCK"`.
+- **Processes outlive their run, not their sequencing set**: when the main
+  program ends, each process's STATE and CLOCK are stored, one not
+  terminated as PASSIVE; reactivated in a later run, its body starts
+  again from the top. Each run's time starts at 0. Nothing is journalled
+  per event.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Passive: created
+    Passive --> Hold: ACTIVATE, REACTIVATE [AT, BEFORE, AFTER]
+    Hold --> Active: its time comes
+    Active --> Hold: HOLD FOR dt
+    Hold --> Hold: DELAY FOR dt
+    Hold --> Passive: CANCEL
+    Active --> Passive: PASSIVATE
+    Active --> Terminated: TERMINATE, the end of its body
+    Hold --> Terminated: KILL
+    Passive --> Terminated: KILL
+    Terminated --> [*]
+```
+
+Every other move is an error that says which state the process is in.
+The main program holding hands time over:
+
+```mermaid
+sequenceDiagram
+    participant M as main program
+    participant S as sequencing set
+    participant P as fire hydrant
+    participant Q as surpressor
+    M->>S: ACTIVATE both, at 0
+    M->>S: HOLD FOR 10: due at 10
+    S->>P: 0: runs its body
+    P->>S: HOLD FOR 4: due at 4
+    S->>Q: 0: runs its body
+    Q->>S: HOLD FOR 3: due at 3
+    S->>Q: 3: goes on where it held
+    S->>P: 4: goes on where it held
+    Note over S: ... until the main program is due
+    S->>M: 10: goes on after its HOLD
+```
+
 ## The model
 
 The six basic a.d.t. (page 46, figure 6), as the store keeps them: a
@@ -294,7 +363,12 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
   the structure and its prototype.
 - **What associations are for.** ASSOC and DISSOC keep their pairs (page
   24, figure 9's multi-layer system), but no functor reads them yet.
-- Processes (ACTIVATE...) belong to the simulation engine (page 112).
+- **Waiting lists.** PASSIVATE may first put a process in a waiting list
+  (page 114, figure 52's INTO and OUTOF); bodies share no variables, so a
+  list one fills and another empties needs a home the print does not
+  give.
+- **`REACTIVATE ALL x/ ... ENDALL`** (page 125) acts on every process a
+  condition selects; the BNF has no such statement.
 
 ## Files
 
@@ -305,6 +379,8 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `crates/hbds-core` | values, specifications, the vocabulary |
 | `crates/hbds-journal` | the journal's format, recording and replay |
 | `crates/hbds-rules` | the expert systems: the model, the functors, the chaining |
+| `crates/hbds-simulation` | the simulation: PROCESS, the sequencing set |
+| `crates/hbds-simulation/tests/sequencing.rs` | every transition of figure 52, legal and not |
 | `crates/hbds-rules/tests/engine.rs` | the chaining rule by rule, on a fake language |
 | `tools/check_engines.py` | what each crate may depend on |
 | `crates/adt81/src/interp.rs` | the a.d.t. statements and expressions, on the store |

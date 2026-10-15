@@ -181,6 +181,7 @@ fn module(tree: &Tree) -> Lowered<Module> {
     for c in trees(tree) {
         match c.rule {
             R::ModuleName => name = Some(ModuleName::Name(module_name(c))),
+            R::ProcessClass => name = Some(ModuleName::Body(string(&c.children[0]))),
             R::ComputedAttribute => {
                 name = Some(ModuleName::Attribute {
                     class: string(&c.children[0]),
@@ -729,6 +730,12 @@ fn specify(tree: &Tree) -> Lowered<StmtKind> {
 }
 
 fn process(tree: &Tree) -> Lowered<StmtKind> {
+    if let Some(hold) = child(tree, R::Hold) {
+        return Ok(StmtKind::Hold {
+            object: child(hold, R::Object).map(designation).transpose()?,
+            duration: expr(hold.children.last().unwrap())?,
+        });
+    }
     let mut objects = trees_of(tree, R::Object).map(designation);
     let mut next = || objects.next().expect("an object");
     let last = || expr(tree.children.last().unwrap());
@@ -749,10 +756,6 @@ fn process(tree: &Tree) -> Lowered<StmtKind> {
         "CANCEL" => StmtKind::Cancel(next()?),
         "KILL" => StmtKind::Kill(next()?),
         "DELAY" => StmtKind::Delay {
-            object: next()?,
-            duration: last()?,
-        },
-        "HOLD" => StmtKind::Hold {
             object: next()?,
             duration: last()?,
         },

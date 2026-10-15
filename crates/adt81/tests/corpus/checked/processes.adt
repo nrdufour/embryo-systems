@@ -1,0 +1,24 @@
+-- Every primitive of the simulation engine, a process class's body and --
+-- HOLD FOR. Written for the checker's tests. --
+
+PROGRAM SIMULATION ;
+BEGIN
+        CREATE "pump" ;
+        INCLUDE "pump" INTO "PROCESS" ;
+        CREATE "p" [ "pump" ], "q" [ "pump" ] ;
+        ACTIVATE "p" [ "pump" ] ;
+        REACTIVATE "q" [ "pump" ] AT 3 ;
+        DELAY "q" [ "pump" ] FOR 1.5 ;
+        CANCEL "q" [ "pump" ] ;
+        REACTIVATE "q" [ "pump" ] BEFORE "p" [ "pump" ] ;
+        KILL "q" [ "pump" ] ;
+        HOLD FOR 10
+END ;
+
+COROUTINE "pump" ;
+BEGIN
+        HOLD THIS FOR 2 ;
+        HOLD FOR 2 ;
+        PASSIVATE ;
+        TERMINATE
+END ;

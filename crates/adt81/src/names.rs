@@ -621,7 +621,13 @@ impl Resolver<'_> {
                     Some(When::Before(o) | When::After(o)) => self.designation(o),
                 }
             }
-            StmtKind::Delay { object, duration } | StmtKind::Hold { object, duration } => {
+            StmtKind::Hold { object, duration } => {
+                if let Some(o) = object {
+                    self.designation(o);
+                }
+                self.expr(duration);
+            }
+            StmtKind::Delay { object, duration } => {
                 self.designation(object);
                 self.expr(duration);
             }
