@@ -2,6 +2,8 @@
 name = "hbds-functors"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
+license.workspace = true
 
 # The functor engine (project 15, pages 71 to 84), on GTAD.
 [dependencies]

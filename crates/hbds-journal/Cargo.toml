@@ -2,6 +2,8 @@
 name = "hbds-journal"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
+license.workspace = true
 
 # Persistence of GTAD (project 13 is SFSI and ZE; this is the journal).
 [dependencies]

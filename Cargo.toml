@@ -9,10 +9,16 @@ members = [
 ]
 resolver = "3"
 
+[workspace.package]
+rust-version = "1.88"
+license = "MIT"
+
 [package]
 name = "embryo-systems"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 adt81 = { path = "crates/adt81" }

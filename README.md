@@ -12,7 +12,11 @@ is `embryo-systems.info`.
 
 ## Quick start
 
-`direnv allow` once (Nix flake), then:
+With Nix, `direnv allow` once, or `nix develop`: the flake carries every
+tool. Without it, a Rust toolchain of 1.88 or later (edition 2024, let-chains) builds
+and tests everything; the grammar gate also needs Python 3 with
+[Lark](https://github.com/lark-parser/lark), and the recipes
+[just](https://github.com/casey/just). Then:
 
 ```sh
 cargo run -q -- run crates/adt81/tests/corpus/run/hello.adt      # Hello, world!
@@ -110,7 +114,7 @@ The print's other engines, each to be a crate of its own:
 
 ## Develop
 
-The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs:
+The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs, on Forgejo where the project lives and on its GitHub mirror alike:
 
 - formatting and clippy
 - every test
@@ -118,3 +122,9 @@ The flake's dev shell, loaded by direnv, carries every tool, and `just` lists th
 - `just engines`: each crate depends only on what it may
 - `just docs`: every path and link in the documentation exists
 - the confusable-characters check
+
+## License
+
+The code is under the MIT license ([LICENSE](LICENSE)). The polycopié,
+its text, figures and code listings, is François Bouillé's: this
+repository quotes and cites it, page by page, and does not reproduce it.

@@ -45,8 +45,8 @@
             rustfmt
             rust-analyzer
             just # the task runner; `just` alone lists every recipe
-            tea # forge.internal PRs and issues (see the create-pr skill)
-            forgejo-cli # `fj`: same forge, the other CLI
+            tea # the Forgejo forge's CLI, for pull requests and issues
+            forgejo-cli # `fj`: the forge's other CLI
             nixfmt
             (python3.withPackages (ps: [ ps.lark ])) # tools/check_grammar.py
           ];

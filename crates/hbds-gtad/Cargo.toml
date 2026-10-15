@@ -2,6 +2,8 @@
 name = "hbds-gtad"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
+license.workspace = true
 
 # The a.d.t. model, GTAD (project 12, pages 45 to 48).
 [dependencies]

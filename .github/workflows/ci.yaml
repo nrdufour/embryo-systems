@@ -1,0 +1,24 @@
+name: ci
+
+# The GitHub mirror's CI: the same single definition of what passes as on
+# Forgejo (.forgejo/workflows), `just check` in the flake's shell, so that
+# pull requests here are checked too. The toolchain comes from the flake;
+# only the actions that install Nix are named here.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Check
+        run: nix develop --command just check
