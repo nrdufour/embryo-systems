@@ -1,20 +1,23 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use embryo_systems::adt81::{lexer, lower, parser};
+use embryo_systems::adt81::diagnostic::Severity;
+use embryo_systems::adt81::{lexer, lower, names, parser};
 
 const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE
        embryo-systems fmt [--program | --fragment] FILE
+       embryo-systems check FILE
 
 FILE - reads standard input. parse prints the syntax tree, fmt the source
-in canonical form; both read a program unless told --fragment.";
+in canonical form; both read a program unless told --fragment. check
+reports undeclared and misused names in a program, and fails on errors.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let (command, fragment, path) = match args.as_slice() {
-        ["lex", path] => ("lex", false, *path),
+        [command @ ("lex" | "check"), path] => (*command, false, *path),
         [command @ ("parse" | "fmt"), "--program", path] | [command @ ("parse" | "fmt"), path] => {
             (*command, false, *path)
         }
@@ -37,23 +40,42 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // Whether the source passes: only `check` can fail on a source it reads.
     let result = if command == "lex" {
         lexer::tokenize(&source).map(|tokens| {
             for t in tokens {
                 println!("{}:{}\t{:?}\t{}", t.line, t.column, t.kind, t.text);
             }
+            true
+        })
+    } else if command == "check" {
+        lower::parse_program(&source).map(|program| {
+            let diagnostics = names::resolve(&program).diagnostics;
+            for d in &diagnostics {
+                println!("{path}:{d}");
+            }
+            diagnostics.iter().all(|d| d.severity != Severity::Error)
         })
     } else if command == "fmt" && fragment {
-        lower::parse_fragment(&source).map(|ast| print!("{ast}"))
+        lower::parse_fragment(&source)
+            .map(|ast| print!("{ast}"))
+            .map(|_| true)
     } else if command == "fmt" {
-        lower::parse_program(&source).map(|ast| print!("{ast}"))
+        lower::parse_program(&source)
+            .map(|ast| print!("{ast}"))
+            .map(|_| true)
     } else if fragment {
-        parser::parse_fragment(&source).map(|tree| print!("{tree}"))
+        parser::parse_fragment(&source)
+            .map(|tree| print!("{tree}"))
+            .map(|_| true)
     } else {
-        parser::parse_program(&source).map(|tree| print!("{tree}"))
+        parser::parse_program(&source)
+            .map(|tree| print!("{tree}"))
+            .map(|_| true)
     };
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
         Err(e) => {
             eprintln!("{path}:{e}");
             ExitCode::FAILURE

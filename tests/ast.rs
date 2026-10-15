@@ -72,12 +72,12 @@ fn round_trip_fragment(fragment: &Fragment, what: &str) {
 #[test]
 fn corpus_round_trips() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/adt81");
-    for dir in ["programs", "fragments"] {
+    for dir in ["programs", "checked", "fragments"] {
         for entry in fs::read_dir(root.join(dir)).unwrap() {
             let path = entry.unwrap().path();
             let source = fs::read_to_string(&path).unwrap();
             let what = path.display().to_string();
-            if dir == "programs" {
+            if dir != "fragments" {
                 let program = lower::parse_program(&source).unwrap();
                 round_trip_program(&program, &what);
             } else {
