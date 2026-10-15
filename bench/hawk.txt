@@ -1,31 +1,32 @@
 # Benchmarks on hawk: the median of 3 runs, in milliseconds; growth
-# is a size's time over the one before (x2 linear, x4 quadratic).
+# is a size's time over the one before (x2 linear, x4 quadratic). The
+# work done is in bench/work.txt.
 # The print's scale, the target (decision 12): a million objects for the
 # store and functors, ten thousand rules over a hundred thousand facts for
 # chav, a hundred thousand processes and a million events for simulation.
 
-scenario       size       ms growth statements  changes  lookups     scanned      copied
-store           500     69.0      -       1505     1002     4507      378255      252001
-store          1000    278.1   x4.0       3005     2002     9007     1506505     1004001
-store          2000   1177.9   x4.2       6005     4002    18007     6013005     4008001
-store          4000   5022.7   x4.3      12005     8002    36007    24026005    16016001
-lookup          500     79.2      -       2507     1002     7003      630251      252001
-lookup         1000    328.1   x4.1       5007     2002    14003     2510501     1004001
-lookup         2000   1365.1   x4.2      10007     4002    28003    10021001     4008001
-lookup         4000   5909.5   x4.3      20007     8002    56003    40042001    16016001
-functors        125     24.6      -       1132      629     4136      237763      182380
-functors        250     93.1   x3.8       2257     1254     8261      944263      724130
-functors        500    387.2   x4.2       4507     2504    16511     3763513     2885755
-functors       1000   1641.6   x4.2       9007     5004    33011    15027013    11521505
-chav            125     40.1      -       1384      889    20672      264986      100907
-chav            250    152.9   x3.8       2759     1764    72547     1045486      389282
-chav            500    631.7   x4.1       5509     3514   270047     4153361     1528532
-chav           1000   2639.3   x4.2      11009     7014  1040047    16556611     6057032
-simulation       50     35.9      -       2257     1206     4914       17538       58004
-simulation      100    115.6   x3.2       4507     2406     9814       47563      221004
-simulation      200    543.2   x4.7       9007     4806    19614      145113      862004
-simulation      400   2132.9   x3.9      18007     9606    39214      490213     3404004
-language     125000    308.9      -     312506        0        0           0           0
-language     250000    612.5   x2.0     625006        0        0           0           0
-language     500000   1242.5   x2.0    1250006        0        0           0           0
-language    1000000   2622.8   x2.1    2500006        0        0           0           0
+scenario       size       ms growth
+store           500     69.0      -
+store          1000    278.1   x4.0
+store          2000   1177.9   x4.2
+store          4000   5022.7   x4.3
+lookup          500     79.2      -
+lookup         1000    328.1   x4.1
+lookup         2000   1365.1   x4.2
+lookup         4000   5909.5   x4.3
+functors        125     24.6      -
+functors        250     93.1   x3.8
+functors        500    387.2   x4.2
+functors       1000   1641.6   x4.2
+chav            125     40.1      -
+chav            250    152.9   x3.8
+chav            500    631.7   x4.1
+chav           1000   2639.3   x4.2
+simulation       50     35.9      -
+simulation      100    115.6   x3.2
+simulation      200    543.2   x4.7
+simulation      400   2132.9   x3.9
+language     125000    308.9      -
+language     250000    612.5   x2.0
+language     500000   1242.5   x2.0
+language    1000000   2622.8   x2.1

@@ -35,7 +35,7 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (arithmetic and fuzzy propagation, math functions, what an unknown name means); it wires the engines together | the engines |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal |
-| `embryo-systems-bench` | the benchmarks, `just bench`: the programs of `bench/scenarios` on a ladder of sizes, against `bench/<host>.txt` | adt81, gtad |
+| `embryo-systems-bench` | the benchmarks, `just bench`: the programs of `bench/scenarios` on a ladder of sizes, against `bench/work.txt` and `bench/<host>.txt` | adt81, gtad |
 
 The rules: an engine depends on the core and on as few engines as it
 needs, never on a language; a language never on another language.

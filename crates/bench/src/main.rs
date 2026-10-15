@@ -1,9 +1,11 @@
 //! The benchmarks (docs/architecture.md, decision 12): each scenario of
 //! `bench/scenarios` run on a ladder of sizes, its input generated here,
 //! its output checked, the median of a few runs kept with the work counted
-//! beside it. Compared against `bench/<host>.txt` when this host has one:
-//! a time more than 15% off fails, slower or faster, so that a change of
-//! speed is recorded on purpose. `--record` writes the file.
+//! beside it. The work is the same on every host, and must match
+//! `bench/work.txt` exactly; the times are compared against
+//! `bench/<host>.txt` when this host has one, and one more than 15% off
+//! fails, slower or faster. Either way a change is recorded on purpose:
+//! `--record` writes both files.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -183,65 +185,79 @@ fn host() -> String {
         .unwrap_or_else(|_| "unknown".into())
 }
 
-fn header() -> String {
+fn time_header() -> String {
     format!(
-        "{:<10} {:>8} {:>8} {:>6} {:>10} {:>8} {:>8} {:>11} {:>11}",
-        "scenario", "size", "ms", "growth", "statements", "changes", "lookups", "scanned", "copied"
+        "{:<10} {:>8} {:>8} {:>6}",
+        "scenario", "size", "ms", "growth"
+    )
+}
+
+fn work_header() -> String {
+    format!(
+        "{:>10} {:>8} {:>8} {:>11} {:>11}",
+        "statements", "changes", "lookups", "scanned", "copied"
     )
 }
 
 fn line(name: &str, n: u64, m: &Measure, growth: Option<f64>) -> String {
+    format!("{} {}", time_line(name, n, m, growth), work_columns(m))
+}
+
+fn time_line(name: &str, n: u64, m: &Measure, growth: Option<f64>) -> String {
     let growth = growth.map_or("-".into(), |g| format!("x{g:.1}"));
+    format!("{name:<10} {n:>8} {:>8.1} {growth:>6}", m.ms)
+}
+
+fn work_columns(m: &Measure) -> String {
     let w = &m.work;
     format!(
-        "{name:<10} {n:>8} {:>8.1} {growth:>6} {:>10} {:>8} {:>8} {:>11} {:>11}",
-        m.ms, m.statements, w.changes, w.lookups, w.scanned, w.copied
+        "{:>10} {:>8} {:>8} {:>11} {:>11}",
+        m.statements, w.changes, w.lookups, w.scanned, w.copied
     )
 }
 
-/// A results file: each line's measure, by scenario and size.
-fn parse(text: &str) -> Result<BTreeMap<(String, u64), Measure>, String> {
+type Key = (String, u64);
+
+/// A results file's lines, by scenario and size, their fields after those
+/// two; `width` fields to a line.
+fn parse(text: &str, width: usize) -> Result<BTreeMap<Key, Vec<String>>, String> {
     let mut out = BTreeMap::new();
     for (i, l) in text.lines().enumerate() {
         let f: Vec<&str> = l.split_whitespace().collect();
-        if f.is_empty() || f[0].starts_with('#') || l.starts_with("scenario ") {
+        if f.is_empty() || f[0].starts_with('#') || f[0] == "scenario" {
             continue;
         }
         let bad = || format!("line {}: {l:?}", i + 1);
-        let [name, n, ms, _, st, ch, lk, sc, cp] = f[..] else {
+        let n = f.get(1).and_then(|n| n.parse().ok()).ok_or_else(bad)?;
+        if f.len() != width {
             return Err(bad());
-        };
-        let num = |s: &str| s.parse::<u64>().map_err(|_| bad());
-        let work = Work {
-            changes: num(ch)?,
-            lookups: num(lk)?,
-            scanned: num(sc)?,
-            copied: num(cp)?,
-        };
-        let m = Measure {
-            ms: ms.parse().map_err(|_| bad())?,
-            statements: num(st)?,
-            work,
-        };
-        out.insert((name.to_string(), num(n)?), m);
+        }
+        let rest = f[2..].iter().map(|s| s.to_string()).collect();
+        out.insert((f[0].to_string(), n), rest);
     }
     Ok(out)
 }
 
 /// What changed in the work, said briefly; empty when nothing did.
-fn work_delta(was: &Measure, is: &Measure) -> String {
-    let pairs = [
-        ("statements", was.statements, is.statements),
-        ("changes", was.work.changes, is.work.changes),
-        ("lookups", was.work.lookups, is.work.lookups),
-        ("scanned", was.work.scanned, is.work.scanned),
-        ("copied", was.work.copied, is.work.copied),
-    ];
-    (pairs.iter())
-        .filter(|(_, a, b)| a != b)
-        .map(|(k, a, b)| format!("{k} {a} -> {b}"))
+fn work_delta(was: &[String], is: &Measure) -> String {
+    let names = ["statements", "changes", "lookups", "scanned", "copied"];
+    let now = work_columns(is);
+    (names.iter().zip(was).zip(now.split_whitespace()))
+        .filter(|((_, a), b)| a.as_str() != *b)
+        .map(|((k, a), b)| format!("{k} {a} -> {b}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// A results file, or none; a file that does not parse is an error.
+fn read(path: &PathBuf, width: usize) -> Result<Option<BTreeMap<Key, Vec<String>>>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => parse(&text, width)
+            .map(Some)
+            .map_err(|e| format!("{}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
 }
 
 fn main() -> ExitCode {
@@ -253,26 +269,37 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let host = host();
-    let file = root().join(format!("{host}.txt"));
-    let recorded = match std::fs::read_to_string(&file) {
-        Ok(text) if !record => match parse(&text) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                eprintln!("{}: {e}", file.display());
-                return ExitCode::FAILURE;
-            }
-        },
-        _ => None,
+    let times_file = root().join(format!("{host}.txt"));
+    let work_file = root().join("work.txt");
+    let (times, work) = match (read(&times_file, 4), read(&work_file, 7)) {
+        _ if record => (None, None),
+        (Ok(t), Ok(w)) => (t, w),
+        (Err(e), _) | (_, Err(e)) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
     };
-    let mut table = format!(
+    let intro = format!(
         "# Benchmarks on {host}: the median of {RUNS} runs, in milliseconds; growth\n\
-         # is a size's time over the one before (x2 linear, x4 quadratic).\n\
+         # is a size's time over the one before (x2 linear, x4 quadratic). The\n\
+         # work done is in bench/work.txt.\n\
          {TARGET}\n\n{}\n",
-        header()
+        time_header()
     );
-    print!("{table}");
+    let mut time_table = intro;
+    let mut work_table = format!(
+        "# The work each benchmark does, the same on every host, gated exactly:\n\
+         # statements executed, and the store's changes, lookups, items its\n\
+         # lookups scanned and items its transactions' snapshots copied.\n\n\
+         {:<10} {:>8} {}\n",
+        "scenario",
+        "size",
+        work_header()
+    );
+    println!("{} {}", time_header(), work_header());
     let mut failures = Vec::new();
-    // A time off, or a size not recorded: what recording again settles.
+    // What recording again settles: a time off, a change of work, a size
+    // not recorded.
     let mut stale = false;
     for s in SCENARIOS {
         if !only.is_empty() && !only.iter().any(|o| *o == s.name) {
@@ -295,47 +322,56 @@ fn main() -> ExitCode {
                     break;
                 }
             };
-            let l = line(s.name, n, &m, before.map(|b| m.ms / b));
-            println!("{l}");
-            table.push_str(&l);
-            table.push('\n');
+            let growth = before.map(|b| m.ms / b);
             before = Some(m.ms);
-            let Some(recorded) = &recorded else { continue };
-            let Some(was) = recorded.get(&(s.name.to_string(), n)) else {
+            println!("{}", line(s.name, n, &m, growth));
+            writeln!(time_table, "{}", time_line(s.name, n, &m, growth)).unwrap();
+            writeln!(work_table, "{:<10} {n:>8} {}", s.name, work_columns(&m)).unwrap();
+            let key = (s.name.to_string(), n);
+            if let Some(work) = &work {
+                match work.get(&key) {
+                    None => {
+                        failures.push(format!("{} {n}: not in bench/work.txt", s.name));
+                        stale = true;
+                    }
+                    Some(was) => {
+                        let delta = work_delta(was, &m);
+                        if !delta.is_empty() {
+                            failures.push(format!("{} {n}: the work changed: {delta}", s.name));
+                            stale = true;
+                        }
+                    }
+                }
+            }
+            let Some(times) = &times else { continue };
+            let Some(was) = times.get(&key) else {
                 failures.push(format!("{} {n}: not in bench/{host}.txt", s.name));
                 stale = true;
                 continue;
             };
-            let delta = work_delta(was, &m);
-            let ratio = m.ms / was.ms;
-            if was.ms >= FLOOR_MS && (ratio - 1.0).abs() > MARGIN {
+            let was: f64 = was[0].parse().unwrap_or(f64::NAN);
+            let ratio = m.ms / was;
+            if was >= FLOOR_MS && (ratio - 1.0).abs() > MARGIN {
                 stale = true;
                 let way = if ratio > 1.0 { "slower" } else { "faster" };
-                let why = if delta.is_empty() {
-                    "the same work".to_string()
-                } else {
-                    delta
-                };
                 failures.push(format!(
-                    "{} {n}: {:.1} ms, was {:.1}: {:.0}% {way}; {why}",
+                    "{} {n}: {:.1} ms, was {was:.1}: {:.0}% {way}",
                     s.name,
                     m.ms,
-                    was.ms,
                     (ratio - 1.0).abs() * 100.0
                 ));
-            } else if !delta.is_empty() {
-                println!("  work changed: {delta}");
             }
         }
     }
     if record {
-        if let Err(e) = std::fs::write(&file, &table) {
-            failures.push(format!("{}: {e}", file.display()));
-        } else {
-            println!("\nrecorded in bench/{host}.txt");
+        for (path, table) in [(&times_file, &time_table), (&work_file, &work_table)] {
+            if let Err(e) = std::fs::write(path, table) {
+                failures.push(format!("{}: {e}", path.display()));
+            }
         }
-    } else if recorded.is_none() {
-        println!("\nno bench/{host}.txt: printed, not compared");
+        println!("\nrecorded in bench/{host}.txt and bench/work.txt");
+    } else if times.is_none() {
+        println!("\nno bench/{host}.txt: the times printed, not compared");
     }
     if failures.is_empty() {
         return ExitCode::SUCCESS;
@@ -346,7 +382,8 @@ fn main() -> ExitCode {
     }
     if stale {
         eprintln!(
-            "a change on purpose: `just bench-record` on {host}, and commit bench/{host}.txt"
+            "a change on purpose: `just bench-record`, and commit bench/work.txt and \
+             bench/{host}.txt; the runner's times are those its CI run prints"
         );
     }
     ExitCode::FAILURE

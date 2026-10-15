@@ -1,0 +1,29 @@
+# The work each benchmark does, the same on every host, gated exactly:
+# statements executed, and the store's changes, lookups, items its
+# lookups scanned and items its transactions' snapshots copied.
+
+scenario       size statements  changes  lookups     scanned      copied
+store           500       1505     1002     4507      378255      252001
+store          1000       3005     2002     9007     1506505     1004001
+store          2000       6005     4002    18007     6013005     4008001
+store          4000      12005     8002    36007    24026005    16016001
+lookup          500       2507     1002     7003      630251      252001
+lookup         1000       5007     2002    14003     2510501     1004001
+lookup         2000      10007     4002    28003    10021001     4008001
+lookup         4000      20007     8002    56003    40042001    16016001
+functors        125       1132      629     4136      237763      182380
+functors        250       2257     1254     8261      944263      724130
+functors        500       4507     2504    16511     3763513     2885755
+functors       1000       9007     5004    33011    15027013    11521505
+chav            125       1384      889    20672      264986      100907
+chav            250       2759     1764    72547     1045486      389282
+chav            500       5509     3514   270047     4153361     1528532
+chav           1000      11009     7014  1040047    16556611     6057032
+simulation       50       2257     1206     4914       17538       58004
+simulation      100       4507     2406     9814       47563      221004
+simulation      200       9007     4806    19614      145113      862004
+simulation      400      18007     9606    39214      490213     3404004
+language     125000     312506        0        0           0           0
+language     250000     625006        0        0           0           0
+language     500000    1250006        0        0           0           0
+language    1000000    2500006        0        0           0           0

@@ -307,11 +307,14 @@ growth from one to the next printed: today x4 everywhere but the
 language, since every statement's transaction copies the whole model and
 every lookup scans. The work counted is the statements executed, and the
 store's changes, lookups, items scanned and items its snapshots copied.
-Results are per host, `bench/<hostname>.txt`, wall time meaning nothing
-across machines; the runner's file is the gate, and a host without one
-only prints. Times under 100 ms are not gated, noise being most of them.
-A change of work alone is printed, not failed: an extra lookup per CREATE,
-planted, scanned a third more and cost 7% of the time, under the margin.
+The work is the same on every host and gates exactly, on every host,
+against `bench/work.txt`: an extra lookup per CREATE, planted, scanned a
+third more and cost only 7% of the time, under the margin. Times are per
+host, `bench/<hostname>.txt`, wall time meaning nothing across machines;
+the runner's file is the gate, and a host without one only prints them.
+Times under 100 ms are not gated, noise being most of them. `just
+bench-record` writes the work and this host's times; the runner's times
+are copied from what its CI run prints.
 
 ## The order
 
