@@ -1,9 +1,9 @@
-d starts at 0.0
+d[worker] starts at 0.0
 PASSIVE
-b starts at 2.0
-d resumes at 4.0
-c starts at 5.0
-d ends at 5.0
+b[worker] starts at 2.0
+d[worker] resumes at 4.0
+c[worker] starts at 5.0
+d[worker] ends at 5.0
 PASSIVE PASSIVE PASSIVE TERMINATED TERMINATED
-q quits
+q[quitter] quits
 TERMINATED

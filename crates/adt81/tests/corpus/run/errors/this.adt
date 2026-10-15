@@ -1,0 +1,6 @@
+-- Runtime error: THIS in the main program stands for nothing. --
+
+PROGRAM E ;
+BEGIN
+        PRINT THIS
+END ;

@@ -36,6 +36,14 @@ pub const FUNCTIONS: &[&str] = &[
     "SQRT", "ABS", "EXP", "LN", "SIN", "COS", "TAN", "ATAN", "FLOOR", "CEIL", "ROUND",
 ];
 
+/// Names of values ADT'81 knows: TIME, the simulation's (SIMULA's
+/// `time`), which a variable of that name hides. Ours, not the print's.
+pub const VALUES: &[&str] = &["TIME"];
+
+pub fn is_value(key: &str) -> bool {
+    VALUES.contains(&key)
+}
+
 pub fn is_function(key: &str) -> bool {
     FUNCTIONS.contains(&key)
 }

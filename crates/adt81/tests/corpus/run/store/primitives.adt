@@ -7,12 +7,8 @@ PROGRAM PRIMITIVES ;
 BEGIN
         CREATE "worker", "quitter" ;
         INCLUDE "worker", "quitter" INTO "PROCESS" ;
-        CREATE "worker" . "tag", "quitter" . "tag" ;
         CREATE "a" [ "worker" ], "b" [ "worker" ], "c" [ "worker" ],
                "d" [ "worker" ], "e" [ "worker" ], "q" [ "quitter" ] ;
-        LET "a" [ "worker" ] . "tag" := "a" ; LET "b" [ "worker" ] . "tag" := "b" ;
-        LET "c" [ "worker" ] . "tag" := "c" ; LET "d" [ "worker" ] . "tag" := "d" ;
-        LET "q" [ "quitter" ] . "tag" := "q" ;
         REACTIVATE "a" [ "worker" ] AT 2 ;
         REACTIVATE "b" [ "worker" ] BEFORE "a" [ "worker" ] ;
         REACTIVATE "c" [ "worker" ] AFTER "b" [ "worker" ] ;
@@ -35,16 +31,16 @@ END ;
 
 COROUTINE "worker" ;
 BEGIN
-        PRINT THIS . "tag", "starts at", THIS . "CLOCK" ;
+        PRINT THIS, "starts at", TIME ;
         PASSIVATE ;
-        PRINT THIS . "tag", "resumes at", THIS . "CLOCK" ;
+        PRINT THIS, "resumes at", TIME ;
         HOLD FOR 1 ;
-        PRINT THIS . "tag", "ends at", THIS . "CLOCK"
+        PRINT THIS, "ends at", TIME
 END ;
 
 COROUTINE "quitter" ;
 BEGIN
-        PRINT THIS . "tag", "quits" ;
+        PRINT THIS, "quits" ;
         TERMINATE ;
-        PRINT THIS . "tag", "never"
+        PRINT THIS, "never"
 END ;

@@ -1077,6 +1077,7 @@ fn expr(node: &Node) -> Lowered<Expr> {
             ExprKind::Multiple(values)
         }
         R::BooleanConstant => ExprKind::Boolean(keyword(tree) == "TRUE"),
+        R::This => ExprKind::This,
         R::Variable => ExprKind::Variable(variable(tree)?),
         R::FunctionCall => ExprKind::Call(Call {
             name: module_name(the(tree, R::ModuleName)),

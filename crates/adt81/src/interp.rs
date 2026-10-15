@@ -1358,6 +1358,10 @@ impl Machine {
     // Expressions
 
     fn read(&self, v: &Variable, f: &mut Frame) -> Exec<Value> {
+        // TIME, the simulation's, unless a variable of that name hides it.
+        if v.name.key == "TIME" && v.indices.is_empty() && self.var(&v.name, f).is_err() {
+            return Ok(Value::exact(Scalar::Float(self.sim.lock().unwrap().now())));
+        }
         let s = self.var(&v.name, f)?;
         let indices = v
             .indices
@@ -1412,6 +1416,12 @@ impl Machine {
                 }))
             }
             ExprKind::Boolean(b) => Ok(Value::boolean(*b)),
+            ExprKind::This => f.this.map(Value::Adt).ok_or_else(|| {
+                error(
+                    e.span,
+                    "THIS is the object a computed attribute, a COND, a rule or a process runs for",
+                )
+            }),
             ExprKind::Variable(v) => self.read(v, f),
             ExprKind::Call(c) => self.function(c, f, e.span),
             ExprKind::Unary(op, x) => {

@@ -399,6 +399,7 @@ impl Gen {
         match self.0.below(if depth == 0 { 5 } else { 9 }) {
             0 => ExprKind::Number(self.fuzzy_number()),
             1 => ExprKind::String(self.string()),
+            2 if self.0.one_in(4) => ExprKind::This,
             2 => ExprKind::Boolean(self.0.one_in(2)),
             3 | 4 => ExprKind::Variable(self.variable(0)),
             5 => ExprKind::Variable(self.variable(inner)),

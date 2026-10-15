@@ -1,0 +1,18 @@
+-- TIME is the simulation's, 0 before anything holds; a variable of that --
+-- name hides it. Written for the simulation tests. --
+
+PROGRAM CLOCKS ;
+BEGIN
+        PRINT TIME ;
+        HOLD FOR 2.5 ;
+        PRINT TIME ;
+        CALL HIDE
+END ;
+
+SUBROUTINE HIDE ;
+LOCAL
+        TIME : INTEGER ;
+BEGIN
+        TIME := 7 ;
+        PRINT TIME
+END ;

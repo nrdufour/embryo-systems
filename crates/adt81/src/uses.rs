@@ -88,7 +88,8 @@ impl Walk {
             ExprKind::Number(_)
             | ExprKind::Multiple(_)
             | ExprKind::String(_)
-            | ExprKind::Boolean(_) => {}
+            | ExprKind::Boolean(_)
+            | ExprKind::This => {}
             ExprKind::Variable(v) => v.indices.iter().for_each(|i| self.expr(i)),
             ExprKind::Call(c) => c.args.iter().for_each(|a| self.expr(a)),
             ExprKind::Unary(_, x) => self.expr(x),

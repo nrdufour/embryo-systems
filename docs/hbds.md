@@ -238,7 +238,8 @@ they are due; the engine keeps it, and the time. Decided on 2026-10-15:
   are goes behind them (page 114, REACTIVATE).
 - **STATE and CLOCK are the engine's while the run lasts**, and LET does
   not set them. CLOCK is when a process is due while it holds, when it
-  last ran otherwise. A body reads the time as `THIS . "CLOCK"`.
+  last ran otherwise. Any module reads the time as `TIME`, 0 before
+  anything holds; a body names its process as THIS, `PRINT THIS`.
 - **Processes outlive their run, not their sequencing set**: when the main
   program ends, each process's STATE and CLOCK are stored, one not
   terminated as PASSIVE; reactivated in a later run, its body starts

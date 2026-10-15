@@ -327,6 +327,8 @@ pub enum ExprKind {
     Attribute(Box<Designation>, Box<AdtName>),
     /// Whether two objects are linked, `THIS "retro" a`.
     Link(Box<Designation>, Str, Box<Designation>),
+    /// The object THIS stands for.
+    This,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -280,6 +280,7 @@ impl Resolver<'_> {
                 let message = format!("`{}` is a {kind}, not a variable", n.spelling);
                 self.error(n.span, message);
             }
+            None if builtins::is_value(&n.key) => {}
             None if self.undeclared.insert(n.key.clone()) => {
                 let message = format!("undeclared name `{}`", n.spelling);
                 self.error(n.span, message);
@@ -406,7 +407,8 @@ impl Resolver<'_> {
             ExprKind::Number(_)
             | ExprKind::Multiple(_)
             | ExprKind::String(_)
-            | ExprKind::Boolean(_) => {}
+            | ExprKind::Boolean(_)
+            | ExprKind::This => {}
             ExprKind::Variable(v) => self.indexed(v),
             ExprKind::Call(c) => self.call(c, Kind::Function),
             ExprKind::Unary(_, operand) => self.expr(operand),
