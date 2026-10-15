@@ -56,6 +56,11 @@ Taken on 2026-10-15:
   replays its journal through the same code that recorded it. A last line
   cut short by a crash is dropped, with a warning; a corrupt line elsewhere
   stops the opening, naming the line. Compaction is for later.
+- **One opening at a time.** An open store holds a lock on `DIR/lock`, so
+  a second run, or `store DIR`, on it is refused instead of writing the
+  same journal. The system releases the lock when the process ends, even
+  in a crash, so there is no stale lock to clear. The lock is a file of
+  its own because compaction will replace the journal with a new file.
 - **Lifetime: `run FILE` uses a store that lasts the run; `run --store DIR
   FILE` opens, or creates, a persistent one**, so that what a program
   builds is there for the next. `embryo-systems store DIR` prints what a
@@ -386,4 +391,4 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `tools/check_engines.py` | what each crate may depend on |
 | `crates/adt81/src/interp.rs` | the a.d.t. statements and expressions, on the store |
 | `crates/adt81/tests/corpus/run/store/` | programs on the store, with their expected output |
-| `crates/adt81/tests/store.rs` | the store across runs, a torn journal, a corrupt one, a refused change, code in another language |
+| `crates/adt81/tests/store.rs` | the store across runs, a torn journal, a corrupt one, a store already open, a refused change, code in another language |

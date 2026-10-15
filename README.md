@@ -13,7 +13,7 @@ is `embryo-systems.info`.
 ## Quick start
 
 With Nix, `direnv allow` once, or `nix develop`: the flake carries every
-tool. Without it, a Rust toolchain of 1.88 or later (edition 2024, let-chains) builds
+tool. Without it, a Rust toolchain of 1.89 or later (edition 2024, let-chains, file locks) builds
 and tests everything; the grammar gate also needs Python 3 with
 [Lark](https://github.com/lark-parser/lark), and the recipes
 [just](https://github.com/casey/just). Then:

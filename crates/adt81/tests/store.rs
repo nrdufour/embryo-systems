@@ -1,6 +1,7 @@
 //! The store across runs: a program builds a schema in a directory, a
 //! second run, on a store opened afresh, reads it back; a journal cut short
-//! by a crash loses only its last line; a corrupt one says where.
+//! by a crash loses only its last line; a corrupt one says where; a store
+//! open once cannot be opened again until it is closed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -121,6 +122,26 @@ fn a_torn_last_line_is_dropped() {
     let (store, warnings) = open(&dir);
     assert!(warnings.is_empty(), "{warnings:?}");
     assert!(store.lock().unwrap().dump().contains("object Vienne"));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_open_store_is_refused() {
+    let dir = directory("locked");
+    let (store, _) = open(&dir);
+    run(BUILD, &store);
+    let before = fs::read(dir.join("journal")).unwrap();
+    let error = journal::open(&dir).err().expect("a store in use").0;
+    assert_eq!(
+        error,
+        format!("{}: the store is in use by another run", dir.display())
+    );
+    // The refused opening touched nothing.
+    assert_eq!(fs::read(dir.join("journal")).unwrap(), before);
+    drop(store);
+    let (store, warnings) = open(&dir);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(run(READ, &store), READ_OUT);
     let _ = fs::remove_dir_all(&dir);
 }
 
