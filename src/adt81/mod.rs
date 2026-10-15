@@ -10,3 +10,5 @@ pub mod names;
 pub mod parser;
 pub mod print;
 pub mod sample;
+pub mod typeck;
+pub mod types;

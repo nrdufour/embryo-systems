@@ -1,0 +1,23 @@
+-- Page 152's four aspects of fuzziness in one module: written to check clean. --
+
+SUBROUTINE MEASURES (U, V) ;
+        U : FLOAT APPR INOUT ;
+        V : FLOAT FUZZY IN ;
+LOCAL
+        X, Y, Z : FLOAT APPR ;
+        P, Q : FLOAT PROB ;
+        S, T : FLOAT SUBJ ;
+        M, N : FLOAT MULT ;
+        W : FLOAT APPR PROB SUBJ MULT ;
+        K : INTEGER ;
+BEGIN
+        X := 273.25 +- 0.22 ; Y := 122.34 +- 0.31 ;
+        Z := X * Y ;
+        P := 23.12 % 0.01 ; Q := P + 35.34 % 0.23 ;
+        S := 31.45 @"doubtful" ; T := S * 12.87 @"not expected" ;
+        M := { 25.3, 25.7, 25.4 } ; N := M * { 12.5, 12.6 } ;
+        W := Z + Q + T + N + V ;
+        U := U + X ;
+        K := 3 ;
+        Z := K * 2.0
+END ;
