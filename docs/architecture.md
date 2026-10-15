@@ -1,0 +1,326 @@
+# Architecture
+
+How embryo-systems runs, as opposed to what it runs: the layers, what
+each owns, and the decisions that shape them. [adt81.md](adt81.md) is the
+language and [hbds.md](hbds.md) the engines; this page is how they are
+put to work. Decided on 2026-10-15, point by point; a change to any of it
+is recorded here, with its date.
+
+## Why
+
+Today `embryo-systems run` parses a file, replays the journal, walks the
+syntax tree and exits: one program, one process. HBDS is meant to be two
+things at once, and the print is both:
+
+- **A long-lived system**, a kernel that clients connect to and a UI
+  watches. The print's ADTM is "the kernel of the HBDS system" (page
+  126), its processes "all implicitly persistent" (page 112).
+- **A compiler whose product runs on its own**, carrying what it needs.
+  The print compiles ADT'81 to an intermediate *A-code*, with translators
+  from A-code to C, Ada, Pascal and Fortran (page 161).
+
+## The layers
+
+```mermaid
+flowchart TB
+    hosts["hosts: standalone executable, daemon (HTTP, UI), browser (WASM), CLI client"]
+    languages["languages: ADT'81 (parse, check), others later"]
+    acode[["A-code: HBDS's machine code"]]
+    runtime["runtime: a VM, fibers, transactions"]
+    reference["reference: the tree-walking interpreter"]
+    engines["engines, pure libraries: GTAD, lists, functors,<br/>expert systems, simulation, journal"]
+    core["core: values, a.d.t., specifications"]
+    languages -- compile --> acode
+    hosts -- load and run --> acode
+    acode --> runtime
+    languages -. "same output, gated" .-> reference
+    runtime --> engines
+    reference --> engines
+    engines --> core
+```
+
+- **Engines are libraries.** No I/O, no threads, no language inside: they
+  decide what happens, and when code must run (a COND, a rule's premises,
+  a process's body) they ask the runtime through a trait, as the expert
+  systems and the simulation already do.
+- **A-code is the hinge.** Languages compile to it; the runtime, the
+  daemon, standalone executables and the browser see nothing else.
+- **Hosts are thin.** Each supplies a store (its own or shared), I/O, a
+  time source and a way in.
+
+## Decisions
+
+### 1. A-code is HBDS's machine code, shared by every language
+
+Generic computation (arithmetic, control, calls, frames, suspension) and
+HBDS's operations (create, set, assert, apply a functor, transactions,
+HOLD, CHAV...), on `hbds-core`'s values. ADT'81 compiles to it, as page
+161's does, and so would later languages: a modern ADT'81 for now, other
+kinds unknown, so it is sized for ADT'81-like semantics, and versioned to
+grow. A store keeps compiled modules, so that code from several languages
+mixes.
+
+Not chosen: a code of ADT'81's own (a runtime per language); WebAssembly
+as the target (no standard way yet to save a suspended stack, HBDS's
+values rebuilt inside it, a large dependency). WebAssembly stays possible
+as an *output* of A-code, as page 161 translates A-code to C.
+
+### 2. A reference and a fast path; A-code is stack bytecode
+
+The aim is twofold: show that Bouillé's design works, and that it is
+fast, which is part of the same claim: millions of facts without pattern
+matching (page 80), a sequencing set "of very large size" (page 112), "an
+unlimited set of persistent abstract data types" (page 126).
+
+- **The reference** is the tree-walking interpreter: readable, close to
+  the print, every decision cited; the executable specification.
+- **The fast path** is a VM on **stack bytecode**: flat instructions, an
+  operand stack, frames. A paused process is plain data, a pc (page 112's
+  LSC, literally), its locals and its stack: saveable, resumable, no
+  thread.
+- **The gate:** the VM gives exactly the reference's output on every
+  golden program and thousands of random ones, as the Rust parser is
+  gated against Lark.
+- **A text form from the start**, an assembler and a disassembler
+  (`embryo-systems acode FILE`): golden tests of the compiler's output,
+  the daemon's loaded code readable, and what ADT'81 becomes, shown.
+- **Faster tiers only if benchmarks ask:** register bytecode inside the
+  VM, invisible above it; native code through translators from A-code
+  (page 161).
+
+Not chosen: a tree IR (a paused body would live in Rust's call stack,
+threads would stay); register bytecode now (a harder compiler, speed not
+the constraint).
+
+### 3. Fibers, and a sequential world with threads around it
+
+Everything that runs as its own flow of control is a **fiber**: the main
+program, a coroutine, a process's body, a client's program. A fiber is its
+frames (module, pc, locals) and operand stack, as data, not an operating
+system thread: a few hundred bytes, saveable, and able to run in a
+browser.
+
+- **One executor thread per store** runs its fibers one at a time,
+  switching when one pauses. This is HBDS's model, not a limit of 1995:
+  the simulation is quasi-parallel, with "the active process" in the
+  singular (page 114); COND and ACTION chain within a statement; reflexes
+  propagate in the order the sequencing set gives (page 126). True
+  parallelism inside one world would break all three.
+- **Threads around it:** one executor per store, so stores run in
+  parallel; readers (queries, the UI) on snapshots; I/O (journal syncs,
+  network, compilation) off the executor; later, if benchmarks ask,
+  parallel work inside a pure operation such as a functor over a million
+  objects.
+- **Several clients writing** take turns on the executor: serializable by
+  construction, only who goes first unpredictable.
+- **Code an engine calls back runs to completion**: COND, ACTION, a rule's
+  parts, computed attributes, ASKABLE, EDITABLE, MODIFIABLE. HOLD,
+  PASSIVATE or PAUSE there is an error that says why: the engine's own
+  state (CHAV's agenda, the open transaction) lies beneath it, in Rust.
+  Checks and reactions are not processes (page 116 lists them apart, and
+  only processes and tasks have time); a reaction that needs time
+  schedules a process, as page 126's delayed reflexes are "inserted into
+  the SQS".
+- **An instruction budget in the daemon:** after N instructions the VM
+  switches to another client's fiber, between statements only (a
+  statement over a limit is refused whole, as CHAV's 10 000 tries), and
+  never between the processes of a simulation, whose active process runs
+  until it holds, as in SIMULA. An administrator can kill a session.
+  Standalone, a loop that never ends is a bug, stopped by Ctrl-C.
+
+Not chosen: fibers on a pool of threads (they would mostly wait on the
+store, and runs would no longer be deterministic); engines made
+resumable (each a state machine, which no page of the print needs);
+cooperative switching only (one loop freezes every client).
+
+### 4. Values compute as HBDS says, and A-code carries it
+
+What the front end compiles away does not reach the runtime: control flow
+(EXIT n, NEXT, RELOOP, CASE and EACH become jumps), quotes doubled in
+strings, names compared case-insensitively. What operations do to values
+is HBDS's, since the store keeps fuzzy values, the journal records them
+and rules stamp them: fuzzy propagation (pages 152 and 153), widening,
+comparisons and the text of values move from
+`crates/adt81/src/value.rs` to a shared crate, hbds-values. A-code's add
+is HBDS's addition. A language that means otherwise calls functions of its
+own support module; ADT'81's math functions, ours and not the print's,
+live in such a module.
+
+Not chosen: opcodes tagged by language (all duplicated with the second
+language); every operation a call into a language's library (slow, and
+nothing shared).
+
+### 5. Persistence: exact processes, compaction, group commit
+
+- **The world is data, code and the simulation.** A-code modules are
+  journalled when loaded. Processes are exactly persistent: a fiber that
+  pauses has its new state journalled in the same write as its
+  statement's changes, with the sequencing set and the time. After a
+  crash every process resumes where it was, and nothing runs twice.
+- **Compaction:** now and then the journal is rewritten, atomically, as
+  the shortest sequence of changes that rebuilds the current world. One
+  format, one replay path.
+- **Group commit:** the journal's thread syncs the transactions of a few
+  milliseconds together; a client hears "done" only after its sync.
+  Today's guarantee, at many statements per sync.
+
+Not chosen: checkpoints of the processes (the data ahead of them after a
+crash, statements run twice); processes not persistent (today's rule:
+passive, their bodies starting over); a binary snapshot format beside the
+journal; a sync per statement, or on a timer that may lose what was
+acknowledged.
+
+### 6. Time: one sequencing set per store, at a pace set live
+
+- **Standalone programs keep SIMULA's rules:** the main program is a
+  process, its HOLD moves time, its end ends the simulation.
+- **In the daemon the kernel drives the sequencing set,** the engine that
+  "sets itself to the time" of page 114; clients come and go, their
+  processes live on.
+- **One sequencing set per store**, the print's single one, which the
+  reflex engine feeds too (page 126): one world, one time.
+- **The pace is the store's**, changed live by a client or the UI, like a
+  player: paused or step by step; as fast as possible up to a horizon;
+  real time times a factor, the kernel waiting on the clock, for a living
+  system (monitoring, reflexes, page 116's real-time tasks).
+
+Not chosen: a sequencing set per client (two times over the same
+objects); virtual time only; real time only.
+
+### 7. Concurrency: the statement as a transaction, persistent maps
+
+- **A client's unit of work is the statement**, as today and as the
+  print: a statement and the COND, ACTION and rules it triggers, kept or
+  refused together. A program is not one transaction: across a HOLD it
+  would hold the store through time.
+- **The store's maps become persistent data structures, written here**:
+  versions share what they did not change. Beginning and undoing a
+  transaction cost nothing (today every `begin()` copies the whole
+  model); a reader takes the current version and reads it on its own
+  thread while the executor writes; a write copies one path. A B-tree or
+  a HAMT, property-tested against `BTreeMap` and benchmarked.
+
+Not chosen: an ATOMIC block of several statements (syntax the print
+lacks, and a long one blocks every client; possible later); a crate at
+the heart of the store; today's maps, reads queued on the executor.
+
+### 8. The daemon's interface: our HTTP, one Unix socket
+
+```mermaid
+flowchart LR
+    browser["browser"] -- HTTPS --> nginx["nginx"]
+    nginx -- auth_request --> proxy["oauth2-proxy"] -- OIDC --> kanidm["Kanidm"]
+    nginx -- "HTTP, WebSocket" --> socket(["Unix socket"])
+    cli["CLI"] --> socket
+    socket --> daemon["embryo-systems daemon"]
+```
+
+- **A minimal HTTP/1.1 and WebSocket server, written here**: plain
+  threads, no async runtime, no TLS, no authentication.
+- **WebSocket, with JSON frames, for sessions and events** (`run`, `repl`,
+  the UI's live feed); plain HTTP for one-off requests (the schema, the
+  pace, loading a module).
+- **One door, a Unix socket**, guarded by file permissions. The CLI uses
+  it directly, and the journal records the Unix user. Browsers come
+  through nginx, which terminates HTTPS, upgrades WebSockets and proxies
+  to the socket, authenticating by `auth_request` to oauth2-proxy against
+  Kanidm and passing the user in a header the journal records. The daemon
+  serves the UI's files, embedded in its binary.
+
+Not chosen: hyper or axum on tokio (an async runtime the single executor
+does not need); HTTP alone (a conversation split in two); a TCP port as
+well (two doors). Who may change which a.d.t. is for later, near NINJAS
+(project 20).
+
+### 9. Standalone builds carry what they need
+
+- **Two products:** an `.acode` file, portable compiled modules (for
+  `embryo-systems exec`, the daemon, the playground); and a
+  **self-contained executable**, `embryo-systems build prog.adt -o prog`:
+  the prebuilt runtime with the A-code appended and a trailer saying
+  where it starts. No toolchain at build time, milliseconds to build, and
+  it runs on any machine of its platform. Native code through page 161's
+  translators comes later, if benchmarks ask.
+- **Every engine, always**: one runtime per platform, a few megabytes,
+  and A-code can count on every operation.
+- **Embedded or connected**, chosen when it starts: its own store, in
+  memory or `--store DIR`; or `--connect SOCKET`, its A-code sent to a
+  daemon and run there as a session.
+- **Platforms:** runtimes for x86_64 and aarch64 Linux and for WASM, built
+  by the flake; `build --target` appends to the right one.
+
+Not chosen: `.acode` alone (needs embryo-systems installed); native code
+first; only the engines a program uses (a runtime per combination).
+
+### 10. Versions: read older, refuse newer; modules side by side
+
+- **Every format carries its version**: the journal, A-code, saved
+  fibers. A reader converts older versions as it loads them and
+  compaction rewrites them in the current one; a newer one is refused,
+  saying so. Every old version stays as a test fixture.
+- **A loaded module never changes**: it is named by a hash of its content,
+  and loading a new body adds a version, as Erlang does. Paused fibers
+  finish in the version they started in, new activations get the newest,
+  and an old version goes once no fiber uses it.
+
+Not chosen: the exact version only, with a converter; refusing to load a
+module in use; restarting its fibers in the new version, their place and
+locals lost.
+
+### 11. Engine performance
+
+- **GTAD gets indexes, early**: name to class, class and name to object,
+  class to objects, object to its outgoing and incoming links, hyperclass
+  to members, attribute name to class attributes. Lookups and functors
+  scan today, which a million objects would not survive. Persistent maps
+  too, rebuilt on replay, not journalled.
+- **Names are interned**: each folded name is kept once and numbered,
+  compared as an integer, its spelling kept for display; A-code carries
+  the numbers.
+- **Large values are shared**: lists, arrays and strings behind a
+  reference count, copied only when one that is shared changes.
+
+### 12. Benchmarks at the print's scale
+
+- **Scenarios**: the store and functors (a million objects, lookups,
+  functor chains such as page 127's over a large graph, SIGMA); the
+  expert system (CHAV, ten thousand rules over a hundred thousand facts,
+  page 80); the simulation (a hundred thousand processes, a million
+  events); the language (the reference against the VM); later the daemon
+  (statements per second, journal throughput). Every new engine brings
+  its own, reflexes next: a convention arrives with its gate.
+- **They gate**, on the Forgejo runner, our own hardware: results are
+  versioned in the repository, and CI fails past a margin (15%); a
+  speed-up is recorded on purpose.
+- **Our own small harness**, `just bench`: the median of a few runs, plain
+  text, and the work done counted (instructions, store operations) beside
+  the wall time, so that a regression says why.
+
+Not chosen: numbers tracked but never gating; benchmarks run by hand;
+criterion (a dependency, wall time only).
+
+## The order
+
+Each step is a plan and a pull request of its own:
+
+0. This page; then a lock on a store's directory, so that two runs can no
+   longer write one journal.
+1. Benchmarks: the harness and a baseline, before anything is optimized.
+2. The store: persistent maps, indexes, interned names, shared values;
+   measured against the baseline.
+3. hbds-values: the semantics of values out of adt81.
+4. A-code and the VM: the format, versioned, with its text form; the
+   compiler from the typed tree; fibers, processes and coroutines leaving
+   threads; the gate against the reference.
+5. Builds: `.acode`, `exec`, self-contained executables, embedded or
+   connected.
+6. The daemon: the executor, the journal's thread, group commit,
+   compaction; modules and fibers journalled, their versions; the pace;
+   the HTTP and WebSocket server; the CLI as a client, events, the
+   instruction budget; a NixOS module.
+7. The UI: the schema, the sequencing set as a timeline, rules firing,
+   the journal's tail, a REPL.
+
+The print's engines (reflexes, constraints, dialog) are libraries, and
+come between any two steps; reflexes read most naturally after the
+daemon, inside the kernel where page 126 puts them.

@@ -14,6 +14,9 @@ what works and how it fits together; `docs/` holds every decision.
   review: this repository quotes and cites pages, never copies a scan, a
   transcription or a listing. Test programs are written for the purpose. The
   sources live in the private `embryo-systems-archive`.
+- **The architecture is decided in `docs/architecture.md`.** How the system
+  runs (A-code, the VM, the daemon, builds, persistence, time) follows it;
+  a change to it is recorded there first, with its date and reason.
 - **The grammar leads.** `crates/adt81/grammar.lark` defines ADT'81; the Rust code
   follows it, and a change to the language is made there first, with its
   reason in `docs/adt81.md`.

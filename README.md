@@ -107,11 +107,12 @@ flowchart BT
 ## Documentation
 
 - [docs/adt81.md](docs/adt81.md): the language. How the grammar was derived, every departure from the print, the checker, and running.
+- [docs/architecture.md](docs/architecture.md): how it runs, and where it is going. The layers, A-code and its VM, the daemon, standalone builds, persistence, time, and the order of the steps.
 - [docs/hbds.md](docs/hbds.md): the engines. The model, inheritance, COND and ACTION, transactions, the expert systems, the simulation, the journal, open questions.
 
 ## Roadmap
 
-The print's other engines, each to be a crate of its own:
+The system's own steps (A-code and a VM, standalone builds, a daemon with a web UI) are ordered in [docs/architecture.md](docs/architecture.md). The print's other engines, each to be a crate of its own, come between them:
 
 | engine | print |
 |---|---|
