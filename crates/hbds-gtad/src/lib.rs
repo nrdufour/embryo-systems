@@ -5,6 +5,7 @@
 //! persistence is another engine's, behind that trait. docs/hbds.md gives
 //! the rules.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -224,6 +225,30 @@ pub struct Store {
     pub associations: Vec<(AdtRef, AdtRef)>,
     recorder: Option<Box<dyn Recorder>>,
     transaction: Option<Transaction>,
+    counted: Counted,
+}
+
+/// The work a store has done, counted for the benchmarks: changes made,
+/// the scans its lookups ran and the items they walked, and the items
+/// transactions' snapshots copied. Neither journalled nor rolled back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Work {
+    pub changes: u64,
+    pub lookups: u64,
+    pub scanned: u64,
+    pub copied: u64,
+}
+
+#[derive(Default)]
+struct Counted {
+    changes: Cell<u64>,
+    lookups: Cell<u64>,
+    scanned: Cell<u64>,
+    copied: Cell<u64>,
+}
+
+fn add(c: &Cell<u64>, n: usize) {
+    c.set(c.get() + n as u64);
 }
 
 /// The model as it was when a transaction began.
@@ -284,8 +309,26 @@ impl Store {
         id
     }
 
+    /// The work done so far.
+    pub fn work(&self) -> Work {
+        let c = &self.counted;
+        Work {
+            changes: c.changes.get(),
+            lookups: c.lookups.get(),
+            scanned: c.scanned.get(),
+            copied: c.copied.get(),
+        }
+    }
+
+    /// Counts a scan that walked `n` items.
+    fn scanned(&self, n: usize) {
+        add(&self.counted.lookups, 1);
+        add(&self.counted.scanned, n);
+    }
+
     /// Records `change` in the journal, if there is one, then applies it.
     fn commit(&mut self, change: Change) -> Stored<()> {
+        add(&self.counted.changes, 1);
         if let Some(t) = &mut self.transaction {
             t.changes.push(change.clone());
         } else if let Some(recorder) = &mut self.recorder {
@@ -296,6 +339,13 @@ impl Store {
     }
 
     fn snapshot(&self) -> Snapshot {
+        let items = self.classes.len()
+            + self.attributes.len()
+            + self.objects.len()
+            + self.class_links.len()
+            + self.object_links.len()
+            + self.associations.len();
+        add(&self.counted.copied, items);
         Snapshot {
             next: self.next,
             classes: self.classes.clone(),
@@ -680,10 +730,13 @@ impl Store {
 
     /// A class by name, whatever its state.
     pub fn find_class(&self, name: &str) -> Option<Id> {
-        self.classes
-            .iter()
+        let mut n = 0;
+        let found = (self.classes.iter())
+            .inspect(|_| n += 1)
             .find(|(_, c)| same(&c.name, name))
-            .map(|(i, _)| *i)
+            .map(|(i, _)| *i);
+        self.scanned(n);
+        found
     }
 
     /// An active class by name.
@@ -696,9 +749,13 @@ impl Store {
     }
 
     pub fn find_object(&self, class: Id, name: &str) -> Option<Id> {
-        (self.objects.iter())
+        let mut n = 0;
+        let found = (self.objects.iter())
+            .inspect(|_| n += 1)
             .find(|(_, o)| o.class == class && same(&o.name, name))
-            .map(|(i, _)| *i)
+            .map(|(i, _)| *i);
+        self.scanned(n);
+        found
     }
 
     pub fn object(&self, class: Id, name: &str) -> Stored<Id> {
@@ -737,9 +794,13 @@ impl Store {
     }
 
     fn own_attribute(&self, class: Id, name: &str) -> Option<Id> {
-        (self.attributes.iter())
+        let mut n = 0;
+        let found = (self.attributes.iter())
+            .inspect(|_| n += 1)
             .find(|(_, a)| a.class == class && same(&a.name, name))
-            .map(|(i, _)| *i)
+            .map(|(i, _)| *i);
+        self.scanned(n);
+        found
     }
 
     pub fn attribute(&self, class: Id, name: &str) -> Stored<Id> {
@@ -762,13 +823,17 @@ impl Store {
     }
 
     fn own_class_link(&self, from: Id, relation: &str, to: Id) -> Option<Id> {
-        (self.class_links.iter())
+        let mut n = 0;
+        let found = (self.class_links.iter())
+            .inspect(|_| n += 1)
             .find(|(_, l)| {
                 l.from == from
                     && l.to == to
                     && l.relation.as_deref().is_some_and(|r| same(r, relation))
             })
-            .map(|(i, _)| *i)
+            .map(|(i, _)| *i);
+        self.scanned(n);
+        found
     }
 
     pub fn class_link(&self, from: Id, relation: &str, to: Id) -> Stored<Id> {
@@ -787,10 +852,14 @@ impl Store {
             return None;
         };
         let class_link = self.find_class_link(a.class, relation, b.class)?;
-        (self.object_links.iter())
+        let mut n = 0;
+        let found = (self.object_links.iter())
+            .inspect(|_| n += 1)
             .find(|(_, l)| l.class_link == class_link && l.from == from && l.to == to)
             .filter(|(i, _)| self.visible(AdtRef::ObjectLink(**i)))
-            .map(|(i, _)| *i)
+            .map(|(i, _)| *i);
+        self.scanned(n);
+        found
     }
 
     pub fn get(&self, object: Id, attribute: Id) -> Option<&Value> {

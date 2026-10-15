@@ -1,0 +1,31 @@
+-- Forward chaining: n signals, each with v set, and n rules, rule k --
+-- setting signal k's w once its v is set. A rule's YES sets nothing a --
+-- premise reads, so each is tried once. Their code comes on stdin. --
+
+program rules ;
+local
+        s, r, code : string ;
+        n, i : integer ;
+begin
+        create "signal" ;
+        create "signal" . "v", "signal" . "w" ;
+        read n ;
+        loop for i : 1 to n do
+                read s ;
+                create s [ "signal" ] ;
+                let s [ "signal" ] . "v" := 1 ;
+                let s [ "signal" ] . "w" := 0
+        endloop ;
+        create "watch" ;
+        include "watch" into "rule" ;
+        loop for i : 1 to n do
+                read r ;
+                create r [ "watch" ] ;
+                read code ;
+                let r [ "watch" ] ' premises := code ;
+                read code ;
+                let r [ "watch" ] ' yes := code
+        endloop ;
+        call chav("watch") ;
+        print "signal" ' obj ' oattn("w") ' sigma
+end ;

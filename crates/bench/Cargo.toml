@@ -1,0 +1,11 @@
+[package]
+name = "embryo-systems-bench"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The benchmarks (docs/architecture.md, decision 12): `just bench`.
+[dependencies]
+adt81 = { path = "../adt81" }
+hbds-gtad = { path = "../hbds-gtad" }

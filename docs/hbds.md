@@ -35,6 +35,7 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (arithmetic and fuzzy propagation, math functions, what an unknown name means); it wires the engines together | the engines |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal |
+| `embryo-systems-bench` | the benchmarks, `just bench`: the programs of `bench/scenarios` on a ladder of sizes, against `bench/<host>.txt` | adt81, gtad |
 
 The rules: an engine depends on the core and on as few engines as it
 needs, never on a language; a language never on another language.
@@ -389,6 +390,8 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `crates/hbds-simulation/tests/sequencing.rs` | every transition of figure 52, legal and not |
 | `crates/hbds-rules/tests/engine.rs` | the chaining rule by rule, on a fake language |
 | `tools/check_engines.py` | what each crate may depend on |
+| `crates/bench` | the benchmarks' harness: inputs, expected outputs, the gate |
+| `bench/scenarios/` | the benchmarks' programs |
 | `crates/adt81/src/interp.rs` | the a.d.t. statements and expressions, on the store |
 | `crates/adt81/tests/corpus/run/store/` | programs on the store, with their expected output |
 | `crates/adt81/tests/store.rs` | the store across runs, a torn journal, a corrupt one, a store already open, a refused change, code in another language |

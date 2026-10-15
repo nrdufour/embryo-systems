@@ -8,6 +8,7 @@ members = [
     "crates/hbds-rules",
     "crates/hbds-simulation",
     "crates/adt81",
+    "crates/bench",
 ]
 resolver = "3"
 

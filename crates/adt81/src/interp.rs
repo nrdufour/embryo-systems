@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -119,6 +120,16 @@ pub fn run(
     io: Arc<Mutex<dyn Io>>,
     store: Arc<Mutex<Store>>,
 ) -> Result<(), RuntimeError> {
+    run_counted(program, io, store).map(|_| ())
+}
+
+/// [`run`], and how many statements it executed, coroutines and code the
+/// engines called back included: the benchmarks' count of the work done.
+pub fn run_counted(
+    program: Program,
+    io: Arc<Mutex<dyn Io>>,
+    store: Arc<Mutex<Store>>,
+) -> Result<u64, RuntimeError> {
     let mut modules = HashMap::new();
     let mut computed = HashMap::new();
     let mut bodies = HashMap::new();
@@ -158,6 +169,7 @@ pub fn run(
         sim: Arc::new(Mutex::new(Sequencing::new())),
         processes: Arc::new(Mutex::new(HashMap::new())),
         role: Role::Main,
+        statements: Arc::new(AtomicU64::new(0)),
     };
     // The interpreter recurses (statements, calls, CONDs and ACTIONs): it
     // runs on a thread of its own, with the stack that takes.
@@ -183,7 +195,7 @@ pub fn run(
             })?;
         }
     }
-    Ok(())
+    Ok(machine.statements.load(Ordering::Relaxed))
 }
 
 /// The stack of each thread the interpreter runs on.
@@ -376,6 +388,8 @@ struct Machine {
     processes: Arc<Mutex<HashMap<Id, Coroutine>>>,
     /// Who this thread runs for.
     role: Role,
+    /// Statements executed, on every thread.
+    statements: Arc<AtomicU64>,
 }
 
 /// Who a thread of the interpreter runs for.
@@ -921,6 +935,7 @@ impl Machine {
     }
 
     fn stmt(&self, s: &Stmt, f: &mut Frame) -> Exec<()> {
+        self.statements.fetch_add(1, Ordering::Relaxed);
         match &s.kind {
             StmtKind::Assign { target, value } => {
                 let v = self.eval(value, f)?;

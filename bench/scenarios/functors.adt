@@ -1,0 +1,29 @@
+-- Functors over a graph in the shape of page 127's: n points on a ring, --
+-- n segments each linked to its two ends, then the chain from the --
+-- segments to their points' x, and its sum. --
+
+program functors ;
+local
+        p, a, b : string ;
+        n, i : integer ;
+begin
+        create "point", "segment" ;
+        create "point" . "x" ;
+        create "segment" "ends" "point" reverse "end of" ;
+        read n ;
+        loop for i : 1 to n do
+                read p ;
+                create p [ "point" ] ;
+                let p [ "point" ] . "x" := i
+        endloop ;
+        loop for i : 1 to n do
+                read p ;
+                read a ;
+                read b ;
+                create p [ "segment" ] ;
+                assert p [ "segment" ] "ends" a [ "point" ] ;
+                assert p [ "segment" ] "ends" b [ "point" ]
+        endloop ;
+        print "segment" ' obj ' opscrc("ends", "point") ' ofin ' card,
+              "segment" ' obj ' opscrc("ends", "point") ' ofin ' oattn("x") ' sigma
+end ;

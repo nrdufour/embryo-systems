@@ -25,6 +25,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "embryo-systems-bench"
+version = "0.1.0"
+dependencies = [
+ "adt81",
+ "hbds-gtad",
+]
+
+[[package]]
 name = "hbds-core"
 version = "0.1.0"
 

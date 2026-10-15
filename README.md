@@ -34,6 +34,9 @@ cargo run -q -- store /tmp/hydro                                   # what the st
 | `embryo-systems parse FILE`, `lex FILE` | the syntax tree, the tokens |
 
 `crates/adt81/tests/corpus/run/` holds programs to run, each with its expected output.
+`just bench` runs the benchmarks of `bench/scenarios/` and compares them
+with this host's `bench/<host>.txt`, if it has one; `just bench-record`
+writes it.
 
 ## What works
 

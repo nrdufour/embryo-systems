@@ -1,0 +1,19 @@
+-- The language alone, no store: integer arithmetic in a loop, a list --
+-- built and filtered. What step 4 compares between the reference and --
+-- the virtual machine. --
+
+program language ;
+local
+        l : list of integer ;
+        n, i, e, t, u : integer ;
+begin
+        read n ;
+        t := 0 ;
+        loop for i : 1 to n do
+                t := t + i * i / 3 - i / 2 ;
+                insert (i) into l
+        endloop ;
+        u := 0 ;
+        each e of l / e > n / 2 do u := u + e endeach ;
+        print t, l ' card, u
+end ;

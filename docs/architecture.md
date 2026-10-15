@@ -299,6 +299,20 @@ locals lost.
 Not chosen: numbers tracked but never gating; benchmarks run by hand;
 criterion (a dependency, wall time only).
 
+As built (2026-10-15, step 1): the scenarios are ADT'81 programs in
+`bench/scenarios/`, their sizes, names and rule code on stdin (the
+language has no integer-to-string conversion), so step 4 runs the same
+ones through the VM. Each runs on a ladder of four doubling sizes, the
+growth from one to the next printed: today x4 everywhere but the
+language, since every statement's transaction copies the whole model and
+every lookup scans. The work counted is the statements executed, and the
+store's changes, lookups, items scanned and items its snapshots copied.
+Results are per host, `bench/<hostname>.txt`, wall time meaning nothing
+across machines; the runner's file is the gate, and a host without one
+only prints. Times under 100 ms are not gated, noise being most of them.
+A change of work alone is printed, not failed: an extra lookup per CREATE,
+planted, scanned a third more and cost 7% of the time, under the margin.
+
 ## The order
 
 Each step is a plan and a pull request of its own:

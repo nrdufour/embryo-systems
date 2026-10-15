@@ -1,0 +1,31 @@
+-- Discrete simulation: n workers, processes each holding 20 times, so --
+-- 20 n events; the main program holds past them all. --
+
+program simulation ;
+local
+        s : string ;
+        n, i : integer ;
+begin
+        create "worker" ;
+        include "worker" into "process" ;
+        create "worker" . "steps" ;
+        read n ;
+        loop for i : 1 to n do
+                read s ;
+                create s [ "worker" ] ;
+                let s [ "worker" ] . "steps" := 0 ;
+                activate s [ "worker" ]
+        endloop ;
+        hold for 21 ;
+        print time, "worker" ' obj ' oattn("steps") ' sigma
+end ;
+
+coroutine "worker" ;
+local
+        i : integer ;
+begin
+        loop for i : 1 to 20 do
+                let this . "steps" := this . "steps" + 1 ;
+                hold for 1
+        endloop
+end ;
