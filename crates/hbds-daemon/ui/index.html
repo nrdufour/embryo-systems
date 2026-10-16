@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>embryo-systems</title>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<header>
+  <h1>embryo-systems</h1>
+  <span id="link" class="link down">connecting</span>
+  <form id="pace" class="pace">
+    <label>pace
+      <select id="pace-kind">
+        <option value="paused">paused</option>
+        <option value="step">step</option>
+        <option value="fast">fast</option>
+        <option value="real">real</option>
+      </select>
+    </label>
+    <label id="pace-horizon-label">horizon <input id="pace-horizon" type="number" step="any" placeholder="none"></label>
+    <label id="pace-factor-label">factor <input id="pace-factor" type="number" step="any" min="0" value="1"></label>
+    <label id="pace-steps-label">steps <input id="pace-steps" type="number" min="1" value="1"></label>
+    <button type="submit">set</button>
+    <span id="pace-now" class="muted"></span>
+  </form>
+</header>
+<main>
+  <section id="schema-panel" class="panel">
+    <h2>Schema</h2>
+    <div id="schema" class="schema"></div>
+    <h3>Links</h3>
+    <ul id="links" class="links"></ul>
+  </section>
+  <section id="time-panel" class="panel">
+    <h2>Time <span id="now" class="muted"></span></h2>
+    <svg id="timeline" class="timeline" viewBox="0 0 600 90" preserveAspectRatio="none" role="img" aria-label="the sequencing set"></svg>
+    <table class="processes">
+      <thead><tr><th>process</th><th>state</th><th>clock</th></tr></thead>
+      <tbody id="processes"></tbody>
+    </table>
+  </section>
+  <section id="sessions-panel" class="panel">
+    <h2>Sessions</h2>
+    <ul id="sessions" class="sessions"></ul>
+  </section>
+  <section id="journal-panel" class="panel">
+    <h2>Journal</h2>
+    <ol id="journal" class="journal"></ol>
+  </section>
+</main>
+</body>
+</html>

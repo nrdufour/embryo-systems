@@ -62,3 +62,39 @@ pub fn run(
         }
     }
 }
+
+/// `embryo-systems ui`: a browser reaches no Unix socket, so this listens
+/// on 127.0.0.1 only, and forwards each connection to the daemon's
+/// socket, as the user running it. The daemon keeps its one door
+/// (docs/architecture.md, decision 8). Prints the page's address.
+pub fn forward(socket: &Path, port: u16) -> io::Result<()> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+    // Is the daemon there? Better said now than at the first request.
+    UnixStream::connect(socket)
+        .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", socket.display())))?;
+    println!("http://{}/", listener.local_addr()?);
+    io::stdout().flush()?;
+    for stream in listener.incoming() {
+        let Ok(browser) = stream else { continue };
+        let socket = socket.to_path_buf();
+        std::thread::spawn(move || {
+            let Ok(daemon) = UnixStream::connect(&socket) else {
+                return;
+            };
+            let (Ok(mut from_browser), Ok(mut to_daemon)) =
+                (browser.try_clone(), daemon.try_clone())
+            else {
+                return;
+            };
+            let up = std::thread::spawn(move || {
+                let _ = io::copy(&mut from_browser, &mut to_daemon);
+                let _ = to_daemon.shutdown(std::net::Shutdown::Write);
+            });
+            let (mut from_daemon, mut to_browser) = (daemon, browser);
+            let _ = io::copy(&mut from_daemon, &mut to_browser);
+            let _ = to_browser.shutdown(std::net::Shutdown::Write);
+            let _ = up.join();
+        });
+    }
+    Ok(())
+}

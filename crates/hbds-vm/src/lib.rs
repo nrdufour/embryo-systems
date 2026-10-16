@@ -20,7 +20,7 @@ mod saved;
 
 use hbds_simulation::When;
 /// The sequencing set a turn is lent, and who runs in it.
-pub use hbds_simulation::{Agent, Sequencing};
+pub use hbds_simulation::{Agent, Sequencing, state_name};
 use hbds_values::{Fault, Fz, List, Op, Scalar, Value};
 
 /// How deep CONDs and ACTIONs may nest, an ACTION's change running others.

@@ -20,6 +20,7 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems build FILE -o OUT
        embryo-systems daemon --socket SOCKET [--store DIR] [--slice N] [--compact-at N]
                              [--pace paused | fast [--horizon T] | real [--factor F]]
+       embryo-systems ui --connect SOCKET [--port N]
        embryo-systems store DIR
        embryo-systems compact DIR
 
@@ -40,7 +41,9 @@ compacted once past N lines (10000) and twice what compaction leaves.
 Its store's time is one, the kernel's, which moves at the pace: paused
 (the default), as fast as it can up to T, or real time times F; POST
 /pace changes it, GET /time shows it.
-store prints what the store in DIR holds; compact rewrites its journal
+ui serves the daemon's page on 127.0.0.1, port N (8080; 0 for any),
+forwarding to its socket. store prints what the store in DIR holds;
+compact rewrites its journal
 as the shortest that rebuilds it.";
 
 /// READ on standard input, PRINT on standard output.
@@ -253,6 +256,24 @@ fn main() -> ExitCode {
             eprintln!("{e}");
             return ExitCode::FAILURE;
         }
+    }
+    if let ["ui", "--connect", socket, rest @ ..] = args.as_slice() {
+        let port = match rest {
+            [] => Some(8080),
+            ["--port", n] => n.parse::<u16>().ok(),
+            _ => None,
+        };
+        let Some(port) = port else {
+            eprintln!("{USAGE}");
+            return ExitCode::FAILURE;
+        };
+        return match hbds_daemon::client::forward(std::path::Path::new(socket), port) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if let ["compact", dir] = args.as_slice() {
         return match journal::compact(std::path::Path::new(dir)) {

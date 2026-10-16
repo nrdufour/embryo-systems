@@ -1,0 +1,276 @@
+/* The UI's look: one page, four panels, light or dark as the system is. */
+
+:root {
+  --bg: #f6f6f3;
+  --panel: #ffffff;
+  --ink: #1d1f21;
+  --muted: #6b6f73;
+  --line: #d9dad6;
+  --accent: #2f6f8f;
+  --good: #3b7d3b;
+  --bad: #a83a32;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --panel: #1d2024;
+    --ink: #e4e5e3;
+    --muted: #9a9ea3;
+    --line: #33373c;
+    --accent: #6fb0d0;
+    --good: #7cc17c;
+    --bad: #e0776e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+h1 {
+  margin: 0;
+  font-size: 17px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+h3 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.link {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid currentColor;
+}
+
+.link.up {
+  color: var(--good);
+}
+
+.link.down {
+  color: var(--bad);
+}
+
+.pace {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.pace input {
+  width: 6em;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "schema time"
+    "schema sessions"
+    "journal journal";
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+@media (max-width: 800px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "schema" "time" "sessions" "journal";
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+#schema-panel {
+  grid-area: schema;
+}
+
+#time-panel {
+  grid-area: time;
+}
+
+#sessions-panel {
+  grid-area: sessions;
+}
+
+#journal-panel {
+  grid-area: journal;
+}
+
+.schema {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.class {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.class .name {
+  font-weight: 600;
+}
+
+.class .meta,
+.class .hyper {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.class ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.links,
+.sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.links li,
+.sessions li {
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.sessions .ended {
+  color: var(--muted);
+}
+
+.sessions .failed {
+  color: var(--bad);
+}
+
+.sessions button {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.timeline {
+  width: 100%;
+  height: 90px;
+  display: block;
+}
+
+.timeline .axis {
+  stroke: var(--muted);
+}
+
+.timeline .mark {
+  fill: var(--accent);
+}
+
+.timeline .now {
+  stroke: var(--bad);
+}
+
+.timeline text {
+  fill: var(--ink);
+  font-size: 10px;
+}
+
+.processes {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.processes th,
+.processes td {
+  text-align: left;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.journal {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.journal li {
+  padding: 1px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.journal .output {
+  color: var(--accent);
+}
+
+.journal .session {
+  color: var(--muted);
+}

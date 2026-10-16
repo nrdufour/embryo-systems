@@ -401,6 +401,21 @@ the rest as options, sandboxed; `just module` evaluates a system with it
 enabled and checks its unit. nginx, oauth2-proxy and Kanidm before it
 are the host's to configure, as above. Step 6 is done.
 
+As built (2026-10-16, step 7a): the UI is plain HTML, JS and CSS (decided
+2026-10-16: no framework, no build), `crates/hbds-daemon/ui/`, embedded
+with `include_str!` and served at `/`. It opens the feed and fetches
+where things stand: the schema (`GET /schema`, classes with their
+attributes, hyperclasses and objects' count, the links between them,
+fetched again as changes come), the time as a timeline of who is due
+and the processes' states and clocks (`GET /time`), the sessions with a
+kill button, the journal's tail, and the pace, which it sets. A browser
+reaches no Unix socket: `embryo-systems ui --connect SOCKET` listens on
+127.0.0.1 only and forwards to the socket as the user running it, the
+daemon keeping its one door; behind nginx the page is the socket's `/`.
+No browser runs in CI: `tests/daemon.rs` checks what the page reads, and
+the page itself was run by hand. 7b, the acting side (a REPL, rules
+firing in the feed), follows.
+
 ### 9. Standalone builds carry what they need
 
 - **Two products:** an `.acode` file, portable compiled modules (for
