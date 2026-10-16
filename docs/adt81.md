@@ -326,8 +326,9 @@ Decided on 2026-10-15:
   independent events, an operand without one being certain. Page 152 has
   the law given by rules: what a rule establishes takes its reliability
   times its premises' ([hbds.md](hbds.md), "Expert systems").
-- **Coroutines** run each on a thread of its own, handing control over by
-  channel, so that only one ever runs: RESUME continues a coroutine where
+- **Coroutines** run, in the interpreter, each on a thread of its own,
+  handing control over by channel, so that only one ever runs (the VM's
+  are fibers): RESUME continues a coroutine where
   it paused, its "Local Sequence Counter" (page 112), PAUSE gives control
   back to its resumer. Arguments go with the first RESUME; resuming an
   ended or running coroutine is an error.

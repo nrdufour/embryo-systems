@@ -19,7 +19,7 @@ fn compiled_as_written() {
         }
         let source = fs::read_to_string(&path).unwrap();
         let program = lower::parse_program(&source).unwrap();
-        let unit = compile::compile(&program).unwrap();
+        let unit = compile::compile(&program);
         let text = unit.text();
         let expected = fs::read_to_string(path.with_extension("acode")).unwrap();
         assert_eq!(text, expected, "{}", path.display());

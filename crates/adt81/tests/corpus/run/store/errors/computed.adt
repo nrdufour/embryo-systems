@@ -1,0 +1,22 @@
+-- A coroutine reads a computed attribute whose function pauses: the --
+-- function runs to completion, as code the store calls back does, so --
+-- PAUSE there is an error. Written for the VM's gate. --
+
+program reads ;
+begin
+        create "c" ;
+        create "c" . "a" ;
+        create "o" [ "c" ] ;
+        resume k
+end ;
+
+coroutine k ;
+begin
+        print "o" [ "c" ] . "a"
+end ;
+
+function "c" . "a" returns integer ;
+begin
+        pause ;
+        result 1
+end ;

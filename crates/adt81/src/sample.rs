@@ -808,6 +808,10 @@ struct Writer<'g> {
     depth: usize,
     /// Whether the program made rules, "r0" to "r2" of "k0".
     rules: bool,
+    /// Whether it has a coroutine `co`, and processes "w0" and "w1" of
+    /// "w", whose body holds.
+    coroutine: bool,
+    processes: bool,
 }
 
 impl Writer<'_> {
@@ -1039,7 +1043,33 @@ impl Writer<'_> {
         self.line(&line);
     }
 
+    /// RESUME, and the simulation's statements on "w0" and "w1".
+    fn fiber_stmt(&mut self) {
+        let w = |rng: &mut Rng| format!("\"w{}\" [ \"w\" ]", rng.below(2));
+        let t = self.rng.below(5);
+        let line = match self.rng.below(11) {
+            _ if !self.processes => "resume co".into(),
+            0 if self.coroutine => "resume co".into(),
+            0 | 1 => format!("activate {}", w(self.rng)),
+            2 => format!("reactivate {} at {t}", w(self.rng)),
+            3 => format!("reactivate {} after {}", w(self.rng), w(self.rng)),
+            4 if self.rng.one_in(3) => {
+                format!("{} {}", self.rng.pick(&["cancel", "kill"]), w(self.rng))
+            }
+            5 => format!("delay {} for {t}", w(self.rng)),
+            6 => {
+                let p = w(self.rng);
+                format!("print {p} . \"state\", {p} . \"clock\", time")
+            }
+            _ => format!("hold for {t}"),
+        };
+        self.line(&line);
+    }
+
     fn stmt(&mut self, depth: usize) {
+        if (self.coroutine || self.processes) && self.rng.one_in(6) {
+            return self.fiber_stmt();
+        }
         if self.rng.one_in(4) {
             return self.store_stmt();
         }
@@ -1337,6 +1367,9 @@ pub fn runnable(seed: u64) -> (String, String) {
         });
     }
     let rules = rng.one_in(2);
+    // The coroutine's INOUT parameter, if it has one.
+    let coroutine = rng.one_in(2).then(|| rng.one_in(2));
+    let processes = rng.one_in(2);
     let mut text = String::new();
     for k in 0..=count {
         let (header, mut vars, sig) = match k {
@@ -1407,6 +1440,21 @@ pub fn runnable(seed: u64) -> (String, String) {
             if rules {
                 text += &rule_base(&mut rng);
             }
+            if processes {
+                text += "        create \"w\" ; include \"w\" into \"process\" ;\n";
+                text += "        create \"w0\" [ \"w\" ], \"w1\" [ \"w\" ] ;\n";
+                text += "        activate \"w0\" [ \"w\" ] ; activate \"w1\" [ \"w\" ] ;\n";
+                if rng.one_in(8) {
+                    text += "        let \"c0\" ' action := \"hold for 1\" ;\n";
+                }
+            }
+            match coroutine {
+                Some(true) => text += "        n := 3 ;\n        resume co(n) ;\n",
+                Some(false) if rng.one_in(8) => {
+                    text += "        let \"c0\" ' action := \"resume co\" ;\n";
+                }
+                _ => {}
+            }
         }
         let mut w = Writer {
             rng: &mut rng,
@@ -1417,6 +1465,8 @@ pub fn runnable(seed: u64) -> (String, String) {
             out: String::new(),
             depth: 0,
             rules,
+            coroutine: coroutine.is_some(),
+            processes,
         };
         // Most variables get a value first, so that the runs go further
         // than `has no value`; one now and then is left without.
@@ -1442,6 +1492,27 @@ pub fn runnable(seed: u64) -> (String, String) {
         }
         text += &w.out;
         text += "end ;\n\n";
+    }
+    if let Some(param) = coroutine {
+        let (head, step) = match param {
+            true => (
+                "coroutine co (z) ;\n        z : integer inout ;\n",
+                "z := z + 1 ; ",
+            ),
+            false => ("coroutine co ;\n", ""),
+        };
+        text += head;
+        text += &format!(
+            "local\n        j : integer ;\nbegin\n        loop for j : 1 to {} do\n                {step}print \"co\", j ;\n                pause\n        endloop\nend ;\n\n",
+            rng.below(5) + 1
+        );
+    }
+    if processes {
+        text += &format!(
+            "coroutine \"w\" ;\nlocal\n        i : integer ;\nbegin\n        loop for i : 1 to {} do\n                print this, time ;\n                hold for {}\n        endloop\nend ;\n\n",
+            rng.below(4) + 1,
+            rng.below(3) + 1
+        );
     }
     let input: Vec<String> = (0..rng.below(6))
         .map(|_| match rng.below(6) {

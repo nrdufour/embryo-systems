@@ -151,6 +151,14 @@ const SCENARIOS: &[Scenario] = &[
         expected: |n| format!("21.0 {}\n", 20 * n),
     },
     Scenario {
+        name: "simulation-vm",
+        program: "simulation",
+        vm: true,
+        sizes: &[50, 100, 200, 400],
+        input: |n| format!("{n}\n{}", names("w", n)),
+        expected: |n| format!("21.0 {}\n", 20 * n),
+    },
+    Scenario {
         name: "values",
         program: "values",
         vm: false,
@@ -247,7 +255,7 @@ fn measure(s: &Scenario, source: &str, n: u64) -> Result<Measure, String> {
     let input = (s.input)(n);
     let expected = (s.expected)(n);
     let unit = match s.vm {
-        true => Some(compile(&program).map_err(|e| format!("not yet on the VM: {}", e.what))?),
+        true => Some(compile(&program)),
         false => None,
     };
     let mut runs = Vec::new();

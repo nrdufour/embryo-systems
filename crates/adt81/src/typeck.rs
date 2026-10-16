@@ -488,7 +488,8 @@ impl<'c> Checker<'c> {
                 }
                 self.number(duration, "the duration");
             }
-            StmtKind::Call(c) | StmtKind::Resume(c) => self.args(c),
+            StmtKind::Call(c) => self.args(c, false),
+            StmtKind::Resume(c) => self.args(c, true),
         }
     }
 
@@ -503,11 +504,17 @@ impl<'c> Checker<'c> {
 
     /// Arguments against a module of this file's parameters: their number,
     /// their types, and a variable for each OUT or INOUT.
-    fn args(&mut self, c: &Call) {
+    /// A call's arguments against the module's parameters; a RESUME
+    /// without any may be a later one, which takes none (docs/adt81.md,
+    /// "Coroutines"), and is left to the run.
+    fn args(&mut self, c: &Call, resume: bool) {
         let types: Vec<Typed> = c.args.iter().map(|a| self.expr(a)).collect();
         let Callee::Module(m) = self.callee(&c.name) else {
             return;
         };
+        if resume && c.args.is_empty() {
+            return;
+        }
         if m.parameters.len() != c.args.len() {
             let message = format!(
                 "`{}` takes {} argument(s), not {}",
@@ -742,7 +749,7 @@ impl<'c> Checker<'c> {
             ExprKind::This => Typed::plain(Ty::Adt(AdtType::Object)),
             ExprKind::Variable(v) => self.variable(v),
             ExprKind::Call(c) => {
-                self.args(c);
+                self.args(c, false);
                 let callee = self.callee(&c.name);
                 self.returns(&callee)
             }

@@ -162,17 +162,7 @@ fn main() -> ExitCode {
                 return false;
             }
             if vm {
-                let unit = match compile(&program) {
-                    Ok(unit) => unit,
-                    Err(e) => {
-                        let at = e.span;
-                        eprintln!(
-                            "{path}:{}:{}: not yet on the VM: {}",
-                            at.line, at.column, e.what
-                        );
-                        return false;
-                    }
-                };
+                let unit = compile(&program);
                 let mut store = match open_store(store_dir) {
                     Ok(store) => store,
                     Err(e) => {
@@ -212,20 +202,8 @@ fn main() -> ExitCode {
             if diagnostics.iter().any(|d| d.severity == Severity::Error) {
                 return false;
             }
-            match compile(&program) {
-                Ok(unit) => {
-                    print!("{}", unit.text());
-                    true
-                }
-                Err(e) => {
-                    let at = e.span;
-                    eprintln!(
-                        "{path}:{}:{}: not yet on the VM: {}",
-                        at.line, at.column, e.what
-                    );
-                    false
-                }
-            }
+            print!("{}", compile(&program).text());
+            true
         })
     } else if command == "fmt" && fragment {
         lower::parse_fragment(&source)

@@ -3,16 +3,14 @@
 //! runs. The compiled program does what the reference interpreter does,
 //! failing where it fails, with the same message at the same place:
 //! `crates/adt81/src/interp.rs` is the specification, and the gate
-//! (`tests/vm.rs`) holds the two together.
-//!
-//! What the VM cannot run yet is [`NotYet`]: coroutines and processes
-//! (step 4's slice c).
+//! (`tests/vm.rs`) holds the two together. The compiler does not fail:
+//! what the reference refuses when it runs compiles to a `Fail`.
 
 use std::collections::HashMap;
 
 use hbds_acode::{
-    Instr, Kind, Language, Leave, ListOp, Mode as AMode, Module as AModule, Param, Place, Slot,
-    SlotType, Span as ASpan, StateOp as AState, Unit,
+    Due, Instr, Kind, Language, Leave, ListOp, Mode as AMode, Module as AModule, Param, Place,
+    Slot, SlotType, Span as ASpan, StateOp as AState, Unit,
 };
 use hbds_values::{Base, Computed, Fz, Op, Value};
 
@@ -26,22 +24,6 @@ use super::uses::{self, Part};
 use super::value;
 use hbds_core::fold;
 use hbds_values::Scalar;
-
-/// What this slice of the compiler leaves to the next, and where.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NotYet {
-    pub span: Span,
-    pub what: String,
-}
-
-type Compiled<T> = Result<T, NotYet>;
-
-fn not_yet<T>(span: Span, what: impl Into<String>) -> Compiled<T> {
-    Err(NotYet {
-        span,
-        what: what.into(),
-    })
-}
 
 fn at(s: Span) -> ASpan {
     ASpan {
@@ -75,7 +57,7 @@ impl Language for Adt81 {
 
     fn compile(&self, part: &str, text: &str, what: &str, unit: &Unit) -> Result<AModule, String> {
         let callees = callees_of(unit);
-        let compiled = match part {
+        match part {
             // As the reference's trigger reads a COND: an expression, its
             // fault unsaid.
             "COND" => {
@@ -88,21 +70,20 @@ impl Language for Adt81 {
                                 ..
                             }),
                         ],
-                    ) => Compiler::new(&callees).expression(part, value),
-                    _ => return Err(format!("the COND of {what} does not parse")),
+                    ) => Ok(Compiler::new(&callees).expression(part, value)),
+                    _ => Err(format!("the COND of {what} does not parse")),
                 }
             }
             "ACTION" => match lower::parse_fragment(text) {
-                Ok(f) => Compiler::new(&callees).fragment(part, &f),
-                Err(e) => return Err(format!("the ACTION of {what} does not parse: {e}")),
+                Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),
+                Err(e) => Err(format!("the ACTION of {what} does not parse: {e}")),
             },
             part => match uses::parse(part, text) {
-                Ok(Part::Expr(e)) => Compiler::new(&callees).expression(part, &e),
-                Ok(Part::Stmts(f)) => Compiler::new(&callees).fragment(part, &f),
-                Err(e) => return Err(format!("the {part} of {what} does not parse: {e}")),
+                Ok(Part::Expr(e)) => Ok(Compiler::new(&callees).expression(part, &e)),
+                Ok(Part::Stmts(f)) => Ok(Compiler::new(&callees).fragment(part, &f)),
+                Err(e) => Err(format!("the {part} of {what} does not parse: {e}")),
             },
-        };
-        compiled.map_err(|e| format!("the {part} of {what}: {}: not yet on the VM", e.what))
+        }
     }
 
     fn check(&self, part: &str, text: &str) -> Result<(), String> {
@@ -123,7 +104,7 @@ struct Callee {
 fn callees_of(unit: &Unit) -> HashMap<String, Callee> {
     let mut out = HashMap::new();
     for (i, m) in unit.modules.iter().enumerate() {
-        if m.computes.is_some() {
+        if m.computes.is_some() || m.body.is_some() {
             continue;
         }
         let modes = (m.params.iter())
@@ -153,7 +134,7 @@ fn kind_of(m: &Module) -> Kind {
 }
 
 /// The program compiled; its first PROGRAM runs first.
-pub fn compile(program: &Program) -> Compiled<Unit> {
+pub fn compile(program: &Program) -> Unit {
     let mut callees = HashMap::new();
     for (i, m) in program.modules.iter().enumerate() {
         match &m.name {
@@ -171,16 +152,22 @@ pub fn compile(program: &Program) -> Compiled<Unit> {
                     modes,
                 });
             }
-            ModuleName::Attribute { .. } => {}
-            ModuleName::Body(class) => return not_yet(class.span, "process bodies"),
+            ModuleName::Attribute { .. } | ModuleName::Body(_) => {}
         }
     }
     let Some(first) = (program.modules.iter()).position(|m| m.kind == ModuleKind::Program) else {
-        return not_yet(Span { line: 1, column: 1 }, "a file without a PROGRAM");
+        // As the reference refuses it, when it runs.
+        let mut c = Compiler::new(&callees);
+        let span = Span { line: 1, column: 1 };
+        c.fail(span, "no PROGRAM to run in this file");
+        let program = c.finish("#", "#", Kind::Program, span, None, None, None);
+        return Unit {
+            modules: vec![program],
+        };
     };
     let mut modules = Vec::new();
     for m in &program.modules {
-        modules.push(Compiler::new(&callees).module(m)?);
+        modules.push(Compiler::new(&callees).module(m));
     }
     // The first program first: the VM runs module 0.
     modules.swap(0, first);
@@ -191,12 +178,16 @@ pub fn compile(program: &Program) -> Compiled<Unit> {
     };
     for m in &mut modules {
         for i in &mut m.code {
-            if let Instr::Call(callee, _) | Instr::Chain(callee) = i {
+            if let Instr::Call(callee, _)
+            | Instr::Chain(callee)
+            | Instr::ResumeStarted(callee, ..)
+            | Instr::ResumeFirst(callee, _) = i
+            {
                 *callee = renumber(*callee);
             }
         }
     }
-    Ok(Unit { modules })
+    Unit { modules }
 }
 
 struct Compiler<'p> {
@@ -306,16 +297,16 @@ impl<'p> Compiler<'p> {
 
     /// Code the store keeps that gives a value: COND and the parts that
     /// are expressions; a function of no parameter, THIS its object.
-    fn expression(mut self, part: &str, e: &Expr) -> Compiled<AModule> {
-        self.expr(e)?;
+    fn expression(mut self, part: &str, e: &Expr) -> AModule {
+        self.expr(e);
         self.emit(Instr::Result, e.span);
-        Ok(self.finish(part, part, Kind::Function, e.span, None, None, None))
+        self.finish(part, part, Kind::Function, e.span, None, None, None)
     }
 
     /// Code the store keeps that is statements: an ACTION, a rule's YES,
     /// in the reference's `run_fragment`: a declaration declares when
     /// reached, a parameter is an error there, RETURN ends it.
-    fn fragment(mut self, part: &str, f: &Fragment) -> Compiled<AModule> {
+    fn fragment(mut self, part: &str, f: &Fragment) -> AModule {
         for item in &f.items {
             match item {
                 Item::Local(d) => {
@@ -330,13 +321,13 @@ impl<'p> Compiler<'p> {
                     }
                 }
                 Item::Parameter(p) => self.fail(p.span, "an ACTION has no parameters"),
-                Item::Stmt(s) => self.stmt(s)?,
+                Item::Stmt(s) => self.stmt(s),
             }
         }
         let end = self.here();
         self.end_returns(end);
         self.emit(Instr::Return, Span::default());
-        Ok(self.finish(
+        self.finish(
             part,
             part,
             Kind::Subroutine,
@@ -344,7 +335,7 @@ impl<'p> Compiler<'p> {
             None,
             None,
             None,
-        ))
+        )
     }
 
     fn end_returns(&mut self, end: usize) {
@@ -376,6 +367,7 @@ impl<'p> Compiler<'p> {
             prefix,
             result,
             computes,
+            body: None,
             code: self.code,
             spans: self.spans,
         }
@@ -383,11 +375,9 @@ impl<'p> Compiler<'p> {
 
     // Modules: the prologue as `call` in the reference builds the frame.
 
-    fn module(mut self, m: &Module) -> Compiled<AModule> {
+    fn module(mut self, m: &Module) -> AModule {
         let kind = kind_of(m);
-        if kind == Kind::Coroutine {
-            return not_yet(m.span, "coroutines");
-        }
+        let mut body = None;
         let (name, spelling, computes) = match &m.name {
             ModuleName::Name(n) => (n.key.clone(), n.spelling.clone(), None),
             ModuleName::Attribute { class, attribute } => (
@@ -395,7 +385,14 @@ impl<'p> Compiler<'p> {
                 format!("\"{}\" . \"{}\"", class.text, attribute.text),
                 Some((fold(&class.text), fold(&attribute.text))),
             ),
-            ModuleName::Body(_) => unreachable!("refused before"),
+            ModuleName::Body(class) => {
+                body = Some(fold(&class.text));
+                (
+                    format!("#{}", fold(&class.text)),
+                    format!("\"{}\"", class.text),
+                    None,
+                )
+            }
         };
         let mut params = Vec::new();
         for (i, p) in m.parameters.iter().enumerate() {
@@ -415,7 +412,7 @@ impl<'p> Compiler<'p> {
             result = Some(self.declare(n, &Typed::of(returns).ty, false));
         }
         for d in &m.locals {
-            self.local(d)?;
+            self.local(d);
         }
         let mut prefix = None;
         if let ModuleKind::Functor {
@@ -430,7 +427,7 @@ impl<'p> Compiler<'p> {
                 None => self.fail(p.span, format!("`{}` is not a variable here", p.spelling)),
             }
         }
-        self.stmts(&m.body)?;
+        self.stmts(&m.body);
         let end = self.here();
         self.end_returns(end);
         match kind {
@@ -443,10 +440,11 @@ impl<'p> Compiler<'p> {
         }
         let mut module = self.finish(&name, &spelling, kind, m.span, prefix, result, computes);
         module.params = params;
-        Ok(module)
+        module.body = body;
+        module
     }
 
-    fn local(&mut self, d: &Declaration) -> Compiled<()> {
+    fn local(&mut self, d: &Declaration) {
         let ty = Typed::of(&d.ty);
         let constant = matches!(d.init, Some(Init::Constant(_)));
         let init = match &d.init {
@@ -469,7 +467,7 @@ impl<'p> Compiler<'p> {
                                     self.emit(Instr::Const(Value::integer(*i)), n.span);
                                 }
                                 Bound::Name(b) => {
-                                    self.load(b)?;
+                                    self.load(b);
                                     self.emit(Instr::AsInteger, b.span);
                                 }
                             }
@@ -493,21 +491,19 @@ impl<'p> Compiler<'p> {
                 }
             }
         }
-        Ok(())
     }
 
     // Statements
 
-    fn stmts(&mut self, stmts: &[Stmt]) -> Compiled<()> {
+    fn stmts(&mut self, stmts: &[Stmt]) {
         for s in stmts {
-            self.stmt(s)?;
+            self.stmt(s);
         }
-        Ok(())
     }
 
     /// A variable's value, as the reference's `read`: TIME when no
     /// variable hides it.
-    fn load(&mut self, n: &Name) -> Compiled<()> {
+    fn load(&mut self, n: &Name) {
         match self.slot(n) {
             Some(s) => {
                 self.emit(Instr::Load(s), n.span);
@@ -517,27 +513,25 @@ impl<'p> Compiler<'p> {
             }
             None => self.fail(n.span, format!("`{}` is not a variable here", n.spelling)),
         }
-        Ok(())
     }
 
-    fn indices(&mut self, v: &Variable) -> Compiled<()> {
+    fn indices(&mut self, v: &Variable) {
         for i in &v.indices {
-            self.expr(i)?;
+            self.expr(i);
             self.emit(Instr::AsInteger, i.span);
         }
-        Ok(())
     }
 
     /// Stores the value on the stack in `target`, as the reference's
     /// `assign`: indices, then the constant check, then the conversion,
     /// which fails at `convert`.
-    fn assign(&mut self, target: &Variable, convert: Span) -> Compiled<()> {
+    fn assign(&mut self, target: &Variable, convert: Span) {
         let Some(s) = self.slot(&target.name) else {
             let message = format!("`{}` is not a variable here", target.name.spelling);
             self.fail(target.name.span, message);
-            return Ok(());
+            return;
         };
-        self.indices(target)?;
+        self.indices(target);
         self.emit(Instr::CheckStore(s), target.name.span);
         if target.indices.is_empty() {
             self.emit(Instr::Store(s), convert);
@@ -545,7 +539,6 @@ impl<'p> Compiler<'p> {
             let n = target.indices.len();
             self.emit(Instr::StoreIndex(s, n, at(convert)), target.name.span);
         }
-        Ok(())
     }
 
     fn whole(name: &Name) -> Variable {
@@ -555,11 +548,11 @@ impl<'p> Compiler<'p> {
         }
     }
 
-    fn stmt(&mut self, s: &Stmt) -> Compiled<()> {
+    fn stmt(&mut self, s: &Stmt) {
         self.emit(Instr::Stmt, s.span);
         match &s.kind {
             StmtKind::Assign { target, value } => {
-                self.expr(value)?;
+                self.expr(value);
                 self.assign(target, value.span)
             }
             StmtKind::Loop {
@@ -577,30 +570,29 @@ impl<'p> Compiler<'p> {
             } => {
                 let Some(of) = of else {
                     self.fail(s.span, "EACH without OF: not yet");
-                    return Ok(());
+                    return;
                 };
                 self.each(name, of, filter.as_ref(), body)
             }
             StmtKind::Parallel(branches) => {
                 for b in branches {
-                    self.stmts(b)?;
+                    self.stmts(b);
                 }
-                Ok(())
             }
             StmtKind::If {
                 condition,
                 then,
                 otherwise,
             } => {
-                self.expr(condition)?;
+                self.expr(condition);
                 let skip = self.emit(Instr::JumpFalse(PENDING), condition.span);
-                self.stmts(then)?;
+                self.stmts(then);
                 match otherwise {
                     Some(o) => {
                         let over = self.emit(Instr::Jump(0), s.span);
                         let here = self.here();
                         self.patch(skip, here);
-                        self.stmts(o)?;
+                        self.stmts(o);
                         let here = self.here();
                         self.patch(over, here);
                     }
@@ -609,34 +601,33 @@ impl<'p> Compiler<'p> {
                         self.patch(skip, here);
                     }
                 }
-                Ok(())
             }
             StmtKind::Case {
                 subject,
                 arms,
                 others,
             } => {
-                self.expr(subject)?;
+                self.expr(subject);
                 let v = self.hidden();
                 self.emit(Instr::Store(v), subject.span);
                 let mut entries = Vec::new();
                 for (k, arm) in arms.iter().enumerate() {
                     for candidate in &arm.values {
                         self.emit(Instr::Load(v), candidate.span);
-                        self.expr(candidate)?;
+                        self.expr(candidate);
                         self.emit(Instr::Op(Op::Eq), candidate.span);
                         let j = self.emit(Instr::JumpTrue(PENDING), candidate.span);
                         entries.push((j, k));
                     }
                 }
                 if let Some(o) = others {
-                    self.stmts(o)?;
+                    self.stmts(o);
                 }
                 let mut ends = vec![self.emit(Instr::Jump(0), s.span)];
                 let mut starts = Vec::new();
                 for arm in arms {
                     starts.push(self.here());
-                    self.stmts(&arm.body)?;
+                    self.stmts(&arm.body);
                     ends.push(self.emit(Instr::Jump(0), s.span));
                 }
                 for (j, k) in entries {
@@ -646,7 +637,6 @@ impl<'p> Compiler<'p> {
                 for j in ends {
                     self.patch(j, end);
                 }
-                Ok(())
             }
             StmtKind::Exit { kind, count } => {
                 let leave = match kind {
@@ -676,7 +666,7 @@ impl<'p> Compiler<'p> {
                         self.loops[loop_].push((j, leave));
                     }
                     (None, Some(c)) => {
-                        self.expr(c)?;
+                        self.expr(c);
                         self.emit(Instr::AsInteger, c.span);
                         let j = self.emit(Instr::Leave(leave, vec![PENDING; depth]), s.span);
                         for l in &mut self.loops {
@@ -685,27 +675,21 @@ impl<'p> Compiler<'p> {
                     }
                     (None, None) => unreachable!("a count of one is written"),
                 }
-                Ok(())
             }
             StmtKind::Return => {
                 self.emit(Instr::Jump(PENDING), s.span);
-                Ok(())
             }
             StmtKind::Reproc => {
                 self.fail(s.span, "the meaning of REPROC is not established");
-                Ok(())
             }
             StmtKind::Pause => {
                 self.emit(Instr::Pause, s.span);
-                Ok(())
             }
             StmtKind::Stop => {
                 self.emit(Instr::Stop, s.span);
-                Ok(())
             }
             StmtKind::Restart => {
                 self.emit(Instr::Restart, s.span);
-                Ok(())
             }
             StmtKind::Reset(vs) => {
                 for v in vs {
@@ -719,22 +703,20 @@ impl<'p> Compiler<'p> {
                         }
                     }
                 }
-                Ok(())
             }
             StmtKind::Result(e) => {
-                self.expr(e)?;
+                self.expr(e);
                 self.emit(Instr::Result, s.span);
-                Ok(())
             }
             StmtKind::Insert {
                 items,
                 list,
                 position,
             } => {
-                self.gather(items)?;
+                self.gather(items);
                 let place = match position {
                     Some((p, e)) => {
-                        self.expr(e)?;
+                        self.expr(e);
                         self.emit(Instr::AsInteger, e.span);
                         match p {
                             Position::After => Place::After,
@@ -744,29 +726,26 @@ impl<'p> Compiler<'p> {
                     None => Place::End,
                 };
                 let Some(l) = self.list(list) else {
-                    return Ok(());
+                    return;
                 };
                 let span = position.as_ref().map_or(s.span, |(_, e)| e.span);
                 self.emit(Instr::Insert(l, place), span);
-                Ok(())
             }
             StmtKind::Extract { items, list } => {
-                self.gather(items)?;
+                self.gather(items);
                 if let Some(l) = self.list(list) {
                     self.emit(Instr::Extract(l), s.span);
                 }
-                Ok(())
             }
             StmtKind::Empty(list) => {
                 if let Some(l) = self.list(list) {
                     self.emit(Instr::Empty(l), s.span);
                 }
-                Ok(())
             }
             StmtKind::Organize { kind, lists } => {
                 for list in lists {
                     let Some(l) = self.list(list) else {
-                        return Ok(());
+                        return;
                     };
                     match kind {
                         Organization::Circular => {
@@ -778,77 +757,65 @@ impl<'p> Compiler<'p> {
                         Organization::Single | Organization::Tuple => {}
                     }
                 }
-                Ok(())
             }
-            StmtKind::Chain(q) => {
-                match self.module_named(q) {
-                    Some(m) if m.kind == Kind::Program => {
-                        self.emit(Instr::Chain(m.index), q.span);
-                    }
-                    _ => self.fail(
-                        q.span,
-                        format!("`{}` is not a program of this file", q.spelling),
-                    ),
+            StmtKind::Chain(q) => match self.module_named(q) {
+                Some(m) if m.kind == Kind::Program => {
+                    self.emit(Instr::Chain(m.index), q.span);
                 }
-                Ok(())
-            }
-            StmtKind::Call(c) => {
-                match self.module_named(&c.name) {
-                    None if builtins::is_subroutine(&c.name.key) => {
-                        self.emit(Instr::Begin, s.span);
-                        self.engine(c, s.span)?;
-                        self.emit(Instr::Commit, s.span);
-                    }
-                    Some(m) if m.kind == Kind::Subroutine => {
-                        let n = self.args(&m, c)?;
-                        if let Some(n) = n {
-                            self.emit(Instr::Call(m.index, n), c.name.span);
-                        }
-                    }
-                    _ => {
-                        let message =
-                            format!("`{}` is not a subroutine of this file", c.name.spelling);
-                        self.fail(c.name.span, message);
+                _ => self.fail(
+                    q.span,
+                    format!("`{}` is not a program of this file", q.spelling),
+                ),
+            },
+            StmtKind::Call(c) => match self.module_named(&c.name) {
+                None if builtins::is_subroutine(&c.name.key) => {
+                    self.emit(Instr::Begin, s.span);
+                    self.engine(c, s.span);
+                    self.emit(Instr::Commit, s.span);
+                }
+                Some(m) if m.kind == Kind::Subroutine => {
+                    let n = self.args(&m, c);
+                    if let Some(n) = n {
+                        self.emit(Instr::Call(m.index, n), c.name.span);
                     }
                 }
-                Ok(())
-            }
+                _ => {
+                    let message = format!("`{}` is not a subroutine of this file", c.name.spelling);
+                    self.fail(c.name.span, message);
+                }
+            },
             StmtKind::Read(vs) => {
                 for v in vs {
                     let Some(slot) = self.slot(&v.name) else {
                         let message = format!("`{}` is not a variable here", v.name.spelling);
                         self.fail(v.name.span, message);
-                        return Ok(());
+                        return;
                     };
                     let text = matches!(
                         self.slots[slot].ty,
                         SlotType::Base(Base::String | Base::Character)
                     );
                     self.emit(Instr::Read(text), v.name.span);
-                    self.assign(v, v.name.span)?;
+                    self.assign(v, v.name.span);
                 }
-                Ok(())
             }
             StmtKind::Print(es) => {
                 for e in es {
-                    self.expr(e)?;
+                    self.expr(e);
                 }
                 self.emit(Instr::Print(es.len()), s.span);
-                Ok(())
             }
             StmtKind::Create(o) => {
                 self.emit(Instr::Begin, s.span);
-                self.create(o, false, s.span)?;
+                self.create(o, false, s.span);
                 self.emit(Instr::Commit, s.span);
-                Ok(())
             }
             StmtKind::Design(o) => self.create(o, true, s.span),
             StmtKind::StateChange(op, o) => self.state_change(*op, o, s.span),
             StmtKind::Let { target, value } => {
                 self.emit(Instr::Begin, s.span);
-                self.let_(target, value, s.span)?;
+                self.let_(target, value, s.span);
                 self.emit(Instr::Commit, s.span);
-                Ok(())
             }
             StmtKind::Assert(Assertion::Link {
                 from,
@@ -857,8 +824,8 @@ impl<'p> Compiler<'p> {
                 probability,
                 to,
             }) => {
-                self.object(from, s.span)?;
-                self.object(to, s.span)?;
+                self.object(from, s.span);
+                self.object(to, s.span);
                 let p = probability.as_ref().map(|p| match p {
                     Real::Integer(i) => *i as f64,
                     Real::Float(x) => *x,
@@ -866,11 +833,9 @@ impl<'p> Compiler<'p> {
                 self.emit(Instr::Begin, s.span);
                 self.emit(Instr::Assert(relation.text.clone(), p, *negated), s.span);
                 self.emit(Instr::Commit, s.span);
-                Ok(())
             }
             StmtKind::Assert(Assertion::Name(_)) => {
                 self.fail(s.span, "ASSERT of a name: not yet");
-                Ok(())
             }
             StmtKind::Specify {
                 items,
@@ -881,18 +846,17 @@ impl<'p> Compiler<'p> {
                 let spec = specification(spec);
                 for item in items {
                     match item {
-                        Specified::Class(c) => self.class(c, s.span)?,
-                        Specified::Attribute(a) => self.class_attribute(a, s.span)?,
+                        Specified::Class(c) => self.class(c, s.span),
+                        Specified::Attribute(a) => self.class_attribute(a, s.span),
                         Specified::Link(l) => {
-                            self.class(&l.from, s.span)?;
-                            self.class(&l.to, s.span)?;
+                            self.class(&l.from, s.span);
+                            self.class(&l.to, s.span);
                             self.emit(Instr::LinkOf(l.relation.text.clone()), s.span);
                         }
                     }
                     let unit = unit.as_ref().map(|u| u.spelling.clone());
                     self.emit(Instr::Specify(spec, unit, *computed), s.span);
                 }
-                Ok(())
             }
             StmtKind::Include { classes, into }
             | StmtKind::Exclude {
@@ -901,41 +865,120 @@ impl<'p> Compiler<'p> {
             } => {
                 let include = matches!(s.kind, StmtKind::Include { .. });
                 for c in classes {
-                    self.class(c, s.span)?;
+                    self.class(c, s.span);
                 }
                 for h in into {
-                    self.class(h, s.span)?;
+                    self.class(h, s.span);
                 }
                 self.emit(Instr::Include(classes.len(), into.len(), include), s.span);
-                Ok(())
             }
             StmtKind::Associate(pairs) | StmtKind::Dissociate(pairs) => {
                 let assoc = matches!(s.kind, StmtKind::Associate(_));
                 for (a, d) in pairs {
-                    self.adt(a, s.span)?;
-                    self.designate(d, s.span, false)?;
+                    self.adt(a, s.span);
+                    self.designate(d, s.span, false);
                     self.emit(Instr::Assoc(assoc), s.span);
                 }
-                Ok(())
             }
             StmtKind::Compose { class, with } => {
-                self.text(class, s.span)?;
+                self.text(class, s.span);
                 for w in with {
-                    self.class(w, s.span)?;
+                    self.class(w, s.span);
                 }
                 self.emit(Instr::Compose(with.len()), s.span);
-                Ok(())
             }
             StmtKind::Build { classes, model } => {
-                self.class(model, s.span)?;
+                self.class(model, s.span);
                 for c in classes {
-                    self.text(c, s.span)?;
+                    self.text(c, s.span);
                 }
                 self.emit(Instr::Build(classes.len()), s.span);
-                Ok(())
             }
-            _ => not_yet(s.span, "processes and coroutines"),
+            StmtKind::Resume(c) => match self.module_named(&c.name) {
+                Some(m) if m.kind == Kind::Coroutine => {
+                    let index = m.index;
+                    let started = self.emit(
+                        Instr::ResumeStarted(index, !c.args.is_empty(), PENDING),
+                        c.name.span,
+                    );
+                    if let Some(n) = self.args(&m, c) {
+                        self.emit(Instr::ResumeFirst(index, n), c.name.span);
+                    }
+                    let after = self.here();
+                    if let Instr::ResumeStarted(_, _, t) = &mut self.code[started] {
+                        *t = after;
+                    }
+                }
+                _ => self.fail(
+                    c.name.span,
+                    format!("`{}` is not a coroutine of this file", c.name.spelling),
+                ),
+            },
+            StmtKind::Activate(o) => self.activate(o, None, s.span),
+            StmtKind::Reactivate { object, when } => self.activate(object, when.as_ref(), s.span),
+            StmtKind::Cancel(o) => {
+                self.process(o, s.span);
+                self.emit(Instr::Cancel, s.span);
+            }
+            StmtKind::Kill(o) => {
+                self.process(o, s.span);
+                self.emit(Instr::Kill, s.span);
+            }
+            StmtKind::Delay { object, duration } => {
+                self.process(object, s.span);
+                self.expr(duration);
+                self.emit(Instr::AsTime, duration.span);
+                self.emit(Instr::Delay, s.span);
+            }
+            StmtKind::Hold { object, duration } => {
+                self.emit(Instr::Running("HOLD".into()), s.span);
+                if let Some(o) = object {
+                    self.process(o, s.span);
+                    self.emit(Instr::IsRunning, s.span);
+                }
+                self.expr(duration);
+                self.emit(Instr::AsTime, duration.span);
+                self.emit(Instr::Hold, s.span);
+            }
+            StmtKind::Passivate => {
+                self.emit(Instr::Running("PASSIVATE".into()), s.span);
+                self.emit(Instr::Passivate, s.span);
+            }
+            StmtKind::Terminate => {
+                self.emit(Instr::Running("TERMINATE".into()), s.span);
+                self.emit(Instr::Terminate, s.span);
+            }
         }
+    }
+
+    /// A process a designation names, as the reference's `process`.
+    fn process(&mut self, d: &Designation, span: Span) {
+        self.object(d, span);
+        self.emit(Instr::Process, span);
+    }
+
+    /// ACTIVATE, and REACTIVATE AT, BEFORE or AFTER, as the reference's
+    /// `reactivate`.
+    fn activate(&mut self, o: &Designation, when: Option<&When>, span: Span) {
+        self.process(o, span);
+        self.emit(Instr::HasBody, span);
+        let due = match when {
+            None => Due::Now,
+            Some(When::At(e)) => {
+                self.expr(e);
+                self.emit(Instr::AsTime, e.span);
+                Due::At
+            }
+            Some(When::Before(q)) => {
+                self.process(q, span);
+                Due::Before
+            }
+            Some(When::After(q)) => {
+                self.process(q, span);
+                Due::After
+            }
+        };
+        self.emit(Instr::Activate(due), span);
     }
 
     /// A list variable for INSERT, EXTRACT, EMPTY, CIRCULAR and LINEAR.
@@ -952,12 +995,11 @@ impl<'p> Compiler<'p> {
         }
     }
 
-    fn gather(&mut self, items: &[Expr]) -> Compiled<()> {
+    fn gather(&mut self, items: &[Expr]) {
         for i in items {
-            self.expr(i)?;
+            self.expr(i);
         }
         self.emit(Instr::Gather(items.len()), Span::default());
-        Ok(())
     }
 
     fn open_loop(&mut self, again: usize) {
@@ -996,14 +1038,14 @@ impl<'p> Compiler<'p> {
         condition: Option<&Expr>,
         body: &[Stmt],
         until: Option<&Expr>,
-    ) -> Compiled<()> {
+    ) {
         let again = self.here();
         let mut counter = None;
         if let Some(r) = range {
-            self.expr(&r.from)?;
-            self.assign(&Self::whole(&r.name), r.from.span)?;
+            self.expr(&r.from);
+            self.assign(&Self::whole(&r.name), r.from.span);
             match &r.step {
-                Some(s) => self.expr(s)?,
+                Some(s) => self.expr(s),
                 None => {
                     self.emit(Instr::Const(Value::integer(1)), r.from.span);
                 }
@@ -1017,26 +1059,26 @@ impl<'p> Compiler<'p> {
         let top = self.here();
         let mut exits = Vec::new();
         if let Some((r, _, up)) = counter {
-            self.load(&r.name)?;
-            self.expr(&r.to)?;
+            self.load(&r.name);
+            self.expr(&r.to);
             self.emit(Instr::Within(up), r.to.span);
             exits.push(self.emit(Instr::JumpFalse(PENDING), r.to.span));
         }
         if let Some(c) = condition {
-            self.expr(c)?;
+            self.expr(c);
             exits.push(self.emit(Instr::JumpFalse(PENDING), c.span));
         }
-        self.stmts(body)?;
+        self.stmts(body);
         let next = self.here();
         if let Some(u) = until {
-            self.expr(u)?;
+            self.expr(u);
             exits.push(self.emit(Instr::JumpTrue(PENDING), u.span));
         }
         if let Some((r, step, _)) = counter {
-            self.load(&r.name)?;
+            self.load(&r.name);
             self.emit(Instr::Load(step), r.name.span);
             self.emit(Instr::Op(Op::Add), r.name.span);
-            self.assign(&Self::whole(&r.name), r.name.span)?;
+            self.assign(&Self::whole(&r.name), r.name.span);
         }
         self.emit(Instr::Jump(top), Span::default());
         let end = self.here();
@@ -1044,40 +1086,32 @@ impl<'p> Compiler<'p> {
             self.patch(j, end);
         }
         self.close_loop(next, end);
-        Ok(())
     }
 
-    fn each(
-        &mut self,
-        name: &Name,
-        of: &Expr,
-        filter: Option<&Expr>,
-        body: &[Stmt],
-    ) -> Compiled<()> {
+    fn each(&mut self, name: &Name, of: &Expr, filter: Option<&Expr>, body: &[Stmt]) {
         let again = self.here();
-        self.expr(of)?;
+        self.expr(of);
         let (items, position) = (self.hidden(), self.hidden());
         self.emit(Instr::EachStart(items, position), of.span);
         self.open_loop(again);
         let top = self.here();
         let next = self.emit(Instr::EachNext(items, position, PENDING), name.span);
-        self.assign(&Self::whole(name), name.span)?;
+        self.assign(&Self::whole(name), name.span);
         if let Some(f) = filter {
-            self.expr(f)?;
+            self.expr(f);
             self.emit(Instr::JumpFalse(top), f.span);
         }
-        self.stmts(body)?;
+        self.stmts(body);
         self.emit(Instr::Jump(top), Span::default());
         let end = self.here();
         self.patch(next, end);
         self.close_loop(top, end);
-        Ok(())
     }
 
     /// A call's arguments, as the reference's `args`: their number
     /// first, then each in order, a value for IN, the caller's variable
     /// for OUT and INOUT. None if it fails before the call.
-    fn args(&mut self, m: &Callee, c: &Call) -> Compiled<Option<usize>> {
+    fn args(&mut self, m: &Callee, c: &Call) -> Option<usize> {
         if m.modes.len() != c.args.len() {
             let message = format!(
                 "`{}` takes {} argument(s), not {}",
@@ -1086,11 +1120,11 @@ impl<'p> Compiler<'p> {
                 c.args.len()
             );
             self.fail(c.name.span, message);
-            return Ok(None);
+            return None;
         }
         for (mode, a) in m.modes.iter().zip(&c.args) {
             match (mode, &a.kind) {
-                (Mode::In, _) => self.expr(a)?,
+                (Mode::In, _) => self.expr(a),
                 (_, ExprKind::Variable(v)) if v.indices.is_empty() => match self.slot(&v.name) {
                     Some(s) => {
                         self.emit(Instr::Ref(s), a.span);
@@ -1098,21 +1132,21 @@ impl<'p> Compiler<'p> {
                     None => {
                         let message = format!("`{}` is not a variable here", v.name.spelling);
                         self.fail(v.name.span, message);
-                        return Ok(None);
+                        return None;
                     }
                 },
                 _ => {
                     self.fail(a.span, "an OUT or INOUT argument is a whole variable");
-                    return Ok(None);
+                    return None;
                 }
             }
         }
-        Ok(Some(c.args.len()))
+        Some(c.args.len())
     }
 
     // Expressions
 
-    fn expr(&mut self, e: &Expr) -> Compiled<()> {
+    fn expr(&mut self, e: &Expr) {
         match &e.kind {
             ExprKind::Number(n) => match literal(n) {
                 Ok(fz) => {
@@ -1131,7 +1165,7 @@ impl<'p> Compiler<'p> {
                         Ok(fz) => out.push(fz),
                         Err(f) => {
                             self.fail(e.span, f.0);
-                            return Ok(());
+                            return;
                         }
                     }
                 }
@@ -1150,18 +1184,18 @@ impl<'p> Compiler<'p> {
             }
             ExprKind::Variable(v) => {
                 if v.indices.is_empty() {
-                    self.load(&v.name)?;
+                    self.load(&v.name);
                 } else if let Some(s) = self.slot(&v.name) {
-                    self.indices(v)?;
+                    self.indices(v);
                     self.emit(Instr::LoadIndex(s, v.indices.len()), v.name.span);
                 } else {
                     let message = format!("`{}` is not a variable here", v.name.spelling);
                     self.fail(v.name.span, message);
                 }
             }
-            ExprKind::Call(c) => self.function(c, e.span)?,
+            ExprKind::Call(c) => self.function(c, e.span),
             ExprKind::Unary(op, x) => {
-                self.expr(x)?;
+                self.expr(x);
                 let u = match op {
                     UnaryOp::Neg => hbds_values::Unary::Neg,
                     UnaryOp::Plus => hbds_values::Unary::Number,
@@ -1170,8 +1204,8 @@ impl<'p> Compiler<'p> {
                 self.emit(Instr::Unary(u), e.span);
             }
             ExprKind::Binary(op, l, r) => {
-                self.expr(l)?;
-                self.expr(r)?;
+                self.expr(l);
+                self.expr(r);
                 let i = match value::op(*op) {
                     Some(op) => Instr::Op(op),
                     None => Instr::ListOp(match op {
@@ -1182,71 +1216,69 @@ impl<'p> Compiler<'p> {
                 };
                 self.emit(i, e.span);
             }
-            ExprKind::Functor(adt, calls) => self.functors(adt, calls, e.span)?,
+            ExprKind::Functor(adt, calls) => self.functors(adt, calls, e.span),
             ExprKind::Attribute(object, attribute) => {
-                self.object(object, e.span)?;
-                self.text(attribute, e.span)?;
+                self.object(object, e.span);
+                self.text(attribute, e.span);
                 self.emit(Instr::AttrValue, e.span);
             }
             ExprKind::Link(from, relation, to) => {
-                self.object(from, e.span)?;
-                self.object(to, e.span)?;
+                self.object(from, e.span);
+                self.object(to, e.span);
                 self.emit(Instr::Linked(relation.text.clone()), e.span);
             }
         }
-        Ok(())
     }
 
-    fn function(&mut self, c: &Call, span: Span) -> Compiled<()> {
+    fn function(&mut self, c: &Call, span: Span) {
         if let Some(m) = self.module_named(&c.name) {
             if m.kind != Kind::Function {
                 self.fail(
                     c.name.span,
                     format!("`{}` is not a function", c.name.spelling),
                 );
-                return Ok(());
+                return;
             }
-            if let Some(n) = self.args(&m, c)? {
+            if let Some(n) = self.args(&m, c) {
                 self.emit(Instr::Call(m.index, n), c.name.span);
             }
-            return Ok(());
+            return;
         }
         if !builtins::is_function(&c.name.key) {
             let message = format!("`{}` is not a function of this file", c.name.spelling);
             self.fail(c.name.span, message);
-            return Ok(());
+            return;
         }
         let [arg] = c.args.as_slice() else {
             self.fail(
                 c.name.span,
                 format!("`{}` takes one argument", c.name.spelling),
             );
-            return Ok(());
+            return;
         };
-        self.expr(arg)?;
+        self.expr(arg);
         let one = format!("`{}` takes one number", c.name.spelling);
         self.emit(Instr::ExpectOne(one), arg.span);
         self.emit(Instr::Native(c.name.key.clone()), span);
-        Ok(())
     }
 
     /// `L ' F ' G(x)`: the prefix as the reference's `prefix`, a list or
     /// an a.d.t. a variable holds or an expression gives, else the
     /// designation; the first functor may change the list a variable
     /// holds.
-    fn functors(&mut self, adt: &Adt, calls: &[Call], span: Span) -> Compiled<()> {
+    fn functors(&mut self, adt: &Adt, calls: &[Call], span: Span) {
         let mut held = None;
         match (&adt.designation, &adt.part) {
             (Designation::Named(AdtName::Name(n)), AdtPart::None) => {
-                self.load(n)?;
+                self.load(n);
                 held = self.slot(n);
-                self.keep_or(adt, span)?;
+                self.keep_or(adt, span);
             }
             (Designation::Named(AdtName::Expr(e)), AdtPart::None) => {
-                self.expr(e)?;
-                self.keep_or(adt, span)?;
+                self.expr(e);
+                self.keep_or(adt, span);
             }
-            _ => self.adt(adt, span)?,
+            _ => self.adt(adt, span),
         }
         for c in calls {
             let held_now = held.take();
@@ -1256,9 +1288,9 @@ impl<'p> Compiler<'p> {
                         c.name.span,
                         format!("`{}` is not a functor", c.name.spelling),
                     );
-                    return Ok(());
+                    return;
                 }
-                if let Some(n) = self.args(&m, c)? {
+                if let Some(n) = self.args(&m, c) {
                     // The prefix, under the arguments, goes first.
                     self.emit(Instr::Call(m.index, n + 1), c.name.span);
                 }
@@ -1267,10 +1299,10 @@ impl<'p> Compiler<'p> {
             let Some(functor) = builtins::functor(&c.name.key) else {
                 let message = format!("`{}` is not a functor of this file", c.name.spelling);
                 self.fail(c.name.span, message);
-                return Ok(());
+                return;
             };
             for a in &c.args {
-                self.expr(a)?;
+                self.expr(a);
             }
             let (key, spelling) = (c.name.key.clone(), c.name.spelling.clone());
             let n = c.args.len();
@@ -1280,12 +1312,11 @@ impl<'p> Compiler<'p> {
                 self.emit(Instr::AdtFunctor(key, spelling, n), c.name.span);
             }
         }
-        Ok(())
     }
 
     /// CALL CHAV(rule classes) and CALL HYPOCHAV(hypotheses, rule
     /// classes), as the reference's `engine`.
-    fn engine(&mut self, c: &Call, span: Span) -> Compiled<()> {
+    fn engine(&mut self, c: &Call, span: Span) {
         let hypothetical = c.name.key == "HYPOCHAV";
         let mut args = c.args.iter();
         if hypothetical {
@@ -1294,151 +1325,142 @@ impl<'p> Compiler<'p> {
                     span,
                     "HYPOCHAV takes its hypotheses first, statements in a string",
                 );
-                return Ok(());
+                return;
             };
-            self.expr(h)?;
+            self.expr(h);
             self.emit(Instr::Hypotheses, span);
         }
         self.emit(Instr::InstallRules, span);
         let mut n = 0;
         for a in args {
-            self.expr(a)?;
+            self.expr(a);
             self.emit(Instr::RuleClass(c.name.spelling.clone()), a.span);
             n += 1;
         }
         self.emit(Instr::Chav(hypothetical, n), span);
-        Ok(())
     }
 
     /// A list or an a.d.t. on the stack is the prefix; anything else
     /// gives way to the designation, evaluated again.
-    fn keep_or(&mut self, adt: &Adt, span: Span) -> Compiled<()> {
+    fn keep_or(&mut self, adt: &Adt, span: Span) {
         let keep = self.emit(Instr::KeepOr(PENDING), span);
         let over = self.emit(Instr::Jump(0), span);
         let designation = self.here();
         if let Instr::KeepOr(t) = &mut self.code[keep] {
             *t = designation;
         }
-        self.adt(adt, span)?;
+        self.adt(adt, span);
         let after = self.here();
         self.patch(over, after);
-        Ok(())
     }
 
     // The store's designations, as the reference's functions of the same
     // names: each leaves its result on the stack.
 
     /// A name as a designation gives it: a string, or an a.d.t.
-    fn named(&mut self, n: &AdtName, span: Span) -> Compiled<()> {
+    fn named(&mut self, n: &AdtName, span: Span) {
         match n {
             AdtName::String(s) => {
                 let v = Value::exact(Scalar::String(s.text.as_str().into()));
                 self.emit(Instr::Const(v), s.span);
             }
-            AdtName::Name(name) => self.load(name)?,
-            AdtName::Expr(e) => self.expr(e)?,
+            AdtName::Name(name) => self.load(name),
+            AdtName::Expr(e) => self.expr(e),
         }
         self.emit(Instr::Named, span);
-        Ok(())
     }
 
-    fn text(&mut self, n: &AdtName, span: Span) -> Compiled<()> {
-        self.named(n, span)?;
+    fn text(&mut self, n: &AdtName, span: Span) {
+        self.named(n, span);
         self.emit(Instr::Text, span);
-        Ok(())
     }
 
-    fn class(&mut self, n: &AdtName, span: Span) -> Compiled<()> {
-        self.named(n, span)?;
+    fn class(&mut self, n: &AdtName, span: Span) {
+        self.named(n, span);
         self.emit(Instr::ToClass, span);
-        Ok(())
     }
 
-    fn designate(&mut self, d: &Designation, span: Span, any: bool) -> Compiled<()> {
+    fn designate(&mut self, d: &Designation, span: Span, any: bool) {
         match d {
             Designation::This(at) => {
                 let message = "THIS is the object a computed attribute is computed for";
                 self.emit(Instr::This(message.into()), *at);
             }
             Designation::Named(n) => {
-                self.named(n, span)?;
+                self.named(n, span);
                 self.emit(Instr::Designate(any), span);
             }
             Designation::Classed { name, class } => {
-                self.text(name, span)?;
-                self.text(class, span)?;
+                self.text(name, span);
+                self.text(class, span);
                 self.emit(Instr::ObjectNamed(any), span);
             }
         }
-        Ok(())
     }
 
-    fn object(&mut self, d: &Designation, span: Span) -> Compiled<()> {
-        self.designate(d, span, false)?;
+    fn object(&mut self, d: &Designation, span: Span) {
+        self.designate(d, span, false);
         self.emit(Instr::IsObject, span);
-        Ok(())
     }
 
-    fn adt(&mut self, a: &Adt, span: Span) -> Compiled<()> {
-        self.designate(&a.designation, span, false)?;
+    fn adt(&mut self, a: &Adt, span: Span) {
+        self.designate(&a.designation, span, false);
         match &a.part {
             AdtPart::None => {}
             AdtPart::Attribute(n) => {
-                self.text(n, span)?;
+                self.text(n, span);
                 self.emit(Instr::AttrOf, span);
             }
             AdtPart::Link(relation, to) => {
-                self.designate(to, span, false)?;
+                self.designate(to, span, false);
                 self.emit(Instr::LinkOf(relation.text.clone()), span);
             }
         }
-        Ok(())
     }
 
-    fn class_attribute(&mut self, a: &ClassAttribute, span: Span) -> Compiled<()> {
-        self.class(&a.class, span)?;
-        self.text(&a.attribute, span)?;
+    fn class_attribute(&mut self, a: &ClassAttribute, span: Span) {
+        self.class(&a.class, span);
+        self.text(&a.attribute, span);
         self.emit(Instr::ClassAttr, span);
-        Ok(())
     }
 
     /// CREATE and DESIGN: classes (embryos for DESIGN), objects,
     /// attributes, links.
-    fn create(&mut self, o: &Operands, embryo: bool, span: Span) -> Compiled<()> {
+    fn create(&mut self, o: &Operands, embryo: bool, span: Span) {
         match o {
             Operands::Designations(ds) => {
                 for d in ds {
                     match d {
                         Designation::Named(n) => {
-                            self.text(n, span)?;
+                            self.text(n, span);
                             self.emit(Instr::CreateClass(embryo), span);
                         }
                         Designation::Classed { name, class } => {
-                            self.class(class, span)?;
-                            self.text(name, span)?;
+                            self.class(class, span);
+                            self.text(name, span);
                             self.emit(Instr::CreateObject, span);
                         }
                         Designation::This(at) => {
                             self.fail(*at, "THIS exists already");
-                            return Ok(());
+                            return;
                         }
                     }
                 }
             }
             Operands::Attributes(attributes) => {
                 for a in attributes {
-                    self.class(&a.class, span)?;
-                    self.text(&a.attribute, span)?;
+                    self.class(&a.class, span);
+                    self.text(&a.attribute, span);
                     self.emit(Instr::CreateAttribute, span);
                 }
             }
             Operands::Links(links) => {
                 for l in links {
-                    self.class(&l.link.from, span)?;
-                    self.class(&l.link.to, span)?;
+                    self.class(&l.link.from, span);
+                    self.class(&l.link.to, span);
                     let named = match &l.reverse {
                         Reverse::Named(n) => {
-                            self.text(n, span)?;
+                            self.text(n, span);
                             true
                         }
                         _ => false,
@@ -1449,30 +1471,29 @@ impl<'p> Compiler<'p> {
                 }
             }
         }
-        Ok(())
     }
 
-    fn state_change(&mut self, op: StateOp, o: &Operands, span: Span) -> Compiled<()> {
+    fn state_change(&mut self, op: StateOp, o: &Operands, span: Span) {
         let mut n = 0;
         match o {
             Operands::Designations(ds) => {
                 for d in ds {
-                    self.designate(d, span, true)?;
+                    self.designate(d, span, true);
                     n += 1;
                 }
             }
             Operands::Attributes(attributes) => {
                 for a in attributes {
-                    self.class(&a.class, span)?;
-                    self.text(&a.attribute, span)?;
+                    self.class(&a.class, span);
+                    self.text(&a.attribute, span);
                     self.emit(Instr::FindAttribute, span);
                     n += 1;
                 }
             }
             Operands::Links(links) => {
                 for l in links {
-                    self.class(&l.link.from, span)?;
-                    self.class(&l.link.to, span)?;
+                    self.class(&l.link.from, span);
+                    self.class(&l.link.to, span);
                     self.emit(Instr::FindLink(l.link.relation.text.clone()), span);
                     n += 1;
                 }
@@ -1486,27 +1507,25 @@ impl<'p> Compiler<'p> {
             StateOp::Purge => AState::Purge,
         };
         self.emit(Instr::StateChange(op, n), span);
-        Ok(())
     }
 
-    fn let_(&mut self, target: &LetTarget, value: &Expr, span: Span) -> Compiled<()> {
-        self.expr(value)?;
+    fn let_(&mut self, target: &LetTarget, value: &Expr, span: Span) {
+        self.expr(value);
         match target {
             LetTarget::Attribute { object, attribute } => {
-                self.object(object, span)?;
-                self.text(attribute, span)?;
+                self.object(object, span);
+                self.text(attribute, span);
                 self.emit(Instr::SetAttribute, span);
             }
             LetTarget::Variable(n) => {
-                self.load(n)?;
+                self.load(n);
                 self.emit(Instr::SetHeld(n.spelling.clone(), at(span)), n.span);
             }
             LetTarget::Property { adt, name } => {
-                self.adt(adt, span)?;
+                self.adt(adt, span);
                 self.emit(Instr::SetProperty(name.key.clone(), at(span)), value.span);
             }
         }
-        Ok(())
     }
 }
 

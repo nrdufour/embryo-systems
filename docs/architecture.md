@@ -175,6 +175,20 @@ store, and runs would no longer be deterministic); engines made
 resumable (each a state machine, which no page of the print needs);
 cooperative switching only (one loop freezes every client).
 
+As built (2026-10-16, step 4c): the VM's fibers are the main program,
+each coroutine RESUME started and each process's body, one exec loop
+running whichever is current; RESUME, PAUSE, HOLD, PASSIVATE and a
+fiber's end change which, the sequencing set saying who runs after a
+hold. A failure or a jump out ends every fiber between it and the code
+that ran it, as the reference's threads end. A coroutine's OUT and INOUT
+parameters are shared with the caller's variable, which outlives the
+caller's frame. The refusal above is in both engines; so is a later
+RESUME without arguments, which the checker had refused. The gate runs
+all 60 corpus programs both ways, none left; random programs resume a
+coroutine and hold among processes. `simulation-vm` does the same work
+as the reference in a quarter of the time: a fiber switch, not a thread
+handing over by channel.
+
 ### 4. Values compute as HBDS says, and A-code carries it
 
 What the front end compiles away does not reach the runtime: control flow

@@ -1,0 +1,10 @@
+-- An ACTION that holds: code the store calls back runs to completion --
+-- (docs/architecture.md, decision 3), so HOLD there is an error, told --
+-- at the change that ran it. Written for the VM's gate. --
+
+program callback ;
+begin
+        create "c" ;
+        let "c" ' action := "hold for 1" ;
+        create "o" [ "c" ]
+end ;

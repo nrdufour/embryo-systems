@@ -1,0 +1,45 @@
+-- A coroutine's INOUT parameter is the variable its first RESUME gave --
+-- it, for as long as the coroutine lives: written after each pause, and --
+-- after the caller's frame is gone. Written for the VM's gate. --
+
+program shared ;
+local
+        n : integer ;
+begin
+        n := 0 ;
+        call s ;
+        resume k ;
+        print "main", n ;
+        resume c(n) ;
+        print "after first", n ;
+        n := 10 ;
+        resume c ;
+        print "after second", n
+end ;
+
+subroutine s ;
+local
+        x : integer ;
+begin
+        x := 5 ;
+        resume k(x) ;
+        print "s", x
+end ;
+
+coroutine k (y) ;
+        y : integer inout ;
+begin
+        y := y + 1 ;
+        pause ;
+        y := y + 100 ;
+        print "k", y
+end ;
+
+coroutine c (z) ;
+        z : integer inout ;
+begin
+        loop while true do
+                z := z + 1 ;
+                pause
+        endloop
+end ;
