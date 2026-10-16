@@ -192,3 +192,31 @@ fn a_built_program_keeps_its_store() {
         "7\n"
     );
 }
+
+#[test]
+fn the_help_is_tidy() {
+    let help = run(&["--help"]);
+    // Each command in the synopsis, and described below it.
+    let commands = [
+        "run", "check", "acode", "exec", "build", "daemon", "ui", "store", "compact", "lex",
+    ];
+    for command in commands {
+        assert!(
+            help.contains(&format!("embryo-systems {command}")),
+            "{command}"
+        );
+        assert!(
+            help.lines().any(|l| l.starts_with(command)),
+            "{command} is not described"
+        );
+    }
+    for line in help.lines() {
+        assert!(line.len() <= 80, "too long: {line}");
+    }
+    // A wrong command shows it too, and fails.
+    let (success, _, err) = launch(BIN, &["frobnicate"], "");
+    assert!(
+        !success && err.starts_with("usage: embryo-systems"),
+        "{err}"
+    );
+}

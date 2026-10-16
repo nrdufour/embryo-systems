@@ -10,41 +10,43 @@ use adt81::{interp, lexer, lower, parser};
 use hbds_gtad::Store;
 use hbds_journal as journal;
 
-const USAGE: &str = "usage: embryo-systems lex FILE
-       embryo-systems parse [--program | --fragment] FILE
-       embryo-systems fmt [--program | --fragment] FILE
+const USAGE: &str = "usage: embryo-systems run [--store DIR | --connect SOCKET] [--reference] FILE
        embryo-systems check FILE
-       embryo-systems run [--store DIR | --connect SOCKET] [--reference] FILE
        embryo-systems acode FILE
        embryo-systems exec [--store DIR | --connect SOCKET] FILE
        embryo-systems build FILE -o OUT
-       embryo-systems daemon --socket SOCKET [--store DIR] [--slice N] [--compact-at N]
-                             [--pace paused | fast [--horizon T] | real [--factor F]]
+       embryo-systems daemon --socket SOCKET [--store DIR] [--slice N]
+                             [--compact-at N] [--pace paused
+                             | fast [--horizon T] | real [--factor F]]
        embryo-systems ui --connect SOCKET [--port N]
        embryo-systems store DIR
        embryo-systems compact DIR
+       embryo-systems lex | parse | fmt [--program | --fragment] FILE
 
-FILE - reads standard input, but for run. parse prints the syntax tree,
-fmt the source in canonical form; both read a program unless told
---fragment. check reports undeclared and misused names, and type errors,
-in a program, and fails on errors. run checks a program, then runs it:
-READ reads standard input, PRINT writes standard output; its classes and
-objects last the run, or go in the store in DIR, created if need be. It
-runs compiled to A-code, on the VM; --reference runs it on the
-interpreter, the VM's specification. acode prints a program compiled to
-A-code, an .acode file's contents; exec runs one, as run does. build
-writes OUT, an executable that runs the program, OUT [--store DIR |
---connect SOCKET]. daemon serves the store in DIR, or one for its life,
-on SOCKET: --connect runs a program there, its clients taking turns of N
-instructions (10000); its journal syncs what comes together, and is
-compacted once past N lines (10000) and twice what compaction leaves.
-Its store's time is one, the kernel's, which moves at the pace: paused
-(the default), as fast as it can up to T, or real time times F; POST
-/pace changes it, GET /time shows it.
-ui serves the daemon's page on 127.0.0.1, port N (8080; 0 for any),
-forwarding to its socket. store prints what the store in DIR holds;
-compact rewrites its journal
-as the shortest that rebuilds it.";
+run      checks a program and runs it, compiled to A-code, on the VM;
+         --reference runs it on the interpreter, the VM's specification.
+         READ reads stdin, PRINT writes stdout. Its classes and objects
+         last the run, or stay in the store in DIR; --connect runs it
+         on a daemon instead.
+check    reports undeclared and misused names and type errors; fails on
+         errors.
+acode    prints a program compiled to A-code: an .acode file.
+exec     runs an .acode file, as run does.
+build    writes OUT, an executable carrying the program:
+         OUT [--store DIR | --connect SOCKET] runs it.
+daemon   serves the store in DIR (or one for its life) on SOCKET.
+         Clients take turns of N instructions (--slice, 10000). The
+         journal syncs what comes together and is compacted past N
+         lines (--compact-at, 10000). The store's time moves at the
+         pace: paused (the default), fast up to T, or real time times
+         F; POST /pace changes it, GET /time shows it.
+ui       serves the daemon's page on 127.0.0.1, port N (8080; 0 picks
+         one), forwarding to its socket.
+store    prints what the store in DIR holds.
+compact  rewrites a store's journal as the shortest that rebuilds it.
+lex, parse, fmt
+         the tokens, the syntax tree, the canonical form of a program,
+         or of a fragment with --fragment; FILE - reads stdin.";
 
 /// READ on standard input, PRINT on standard output.
 struct Terminal;
@@ -256,6 +258,10 @@ fn main() -> ExitCode {
             eprintln!("{e}");
             return ExitCode::FAILURE;
         }
+    }
+    if let ["--help" | "-h" | "help"] = args.as_slice() {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
     }
     if let ["ui", "--connect", socket, rest @ ..] = args.as_slice() {
         let port = match rest {
