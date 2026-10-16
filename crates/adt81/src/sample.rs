@@ -806,6 +806,8 @@ struct Writer<'g> {
     callees: &'g [Signature],
     out: String,
     depth: usize,
+    /// Whether the program made rules, "r0" to "r2" of "k0".
+    rules: bool,
 }
 
 impl Writer<'_> {
@@ -992,7 +994,7 @@ impl Writer<'_> {
         // o0 to o2 exist from the start; o3 only once a CREATE made it.
         let o = format!("\"o{}\" [ \"c0\" ]", self.rng.below(4));
         let a = self.rng.pick(&["a0", "a1"]);
-        let line = match self.rng.below(9) {
+        let line = match self.rng.below(if self.rules { 12 } else { 9 }) {
             0 | 1 => format!("let {o} . \"{a}\" := {}", self.expr(T::Int, 2)),
             2 => format!("print {o} . \"{a}\""),
             3 => {
@@ -1015,7 +1017,24 @@ impl Writer<'_> {
                 "{} {o}",
                 self.rng.pick(&["destroy", "resur", "hibern", "awake"])
             ),
-            _ => format!("{} {o}", self.rng.pick(&["purge", "destroy"])),
+            8 => format!("{} {o}", self.rng.pick(&["purge", "destroy"])),
+            9 => "call chav(\"k0\")".into(),
+            10 => {
+                let x = self.rng.below(3);
+                let n = self.rng.below(100);
+                format!(
+                    "call hypochav(\"let \"\"o{x}\"\" [ \"\"c0\"\" ] . \"\"{a}\"\" := {n}\", \"k0\")"
+                )
+            }
+            _ => {
+                let f = self.rng.pick(&[
+                    "\"r0\" [ \"k0\" ] ' inrule",
+                    "\"r1\" [ \"k0\" ] ' outrule",
+                    "\"c0\" . \"a0\" ' outfact",
+                    "\"o0\" [ \"c0\" ] . \"a1\" ' infact",
+                ]);
+                format!("print {f}")
+            }
         };
         self.line(&line);
     }
@@ -1209,6 +1228,93 @@ impl Writer<'_> {
     }
 }
 
+/// Three rules over the schema's objects, written as a program's
+/// statements: PREMISES that read values or test links, YES and NO that
+/// set values or print, priorities and reliabilities now and then, and
+/// the facts' ASKABLE, EDITABLE and MODIFIABLE.
+fn rule_base(rng: &mut Rng) -> String {
+    let line = |text: &mut String, s: String| *text += &format!("        {s} ;\n");
+    let mut text = String::new();
+    line(
+        &mut text,
+        "create \"k0\" ; include \"k0\" into \"rule\"".into(),
+    );
+    line(
+        &mut text,
+        "create \"r0\" [ \"k0\" ], \"r1\" [ \"k0\" ], \"r2\" [ \"k0\" ]".into(),
+    );
+    let fact = |rng: &mut Rng| {
+        let x = rng.below(3);
+        let a = rng.pick(&["a0", "a1"]);
+        format!("\"\"o{x}\"\" [ \"\"c0\"\" ] . \"\"{a}\"\"")
+    };
+    for r in 0..3 {
+        let rule = format!("\"r{r}\" [ \"k0\" ]");
+        if rng.one_in(2) {
+            line(
+                &mut text,
+                format!("let {rule} . \"priority\" := {}", rng.below(4)),
+            );
+        }
+        if rng.one_in(2) {
+            let p = rng.pick(&["0.5", "0.9", "1"]);
+            line(&mut text, format!("let {rule} . \"reliability\" := {p}"));
+        }
+        let premises = match rng.below(4) {
+            0 => format!("{} = {}", fact(rng), rng.below(5)),
+            1 => format!(
+                "\"\"o{}\"\" [ \"\"c0\"\" ] \"\"r\"\" \"\"p0\"\" [ \"\"c1\"\" ]",
+                rng.below(3)
+            ),
+            _ => format!("{} < {}", fact(rng), rng.below(60)),
+        };
+        line(
+            &mut text,
+            format!("let {rule} ' premises := \"{premises}\""),
+        );
+        if !rng.one_in(4) {
+            let yes = match rng.below(3) {
+                0 => "print \"\"yes\"\", this".into(),
+                _ => format!("let {} := {}", fact(rng), rng.below(60)),
+            };
+            line(&mut text, format!("let {rule} ' yes := \"{yes}\""));
+        }
+        if rng.one_in(3) {
+            let no = match rng.below(2) {
+                0 => "print \"\"no\"\"".into(),
+                _ => format!("let {} := {}", fact(rng), rng.below(60)),
+            };
+            line(&mut text, format!("let {rule} ' no := \"{no}\""));
+        }
+    }
+    if rng.one_in(3) {
+        let (a, b) = (rng.below(3), rng.below(3));
+        line(
+            &mut text,
+            format!("assert \"r{a}\" [ \"k0\" ] \"activates\" \"r{b}\" [ \"k0\" ]"),
+        );
+    }
+    if rng.one_in(3) {
+        line(
+            &mut text,
+            "let \"c0\" . \"a1\" ' askable := \"true\"".into(),
+        );
+    }
+    if rng.one_in(3) {
+        line(
+            &mut text,
+            "let \"c0\" . \"a0\" ' editable := \"true\"".into(),
+        );
+    }
+    if rng.one_in(8) {
+        line(
+            &mut text,
+            "let \"c0\" . \"a1\" ' modifiable := \"this . \"\"a0\"\" < 10\"".into(),
+        );
+    }
+    text
+}
+
 /// A program of a few modules that checks, mostly, and its input: for
 /// the VM's gate. Deterministic, as `program` is.
 pub fn runnable(seed: u64) -> (String, String) {
@@ -1230,6 +1336,7 @@ pub fn runnable(seed: u64) -> (String, String) {
             returns,
         });
     }
+    let rules = rng.one_in(2);
     let mut text = String::new();
     for k in 0..=count {
         let (header, mut vars, sig) = match k {
@@ -1297,6 +1404,9 @@ pub fn runnable(seed: u64) -> (String, String) {
                 text += "        let \"c0\" ' action := \"print \"\"made\"\", this\" ;\n";
             }
             text += "        create \"o0\" [ \"c0\" ], \"o1\" [ \"c0\" ], \"o2\" [ \"c0\" ], \"p0\" [ \"c1\" ] ;\n";
+            if rules {
+                text += &rule_base(&mut rng);
+            }
         }
         let mut w = Writer {
             rng: &mut rng,
@@ -1306,6 +1416,7 @@ pub fn runnable(seed: u64) -> (String, String) {
             callees: &signatures[k.min(signatures.len())..],
             out: String::new(),
             depth: 0,
+            rules,
         };
         // Most variables get a value first, so that the runs go further
         // than `has no value`; one now and then is left without.

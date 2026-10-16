@@ -332,6 +332,17 @@ pub enum Instr {
     /// Pops n strings and a prefix, an a.d.t. or a list of them: pushes
     /// the functor's result, a list.
     AdtFunctor(String, String, usize),
+    /// Pops HYPOCHAV's hypotheses: pushes them back once they are a
+    /// string that compiles.
+    Hypotheses,
+    /// FACT and RULE, created if they are not.
+    InstallRules,
+    /// Pops a rule class or its name, for the engine named so: pushes
+    /// the class.
+    RuleClass(String),
+    /// Pops n rule classes, and the hypotheses if HYPOCHAV: runs CHAV or
+    /// HYPOCHAV over them.
+    Chav(bool, usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -580,6 +591,10 @@ fn instr(i: &Instr) -> Vec<Term> {
         Instr::AdtFunctor(f, spelling, k) => {
             vec![word("adt.functor"), text(f), text(spelling), n(k)]
         }
+        Instr::Hypotheses => vec![word("hypotheses")],
+        Instr::InstallRules => vec![word("install.rules")],
+        Instr::RuleClass(e) => vec![word("rule.class"), text(e)],
+        Instr::Chav(hypotheses, k) => vec![word("chav"), word(hypotheses), n(k)],
     }
 }
 
@@ -682,6 +697,10 @@ fn read_instr(r: &mut Reader) -> Result<Instr, String> {
         "linked" => Instr::Linked(r.text()?),
         "keep.or" => Instr::KeepOr(n(r)?),
         "adt.functor" => Instr::AdtFunctor(r.text()?, r.text()?, n(r)?),
+        "hypotheses" => Instr::Hypotheses,
+        "install.rules" => Instr::InstallRules,
+        "rule.class" => Instr::RuleClass(r.text()?),
+        "chav" => Instr::Chav(r.parse()?, n(r)?),
         w => return Err(format!("{w:?} is not an instruction")),
     })
 }
@@ -939,6 +958,10 @@ mod tests {
                         Instr::Assert("crosses".into(), Some(0.9), false),
                         Instr::SetHeld("t".into(), at(7, 2)),
                         Instr::StateChange(StateOp::Resur, 2),
+                        Instr::Hypotheses,
+                        Instr::InstallRules,
+                        Instr::RuleClass("hypochav".into()),
+                        Instr::Chav(true, 1),
                     ],
                     spans: vec![
                         at(3, 9),
@@ -952,6 +975,10 @@ mod tests {
                         at(7, 1),
                         at(7, 1),
                         at(7, 1),
+                        at(8, 1),
+                        at(8, 1),
+                        at(8, 1),
+                        at(8, 9),
                         at(8, 1),
                     ],
                 },

@@ -122,6 +122,18 @@ compares the store's dump too: 33 corpus programs run both ways, the
 build a schema with CONDs and ACTIONs. The store's work counts are the
 same on both engines, and so are the times: the time is the engines'.
 
+As built (2026-10-16, step 4b2): CALL CHAV and HYPOCHAV are A-code's,
+the engines hbds-rules' as for the reference; the VM is their host, its
+`Language` the unit's language and SES's compiler in one, and
+`hbds_rules::Host` lends the engine the store as a boxed `DerefMut`, so
+that the VM keeps its `&mut Store`. A rule's parts are compiled as a
+COND is, and run nested with the rule state the reference keeps: reads
+in PREMISES lower their reliability or ask, YES and NO stamp what they
+write, MODIFIABLE holds outside rules only. A part that fails or jumps
+out has its open transactions ended, refused, before the engine hears
+of it. The gate: 43 corpus programs run both ways, the 13 left are the
+processes'; the random programs make rules over their schema.
+
 ### 3. Fibers, and a sequential world with threads around it
 
 Everything that runs as its own flow of control is a **fiber**: the main

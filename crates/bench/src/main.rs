@@ -127,6 +127,22 @@ const SCENARIOS: &[Scenario] = &[
         expected: |n| format!("{n}\n"),
     },
     Scenario {
+        name: "chav-vm",
+        program: "chav",
+        vm: true,
+        sizes: &[125, 250, 500, 1000],
+        input: |n| {
+            let mut s = format!("{n}\n{}", names("s", n));
+            for i in 1..=n {
+                writeln!(s, "r{i}").unwrap();
+                writeln!(s, "\"s{i}\" [ \"signal\" ] . \"v\" = 1").unwrap();
+                writeln!(s, "let \"s{i}\" [ \"signal\" ] . \"w\" := 1").unwrap();
+            }
+            s
+        },
+        expected: |n| format!("{n}\n"),
+    },
+    Scenario {
         name: "simulation",
         program: "simulation",
         vm: false,

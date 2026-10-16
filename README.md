@@ -28,7 +28,7 @@ cargo run -q -- store /tmp/hydro                                   # what the st
 | command | what it does |
 |---|---|
 | `embryo-systems run [--store DIR] FILE` | checks a program, then runs it. Its classes and objects last the run, or stay in the store in DIR for the next program. READ reads stdin, PRINT writes stdout. |
-| `embryo-systems run [--store DIR] --vm FILE` | the same, compiled to A-code and run on the VM; the expert systems and processes not yet |
+| `embryo-systems run [--store DIR] --vm FILE` | the same, compiled to A-code and run on the VM; processes and coroutines not yet |
 | `embryo-systems acode FILE` | the program compiled to A-code, as text |
 | `embryo-systems check FILE` | undeclared and misused names, type errors |
 | `embryo-systems store DIR` | prints a store's contents |

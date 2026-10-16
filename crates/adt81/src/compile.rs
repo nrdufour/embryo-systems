@@ -5,8 +5,8 @@
 //! `crates/adt81/src/interp.rs` is the specification, and the gate
 //! (`tests/vm.rs`) holds the two together.
 //!
-//! What the VM cannot run yet is [`NotYet`]: the expert systems,
-//! coroutines and processes (step 4's slices b2 and c).
+//! What the VM cannot run yet is [`NotYet`]: coroutines and processes
+//! (step 4's slice c).
 
 use std::collections::HashMap;
 
@@ -53,6 +53,12 @@ fn at(s: Span) -> ASpan {
 /// ADT'81 to the VM: its support module, its math functions and READ's
 /// reading, and its compiler for the code the store keeps.
 pub struct Adt81;
+
+impl hbds_rules::Compiler for Adt81 {
+    fn uses(&self, part: &str, code: &hbds_gtad::Code) -> Result<hbds_rules::Uses, String> {
+        hbds_rules::Compiler::uses(&uses::Adt81, part, code)
+    }
+}
 
 impl Language for Adt81 {
     fn name(&self) -> &str {
@@ -789,7 +795,9 @@ impl<'p> Compiler<'p> {
             StmtKind::Call(c) => {
                 match self.module_named(&c.name) {
                     None if builtins::is_subroutine(&c.name.key) => {
-                        return not_yet(c.name.span, "the expert-system engines");
+                        self.emit(Instr::Begin, s.span);
+                        self.engine(c, s.span)?;
+                        self.emit(Instr::Commit, s.span);
                     }
                     Some(m) if m.kind == Kind::Subroutine => {
                         let n = self.args(&m, c)?;
@@ -1268,12 +1276,37 @@ impl<'p> Compiler<'p> {
             let n = c.args.len();
             if functor.takes == Takes::Lists {
                 self.emit(Instr::Functor(key, spelling, n, held_now), c.name.span);
-            } else if hbds_rules::functor(&key).is_some() {
-                return not_yet(c.name.span, "the expert systems' functors");
             } else {
                 self.emit(Instr::AdtFunctor(key, spelling, n), c.name.span);
             }
         }
+        Ok(())
+    }
+
+    /// CALL CHAV(rule classes) and CALL HYPOCHAV(hypotheses, rule
+    /// classes), as the reference's `engine`.
+    fn engine(&mut self, c: &Call, span: Span) -> Compiled<()> {
+        let hypothetical = c.name.key == "HYPOCHAV";
+        let mut args = c.args.iter();
+        if hypothetical {
+            let Some(h) = args.next() else {
+                self.fail(
+                    span,
+                    "HYPOCHAV takes its hypotheses first, statements in a string",
+                );
+                return Ok(());
+            };
+            self.expr(h)?;
+            self.emit(Instr::Hypotheses, span);
+        }
+        self.emit(Instr::InstallRules, span);
+        let mut n = 0;
+        for a in args {
+            self.expr(a)?;
+            self.emit(Instr::RuleClass(c.name.spelling.clone()), a.span);
+            n += 1;
+        }
+        self.emit(Instr::Chav(hypothetical, n), span);
         Ok(())
     }
 

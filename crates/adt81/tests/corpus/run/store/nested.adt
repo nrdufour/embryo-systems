@@ -1,0 +1,27 @@
+-- PREMISES that call a function whose LET a COND refuses, the COND --
+-- reading a fact not known: the PREMISES do not hold. The LET stands: --
+-- its transaction nests in the CALL's, and only the outermost decides. --
+-- Written for the VM's gate. --
+
+program nested ;
+begin
+        create "c" ;
+        create "c" . "a", "c" . "b" ;
+        create "o" [ "c" ] ;
+        let "o" [ "c" ] . "a" := 1 ;
+        let "c" . "a" ' cond := "this . ""b"" > 0" ;
+        create "steps" ;
+        include "steps" into "rule" ;
+        create "r" [ "steps" ] ;
+        let "r" [ "steps" ] ' premises := "attempt(5)" ;
+        let "r" [ "steps" ] ' no := "print ""not known""" ;
+        call chav("steps") ;
+        print "o" [ "c" ] . "a"
+end ;
+
+function attempt (x) returns boolean ;
+        x : integer in ;
+begin
+        let "o" [ "c" ] . "a" := x ;
+        result true
+end ;
