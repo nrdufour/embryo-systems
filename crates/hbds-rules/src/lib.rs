@@ -241,11 +241,13 @@ pub fn apply(
     prefix: &[AdtRef],
 ) -> Result<Vec<AdtRef>, String> {
     let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    let all: BTreeSet<Id> = rules(store, &[]).into_iter().collect();
     for &p in prefix {
         let found = match name {
             "INRULE" | "OUTRULE" => {
                 let rule = match p {
-                    AdtRef::Object(r) if rules(store, &[]).contains(&r) => r,
+                    AdtRef::Object(r) if all.contains(&r) => r,
                     p => {
                         return Err(format!(
                             "`{name}` applies to rules, not to {}",
@@ -262,7 +264,7 @@ pub fn apply(
             "INFACT" | "OUTFACT" => {
                 let fact = fact_of(store, p);
                 let mut found = Vec::new();
-                for r in rules(store, &[]) {
+                for &r in &all {
                     let facts = if name == "INFACT" {
                         produced(store, compiler, r)?
                     } else {
@@ -277,7 +279,9 @@ pub fn apply(
             _ => return Err(format!("`{name}` is not a functor of SES")),
         };
         for r in found {
-            push_new(&mut out, r);
+            if seen.insert(r) {
+                out.push(r);
+            }
         }
     }
     Ok(out)
@@ -331,12 +335,92 @@ pub fn hypochav(host: &mut dyn Host, hypotheses: &Code, scope: &[Id]) -> Result<
     Chainer::new(host, scope, true).run(Some(hypotheses))
 }
 
+/// The rules to try, in the order CHAV tries them: the highest PRIORITY
+/// first, the oldest first among equals. A rule's priority is read when it
+/// goes on the agenda, and again when a try changes what it could depend
+/// on ([`Chainer::try_rule`]), so that picking is no scan.
+#[derive(Default)]
+struct Agenda {
+    order: BTreeSet<(Rank, Id)>,
+    rank: BTreeMap<Id, Rank>,
+}
+
+/// A priority as the agenda orders it: the highest first.
+#[derive(Clone, Copy, PartialEq)]
+struct Rank(f64);
+
+impl Eq for Rank {}
+
+impl PartialOrd for Rank {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Rank {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.0.total_cmp(&self.0)
+    }
+}
+
+fn priority(store: &Store, r: Id) -> Rank {
+    Rank(number(attribute(store, r, PRIORITY)).unwrap_or(0.0))
+}
+
+impl Agenda {
+    fn insert(&mut self, store: &Store, r: Id) {
+        let rank = priority(store, r);
+        if let Some(old) = self.rank.insert(r, rank) {
+            self.order.remove(&(old, r));
+        }
+        self.order.insert((rank, r));
+    }
+
+    fn remove(&mut self, r: &Id) {
+        if let Some(old) = self.rank.remove(r) {
+            self.order.remove(&(old, *r));
+        }
+    }
+
+    fn contains(&self, r: &Id) -> bool {
+        self.rank.contains_key(r)
+    }
+
+    fn retain(&mut self, keep: impl Fn(&Id) -> bool) {
+        let gone: Vec<Id> = self.rank.keys().filter(|r| !keep(r)).copied().collect();
+        for r in gone {
+            self.remove(&r);
+        }
+    }
+
+    /// Reads the priorities of `rules` again, those on the agenda.
+    fn reread(&mut self, store: &Store, rules: impl IntoIterator<Item = Id>) {
+        for r in rules {
+            if self.contains(&r) {
+                self.insert(store, r);
+            }
+        }
+    }
+
+    /// The first to try; among `urgent` if any of them is on the agenda.
+    fn first(&self, urgent: &BTreeSet<Id>) -> Option<Id> {
+        let urgent = (urgent.iter())
+            .filter_map(|r| self.rank.get(r).map(|k| (*k, *r)))
+            .min();
+        urgent
+            .or_else(|| self.order.first().copied())
+            .map(|(_, r)| r)
+    }
+}
+
 struct Chainer<'h> {
     host: &'h mut dyn Host,
     scope: Vec<Id>,
     /// The rules known, and the facts each consumes.
     consumes: BTreeMap<Id, Vec<AdtRef>>,
-    agenda: BTreeSet<Id>,
+    /// The other way: the rules consuming each fact.
+    consumers: BTreeMap<AdtRef, BTreeSet<Id>>,
+    agenda: Agenda,
     inhibited: BTreeSet<Id>,
     /// For multiple triggering: the consumed facts changed since the
     /// rule's last try.
@@ -378,7 +462,8 @@ impl<'h> Chainer<'h> {
             host,
             scope: scope.to_vec(),
             consumes: BTreeMap::new(),
-            agenda: BTreeSet::new(),
+            consumers: BTreeMap::new(),
+            agenda: Agenda::default(),
             inhibited: BTreeSet::new(),
             changed: BTreeMap::new(),
             hypothetical: hypothetical.then(BTreeSet::new),
@@ -424,6 +509,7 @@ impl<'h> Chainer<'h> {
             let mark = self.pending();
             self.host.run(None, "HYPOTHESES", code, 1.0)?;
             let changes = self.since(mark);
+            self.reread(&changes);
             self.react(&changes, None, true, None)?;
         }
         while let Some(r) = self.pick() {
@@ -451,34 +537,51 @@ impl<'h> Chainer<'h> {
         for r in rules(&store, &self.scope) {
             consumes.insert(r, consumed(&store, &*self.host, r)?);
             if !self.consumes.contains_key(&r) {
-                self.agenda.insert(r);
+                self.agenda.insert(&store, r);
             }
         }
         drop(store);
         self.agenda.retain(|r| consumes.contains_key(r));
+        self.consumers.clear();
+        for (r, facts) in &consumes {
+            for f in facts {
+                self.consumers.entry(*f).or_default().insert(*r);
+            }
+        }
         self.consumes = consumes;
         Ok(())
+    }
+
+    /// After `changes`, the priorities they may have changed read again:
+    /// a rule's own values, or every rule's when attributes or the
+    /// classes' inclusions change, which decide where PRIORITY comes from.
+    fn reread(&mut self, changes: &[Change]) {
+        let store = self.host.store().lock().unwrap();
+        let everything = changes.iter().any(|c| {
+            matches!(
+                c,
+                Change::Attribute { .. }
+                    | Change::Purge { .. }
+                    | Change::Include { .. }
+                    | Change::Exclude { .. }
+            )
+        });
+        if everything {
+            let all: Vec<Id> = self.consumes.keys().copied().collect();
+            self.agenda.reread(&store, all);
+            return;
+        }
+        let set = changes.iter().filter_map(|c| match c {
+            Change::Set { object, .. } => Some(*object),
+            _ => None,
+        });
+        self.agenda.reread(&store, set);
     }
 
     /// The highest priority, the oldest first among equals; in HYPOCHAV,
     /// the rules hypothetical facts triggered before all others.
     fn pick(&self) -> Option<Id> {
-        let store = self.host.store().lock().unwrap();
-        let urgent: Vec<Id> = self.agenda.intersection(&self.urgent).copied().collect();
-        let candidates: Vec<Id> = if urgent.is_empty() {
-            self.agenda.iter().copied().collect()
-        } else {
-            urgent
-        };
-        let priority = |r: Id| number(attribute(&store, r, PRIORITY)).unwrap_or(0.0);
-        let mut best: Option<(f64, Id)> = None;
-        for r in candidates {
-            let p = priority(r);
-            if best.is_none_or(|(q, _)| p > q) {
-                best = Some((p, r));
-            }
-        }
-        best.map(|(_, r)| r)
+        self.agenda.first(&self.urgent)
     }
 
     fn try_rule(&mut self, r: Id, urgent: bool) -> Result<(), String> {
@@ -529,6 +632,7 @@ impl<'h> Chainer<'h> {
             self.links(r);
         }
         let changes = self.since(start);
+        self.reread(&changes);
         if changes.iter().any(|c| {
             matches!(
                 c,
@@ -568,7 +672,13 @@ impl<'h> Chainer<'h> {
                 }
             }
         }
-        for (q, consumes) in &self.consumes {
+        let triggered: BTreeSet<Id> = (facts.iter())
+            .filter_map(|f| self.consumers.get(f))
+            .flatten()
+            .copied()
+            .collect();
+        for q in &triggered {
+            let consumes = &self.consumes[q];
             if self.inhibited.contains(q) || except == Some(*q) {
                 continue;
             }
@@ -589,7 +699,7 @@ impl<'h> Chainer<'h> {
                     continue;
                 }
             }
-            self.agenda.insert(*q);
+            self.agenda.insert(&store, *q);
             let hypothetical = self.hypothetical.as_ref();
             if hypothetical.is_some_and(|h| touched.iter().any(|f| h.contains(f))) {
                 self.urgent.insert(*q);
@@ -614,13 +724,13 @@ impl<'h> Chainer<'h> {
                 .collect()
         };
         let (activated, inhibited) = (targets(ACTIVATES.0), targets(INHIBITS.0));
-        drop(store);
         for q in activated {
             self.inhibited.remove(&q);
             if self.consumes.contains_key(&q) {
-                self.agenda.insert(q);
+                self.agenda.insert(&store, q);
             }
         }
+        drop(store);
         for q in inhibited {
             self.inhibited.insert(q);
             self.agenda.remove(&q);

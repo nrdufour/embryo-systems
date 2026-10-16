@@ -301,6 +301,19 @@ store 4000 in 71 ms here, from 916. `chav` stays near x3 because CHAV's
 `pick` reads every rule's PRIORITY for each try, n squared lookups: the
 engine's, not the store's, left for later.
 
+Changed (2026-10-15): interned names move from step 2 to step 4. A
+profile at four times the top rungs found folding and comparing names
+at about 2% of the time, and a lookup still arrives as a string, to fold
+and hash before any number helps; once A-code carries the numbers, it
+pays. What the profile found instead, each n squared on one statement,
+so that the ladder hid it: the functors' union of results, a `contains`
+on a `Vec` for each result (a quarter of the time on `"town" ' obj '
+card` over 16 000 objects), now beside a set; and CHAV, whose agenda is
+now ordered by priority, each read when a rule goes on it and read again
+after a try that may change it, with the rules consuming each fact
+indexed, so `react` no longer walks every rule. `chav` 1000 rules:
+176 ms to 77, lookups 1 043 051 to 44 051; every scenario linear.
+
 ### 12. Benchmarks at the print's scale
 
 - **Scenarios**: the store and functors (a million objects, lookups,
@@ -344,12 +357,13 @@ Each step is a plan and a pull request of its own:
 0. This page; then a lock on a store's directory, so that two runs can no
    longer write one journal.
 1. Benchmarks: the harness and a baseline, before anything is optimized.
-2. The store: persistent maps, indexes, interned names, shared values;
-   measured against the baseline.
+2. The store: persistent maps, indexes, shared values; measured against
+   the baseline.
 3. hbds-values: the semantics of values out of adt81.
 4. A-code and the VM: the format, versioned, with its text form; the
    compiler from the typed tree; fibers, processes and coroutines leaving
-   threads; the gate against the reference.
+   threads; interned names, which A-code carries; the gate against the
+   reference.
 5. Builds: `.acode`, `exec`, self-contained executables, embedded or
    connected.
 6. The daemon: the executor, the journal's thread, group commit,

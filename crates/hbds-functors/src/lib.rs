@@ -6,8 +6,10 @@
 //! language decides what an unknown name means. The expert-system
 //! functors of page 80 are the expert-system engine's (hbds-rules).
 
+use std::collections::BTreeSet;
+
 use hbds_core::{AdtRef, AdtType, Functor, Gives, Id, Takes, same};
-use hbds_gtad::{Error, ObjectLink, Store, Stored, error, push_new};
+use hbds_gtad::{Error, ObjectLink, Store, Stored, error};
 
 /// The struct, where `AdtRef::ObjectLink` is in scope.
 type LinkOfObjects = ObjectLink;
@@ -80,13 +82,14 @@ pub fn is_functor(key: &str) -> bool {
 pub fn apply(store: &Store, name: &str, prefix: &[AdtRef], args: &[String]) -> Stored<Vec<AdtRef>> {
     let s = store;
     let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
     for &p in prefix {
         if !s.visible(p) {
             continue;
         }
         for r in one(s, name, p, args)? {
-            if s.visible(r) {
-                push_new(&mut out, r);
+            if s.visible(r) && seen.insert(r) {
+                out.push(r);
             }
         }
     }
