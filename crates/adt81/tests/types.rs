@@ -283,9 +283,12 @@ fn adt_kinds() {
         &["1:13: error: CREATE mixes classes and objects"],
     );
     assert_body(
-        "ASSOC \"A\" . \"x\" WITH o",
-        &["1:7: error: ASSOC cannot pair a class attribute WITH an object"],
+        "ASSOC o . \"x\" WITH \"A\"",
+        &["1:7: error: ASSOC cannot pair an object attribute WITH a class"],
     );
+    // A launcher with its reflex (docs/hbds.md, "Reflexes").
+    assert_body("ASSOC \"A\" . \"x\" WITH o", &[]);
+    assert_body("ASSOC \"A\" WITH o", &[]);
     assert_body(
         "DISSOC o FROM o",
         &["1:8: error: DISSOC cannot pair an object FROM an object"],

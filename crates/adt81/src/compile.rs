@@ -78,6 +78,10 @@ impl Language for Adt81 {
                 Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),
                 Err(e) => Err(format!("the ACTION of {what} does not parse: {e}")),
             },
+            "REACTION" => match lower::parse_fragment(text) {
+                Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),
+                Err(e) => Err(format!("the REACTION of {what} does not parse: {e}")),
+            },
             // An entry of the daemon's REPL: statements, as an ACTION's.
             "REPL" => match lower::parse_fragment(text) {
                 Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),

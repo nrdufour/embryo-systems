@@ -12,6 +12,7 @@ dependencies = [
  "hbds-gtad",
  "hbds-journal",
  "hbds-lists",
+ "hbds-reflexes",
  "hbds-rules",
  "hbds-simulation",
  "hbds-values",
@@ -106,6 +107,14 @@ name = "hbds-maps"
 version = "0.1.0"
 
 [[package]]
+name = "hbds-reflexes"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
+ "hbds-gtad",
+]
+
+[[package]]
 name = "hbds-rules"
 version = "0.1.0"
 dependencies = [
@@ -137,6 +146,7 @@ dependencies = [
  "hbds-functors",
  "hbds-gtad",
  "hbds-lists",
+ "hbds-reflexes",
  "hbds-rules",
  "hbds-simulation",
  "hbds-values",

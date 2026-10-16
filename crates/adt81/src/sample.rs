@@ -1345,6 +1345,49 @@ fn rule_base(rng: &mut Rng) -> String {
     text
 }
 
+/// Reflexes over the schema: a value set, an object created or
+/// destroyed, a link asserted launch reactions that set other values or
+/// print, so that chains run breadth first, and a cycle runs out.
+fn reflex_base(rng: &mut Rng) -> String {
+    let line = |text: &mut String, s: &str| *text += &format!("        {s} ;\n");
+    let mut text = String::new();
+    line(&mut text, "create \"rx\" ; include \"rx\" into \"reflex\"");
+    line(
+        &mut text,
+        "create \"x0\" [ \"rx\" ], \"x1\" [ \"rx\" ], \"x2\" [ \"rx\" ]",
+    );
+    let launchers = [
+        ("set", "\"c0\" . \"a0\""),
+        ("set", "\"c0\" . \"a1\""),
+        ("create", "\"c0\""),
+        ("destroy", "\"c0\""),
+        ("assert", "\"c0\" \"r\" \"c1\""),
+    ];
+    let reactions = [
+        "print \"\"reflex\"\", this",
+        "let this . \"\"a1\"\" := 1",
+        "let this . \"\"a0\"\" := 2",
+        "print this . \"\"a0\"\"",
+    ];
+    for x in 0..3 {
+        let r = format!("\"x{x}\" [ \"rx\" ]");
+        let (event, launcher) = launchers[rng.below(launchers.len())];
+        line(&mut text, &format!("let {r} . \"event\" := \"{event}\""));
+        line(&mut text, &format!("assoc {launcher} with {r}"));
+        if !rng.one_in(5) {
+            let reaction = reactions[rng.below(reactions.len())];
+            line(&mut text, &format!("let {r} ' reaction := \"{reaction}\""));
+        }
+        if rng.one_in(4) {
+            line(
+                &mut text,
+                &format!("let {r} . \"delay\" := {}", rng.below(3)),
+            );
+        }
+    }
+    text
+}
+
 /// A program of a few modules that checks, mostly, and its input: for
 /// the VM's gate. Deterministic, as `program` is.
 pub fn runnable(seed: u64) -> (String, String) {
@@ -1439,6 +1482,9 @@ pub fn runnable(seed: u64) -> (String, String) {
             text += "        create \"o0\" [ \"c0\" ], \"o1\" [ \"c0\" ], \"o2\" [ \"c0\" ], \"p0\" [ \"c1\" ] ;\n";
             if rules {
                 text += &rule_base(&mut rng);
+            }
+            if rng.one_in(3) {
+                text += &reflex_base(&mut rng);
             }
             if processes {
                 text += "        create \"w\" ; include \"w\" into \"process\" ;\n";

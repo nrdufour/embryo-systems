@@ -235,6 +235,9 @@ impl fmt::Display for Error {
 
 pub type Stored<T> = Result<T, Error>;
 
+/// Of a change about to be made, the launches it makes: (reflex, object).
+pub type Watcher = fn(&Store, &Change, &mut Vec<(Id, Id)>);
+
 pub fn error<T>(message: impl Into<String>) -> Stored<T> {
     Err(Error(message.into()))
 }
@@ -257,6 +260,12 @@ pub struct Store {
     recorder: Option<Box<dyn Recorder>>,
     /// The changes kept since last taken, when someone watches.
     kept: Option<Vec<Change>>,
+    /// What tells, of each change, the reflexes it launches: the reflex
+    /// engine's, once REFLEX exists (project 18).
+    watcher: Option<Watcher>,
+    /// The launches not yet run, (reflex, object), in order: in the
+    /// transaction's snapshot, so that a refused change launches nothing.
+    launched: Vec<(Id, Id)>,
     transaction: Option<Transaction>,
     counted: Counted,
 }
@@ -297,6 +306,7 @@ struct Snapshot {
     modules: Vec<(String, String)>,
     fibers: Option<String>,
     sequencing: Option<String>,
+    launched: Vec<(Id, Id)>,
     ix: Indexes,
 }
 
@@ -531,6 +541,11 @@ impl Store {
     /// Records `change` in the journal, if there is one, then applies it.
     fn commit(&mut self, change: Change) -> Stored<()> {
         add(&self.counted.changes, 1);
+        if let Some(watcher) = self.watcher {
+            let mut launches = Vec::new();
+            watcher(self, &change, &mut launches);
+            self.launched.extend(launches);
+        }
         if let Some(t) = &mut self.transaction {
             t.changes.push(change.clone());
         } else {
@@ -557,6 +572,7 @@ impl Store {
             modules: self.modules.clone(),
             fibers: self.fibers.clone(),
             sequencing: self.sequencing.clone(),
+            launched: self.launched.clone(),
             ix: self.ix.clone(),
         }
     }
@@ -572,6 +588,7 @@ impl Store {
         self.modules = s.modules;
         self.fibers = s.fibers;
         self.sequencing = s.sequencing;
+        self.launched = s.launched;
         self.ix.restore(s.ix);
     }
 
@@ -615,6 +632,25 @@ impl Store {
             kept.extend(t.changes);
         }
         Ok(())
+    }
+
+    /// From now on, `watcher` tells what each change launches.
+    pub fn watch(&mut self, watcher: Watcher) {
+        self.watcher = Some(watcher);
+    }
+
+    /// The launches not yet run, taken, in order.
+    pub fn take_launched(&mut self) -> Vec<(Id, Id)> {
+        std::mem::take(&mut self.launched)
+    }
+
+    /// Whether a watcher tells this store's launches.
+    pub fn watching(&self) -> bool {
+        self.watcher.is_some()
+    }
+
+    pub fn has_launched(&self) -> bool {
+        !self.launched.is_empty()
     }
 
     /// From now on, the changes kept are gathered for [`take_kept`](

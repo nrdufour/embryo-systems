@@ -703,7 +703,9 @@ impl<'c> Checker<'c> {
     }
 
     /// ASSOC and DISSOC pairs, page 24: a class's attribute or link with a
-    /// class, an object's with an object, an object with a class.
+    /// class, an object's with an object, an object with a class; and,
+    /// ours (docs/hbds.md, "Reflexes"), a class, a class attribute or a
+    /// class link with an object: the reflex it launches.
     fn pairs(&mut self, pairs: &[(Adt, Designation)], statement: &str, word: &str) {
         use AdtKind::*;
         for (a, d) in pairs {
@@ -717,6 +719,7 @@ impl<'c> Checker<'c> {
                 (ClassAttribute | ClassLink, Class)
                     | (ObjectAttribute | ObjectLink, Object)
                     | (Object, Class)
+                    | (Class | ClassAttribute | ClassLink, Object)
             );
             if !legal {
                 let message = format!("{statement} cannot pair {} {word} {}", l.a(), r.a());

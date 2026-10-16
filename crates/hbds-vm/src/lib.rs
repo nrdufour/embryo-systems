@@ -188,6 +188,9 @@ struct Owned {
     failed: Option<Id>,
     /// Whether the store's records wait for the running process's pause.
     holding: bool,
+    /// Whether a reflex's reaction runs: it launches, but does not run,
+    /// what it launches (breadth first).
+    reacting: bool,
     /// Every fiber; the current one's frames and stack are `frames` and
     /// `stack`.
     fibers: Vec<Fiber>,
@@ -251,6 +254,7 @@ impl Session {
             running: None,
             failed: None,
             holding: false,
+            reacting: false,
             fibers: vec![Fiber::new(Role::Main, None)],
             current: 0,
             coroutines: HashMap::new(),
@@ -317,6 +321,7 @@ impl Session {
             language,
         };
         vm.o.slice = slice;
+        vm.watch();
         if let Mode::Client(id) = vm.o.mode {
             vm.sim.run_as(Agent::Client(id));
         }
@@ -352,6 +357,7 @@ impl Session {
         };
         vm.o.slice = slice;
         vm.o.bound = bound;
+        vm.watch();
         match vm.kernel_turn() {
             Ok(turn) => turn,
             Err(e) => Turn::Failed(e),
@@ -418,7 +424,19 @@ impl Vm<'_> {
             }
             self.o.started = false;
             match exit? {
-                Exit::Returned(_) | Exit::End(End::Done) => break,
+                Exit::Returned(_) | Exit::End(End::Done) => {
+                    // What the last statements launched runs before the end.
+                    let span = self.o.modules[self.o.program].span;
+                    let placed = |f: Failure| RuntimeError {
+                        span: f.at.unwrap_or(span),
+                        message: f.message,
+                    };
+                    self.drain().map_err(placed)?;
+                    for _ in 0..std::mem::take(&mut self.o.open) {
+                        let _ = self.store.end(false);
+                    }
+                    break;
+                }
                 Exit::End(End::Restart) => {}
                 Exit::End(End::Chain(m)) => self.o.program = m,
                 Exit::Yield | Exit::Input | Exit::Stop(_) => unreachable!("returned above"),
@@ -945,6 +963,67 @@ impl<'r> Vm<'r> {
             stored(self.store.keep_sequencing(self.sim.save()))?;
         }
         Ok(())
+    }
+
+    /// A store that has reflexes tells what each change launches.
+    fn watch(&mut self) {
+        if !self.store.watching() && hbds_reflexes::installed(self.store) {
+            self.store.watch(hbds_reflexes::launches);
+        }
+    }
+
+    /// The reflexes launched so far, run before the next statement, in
+    /// the order they were launched, each REACTION its own transaction,
+    /// THIS the object concerned; what they launch runs after them,
+    /// breadth first (docs/hbds.md, "Reflexes"). Not inside code the
+    /// store calls back, nor inside a reaction.
+    fn drain(&mut self) -> Run<Next> {
+        if self.o.nesting > 0 || self.o.reacting {
+            return Ok(Next::Go);
+        }
+        let mut done = 0;
+        loop {
+            let launched = self.store.take_launched();
+            if launched.is_empty() {
+                return Ok(Next::Go);
+            }
+            for (r, o) in launched {
+                done += 1;
+                if done > hbds_reflexes::LIMIT {
+                    return Err(format!(
+                        "more than {} reflexes launched at once: a cycle?",
+                        hbds_reflexes::LIMIT
+                    )
+                    .into());
+                }
+                let Some(code) = self.property(AdtRef::Object(r), hbds_reflexes::REACTION) else {
+                    continue;
+                };
+                let what = self.store.describe(AdtRef::Object(r));
+                let m = self.compiled("REACTION", &code.language, &code.text, &what)?;
+                self.store.begin();
+                self.o.open += 1;
+                self.o.reacting = true;
+                let exit = self.nested(m, Some(AdtRef::Object(o)), 0);
+                self.o.reacting = false;
+                match exit {
+                    Ok(Exit::Returned(_)) => {
+                        self.o.open -= 1;
+                        stored(self.store.end(true))?;
+                    }
+                    // Its transaction ends refused with the run's.
+                    Ok(Exit::End(end)) => return Ok(Next::End(end)),
+                    Ok(Exit::Yield | Exit::Input | Exit::Stop(_)) => {
+                        unreachable!("a reaction runs to completion")
+                    }
+                    Err(e) => {
+                        self.o.open -= 1;
+                        let _ = self.store.end(false);
+                        return Err(within(e.into(), "REACTION", &what));
+                    }
+                }
+            }
+        }
     }
 
     /// The agent the main fiber is: the main program, or a client's.
@@ -1483,6 +1562,12 @@ impl<'r> Vm<'r> {
     /// FACT, RULE and PROCESS, created the first time a program names them.
     fn system(&mut self, name: &str) -> Run<()> {
         let rules = hbds_rules::is_system(name);
+        if hbds_reflexes::is_system(name) {
+            if self.store.find_class(name).is_none() {
+                stored(hbds_reflexes::install(self.store))?;
+            }
+            return Ok(());
+        }
         if !rules && !hbds_simulation::is_system(name) {
             return Ok(());
         }
@@ -1590,6 +1675,9 @@ impl<'r> Vm<'r> {
                 self.o.statements += 1;
                 if self.o.budget.is_some_and(|b| self.o.statements > b) {
                     return Err(BUDGET_SPENT.into());
+                }
+                if self.store.has_launched() {
+                    return self.drain();
                 }
             }
             Instr::Const(v) => self.push(v.clone()),
@@ -2177,7 +2265,10 @@ impl<'r> Vm<'r> {
                     Some(Scalar::Character(c)) => c.to_string(),
                     _ => return Err(format!("a property is a string, not {v}").into()),
                 };
-                if hbds_gtad::is_property(key) || hbds_rules::is_property(key) {
+                if hbds_gtad::is_property(key)
+                    || hbds_rules::is_property(key)
+                    || hbds_reflexes::is_property(key)
+                {
                     self.language
                         .check(key, &text)
                         .map_err(|e| Failure::from(format!("this {key} does not parse: {e}")))?;
