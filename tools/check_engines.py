@@ -18,13 +18,15 @@ ALLOWED = {
     "hbds-acode": {"hbds-core", "hbds-values"},
     "hbds-vm": {"hbds-core", "hbds-values", "hbds-lists", "hbds-acode", "hbds-gtad", "hbds-functors", "hbds-rules", "hbds-simulation"},
     "hbds-lists": {"hbds-core", "hbds-values"},
+    "hbds-http": set(),
+    "hbds-daemon": {"hbds-acode", "hbds-gtad", "hbds-http", "hbds-vm"},
     "hbds-gtad": {"hbds-core", "hbds-maps"},
     "hbds-functors": {"hbds-core", "hbds-gtad"},
     "hbds-journal": {"hbds-core", "hbds-gtad"},
     "hbds-rules": {"hbds-core", "hbds-gtad"},
     "hbds-simulation": {"hbds-core", "hbds-gtad"},
     "adt81": {"hbds-core", "hbds-values", "hbds-acode", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules", "hbds-simulation"},
-    "embryo-systems": {"adt81", "hbds-gtad", "hbds-journal", "hbds-acode", "hbds-vm"},
+    "embryo-systems": {"adt81", "hbds-gtad", "hbds-journal", "hbds-acode", "hbds-vm", "hbds-daemon"},
     "embryo-systems-bench": {"adt81", "hbds-gtad", "hbds-vm"},
 }
 

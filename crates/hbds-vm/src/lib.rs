@@ -32,6 +32,11 @@ impl<L: hbds_acode::Language + hbds_rules::Compiler> Language for L {}
 pub trait Io: Send {
     fn read_line(&mut self) -> Option<String>;
     fn write(&mut self, text: &str);
+    /// Whether `read_line` would answer now, a line or the end of the
+    /// input; a session's turn ends where it would wait.
+    fn ready(&mut self) -> bool {
+        true
+    }
 }
 
 /// `line:column: runtime error: message`, as the reference writes it.
@@ -64,81 +69,194 @@ pub fn run(
     std::thread::scope(|s| {
         std::thread::Builder::new()
             .stack_size(STACK)
-            .spawn_scoped(s, || run_here(unit, store, io, language, budget))
+            .spawn_scoped(s, || {
+                let mut session = Session::new(unit.clone(), budget);
+                loop {
+                    match session.turn(store, io, language, None) {
+                        Turn::Done(statements) => return Ok(statements),
+                        Turn::Failed(e) => return Err(e),
+                        // No slice, and an Io that is always ready.
+                        Turn::Yield | Turn::Input => {}
+                    }
+                }
+            })
             .expect("a thread for the run")
             .join()
             .expect("the run's thread")
     })
 }
 
-fn run_here(
-    unit: &Unit,
-    store: &mut Store,
-    io: &mut dyn Io,
-    language: &dyn Language,
+/// How a turn ends.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Turn {
+    /// The run ended: the statements it executed.
+    Done(u64),
+    Failed(RuntimeError),
+    /// Its slice of instructions is spent, between two statements.
+    Yield,
+    /// It waits for a line its Io does not have yet.
+    Input,
+}
+
+/// A run that goes in turns (docs/architecture.md, decision 3): what the
+/// VM keeps between them. The store, the Io and the language are lent to
+/// each turn; a turn runs on a thread with the VM's large stack.
+pub struct Session {
+    unit: Unit,
+    o: Owned,
+}
+
+/// The VM's own state.
+struct Owned {
+    /// The unit's modules, then those compiled from the store's code.
+    modules: Vec<Rc<Module>>,
+    /// Code the store keeps, compiled: by part and text.
+    compiled: HashMap<(String, String), usize>,
+    /// The functions that compute attributes, by class and attribute.
+    computed: HashMap<(String, String), usize>,
+    /// The bodies of process classes, by class (page 112).
+    bodies: HashMap<String, usize>,
     budget: Option<u64>,
-) -> Result<u64, RuntimeError> {
-    let mut computed = HashMap::new();
-    let mut bodies = HashMap::new();
-    for (i, m) in unit.modules.iter().enumerate() {
-        if let Some(key) = &m.computes {
-            computed.entry(key.clone()).or_insert(i);
+    statements: u64,
+    frames: Vec<Frame>,
+    stack: Vec<Item>,
+    /// Transactions begun and not yet ended.
+    open: usize,
+    ses: Ses,
+    sim: Sequencing,
+    /// Every fiber; the current one's frames and stack are `frames` and
+    /// `stack`.
+    fibers: Vec<Fiber>,
+    current: usize,
+    /// The coroutines started, by module, and the processes' bodies, by
+    /// object: their fibers.
+    coroutines: HashMap<usize, usize>,
+    processes: HashMap<Id, usize>,
+    /// Variables shared with a coroutine by its first RESUME.
+    shared: Vec<Var>,
+    /// Where the main program last held: the sequencing set's errors go
+    /// there, as the reference's `give_way` places them.
+    held_at: Span,
+    /// The program running, and whether it has started.
+    program: usize,
+    started: bool,
+    /// How many callbacks run nested: a turn ends only outside them.
+    nesting: usize,
+    /// The instructions this turn may still execute, if it has a slice.
+    slice: Option<u64>,
+}
+
+impl Session {
+    pub fn new(unit: Unit, budget: Option<u64>) -> Session {
+        let mut computed = HashMap::new();
+        let mut bodies = HashMap::new();
+        for (i, m) in unit.modules.iter().enumerate() {
+            if let Some(key) = &m.computes {
+                computed.entry(key.clone()).or_insert(i);
+            }
+            if let Some(class) = &m.body {
+                bodies.insert(class.clone(), i);
+            }
         }
-        if let Some(class) = &m.body {
-            bodies.insert(class.clone(), i);
+        let o = Owned {
+            modules: unit.modules.iter().cloned().map(Rc::new).collect(),
+            compiled: HashMap::new(),
+            computed,
+            bodies,
+            budget,
+            statements: 0,
+            frames: Vec::new(),
+            stack: Vec::new(),
+            open: 0,
+            ses: Ses::default(),
+            sim: Sequencing::new(),
+            fibers: vec![Fiber::new(Role::Main, None)],
+            current: 0,
+            coroutines: HashMap::new(),
+            processes: HashMap::new(),
+            shared: Vec::new(),
+            held_at: Span::default(),
+            program: 0,
+            started: false,
+            nesting: 0,
+            slice: None,
+        };
+        Session { unit, o }
+    }
+
+    /// The A-code this session runs.
+    pub fn unit(&self) -> &Unit {
+        &self.unit
+    }
+
+    /// Runs on until the run ends, or `slice` instructions are spent, or
+    /// it waits for input.
+    pub fn turn(
+        &mut self,
+        store: &mut Store,
+        io: &mut dyn Io,
+        language: &dyn Language,
+        slice: Option<u64>,
+    ) -> Turn {
+        let mut vm = Vm {
+            unit: &self.unit,
+            o: &mut self.o,
+            store,
+            io,
+            language,
+        };
+        vm.o.slice = slice;
+        match vm.turn() {
+            Ok(Some(turn)) => turn,
+            Ok(None) => Turn::Done(vm.o.statements),
+            Err(e) => Turn::Failed(e),
         }
     }
-    let mut vm = Vm {
-        unit,
-        modules: unit.modules.iter().cloned().map(Rc::new).collect(),
-        compiled: HashMap::new(),
-        computed,
-        bodies,
-        store,
-        io,
-        language,
-        budget,
-        statements: 0,
-        frames: Vec::new(),
-        stack: Vec::new(),
-        open: 0,
-        ses: Ses::default(),
-        sim: Sequencing::new(),
-        fibers: vec![Fiber::new(Role::Main, None)],
-        current: 0,
-        coroutines: HashMap::new(),
-        processes: HashMap::new(),
-        shared: Vec::new(),
-        held_at: Span::default(),
-    };
-    let mut current = 0;
-    loop {
-        vm.frames.clear();
-        vm.stack.clear();
-        vm.enter(current, Vec::new(), None, 0, false);
-        let exit = vm.exec(0);
-        // A statement's transaction a failure or a STOP left open is
-        // refused, as the reference's `atomic` refuses it.
-        for _ in 0..std::mem::take(&mut vm.open) {
-            let _ = vm.store.end(false);
+}
+
+impl Vm<'_> {
+    /// A turn of the session: `None` once the run has ended well.
+    fn turn(&mut self) -> Result<Option<Turn>, RuntimeError> {
+        loop {
+            if !self.o.started {
+                self.o.started = true;
+                self.o.frames.clear();
+                self.o.stack.clear();
+                let program = self.o.program;
+                self.enter(program, Vec::new(), None, 0, false);
+            }
+            let exit = self.exec_from(0, 0);
+            if matches!(exit, Ok(Exit::Yield | Exit::Input)) {
+                return Ok(Some(match exit {
+                    Ok(Exit::Yield) => Turn::Yield,
+                    _ => Turn::Input,
+                }));
+            }
+            // A statement's transaction a failure or a STOP left open is
+            // refused, as the reference's `atomic` refuses it.
+            for _ in 0..std::mem::take(&mut self.o.open) {
+                let _ = self.store.end(false);
+            }
+            self.o.started = false;
+            match exit? {
+                Exit::Returned(_) | Exit::End(End::Done) => break,
+                Exit::End(End::Restart) => {}
+                Exit::End(End::Chain(m)) => self.o.program = m,
+                Exit::Yield | Exit::Input => unreachable!("returned above"),
+            }
         }
-        match exit? {
-            Exit::Returned(_) | Exit::End(End::Done) => break,
-            Exit::End(End::Restart) => {}
-            Exit::End(End::Chain(m)) => current = m,
+        // The processes as the run leaves them: implicitly persistent (page
+        // 112), the sequencing set gone with the run.
+        for (p, state, clock) in self.o.sim.processes() {
+            if self.store.objects().contains_key(&p) {
+                hbds_simulation::record(self.store, p, state, clock).map_err(|e| RuntimeError {
+                    span: Span { line: 1, column: 1 },
+                    message: e.0,
+                })?;
+            }
         }
+        Ok(None)
     }
-    // The processes as the run leaves them: implicitly persistent (page
-    // 112), the sequencing set gone with the run.
-    for (p, state, clock) in vm.sim.processes() {
-        if vm.store.objects().contains_key(&p) {
-            hbds_simulation::record(vm.store, p, state, clock).map_err(|e| RuntimeError {
-                span: Span { line: 1, column: 1 },
-                message: e.0,
-            })?;
-        }
-    }
-    Ok(vm.statements)
 }
 
 /// A variable's value, and the one RESET gives back.
@@ -230,6 +348,10 @@ enum End {
 enum Exit {
     Returned(Option<Value>),
     End(End),
+    /// The turn's slice is spent, between two statements.
+    Yield,
+    /// The Io has no line yet.
+    Input,
 }
 
 /// The rule code running, for the expert-system engines (docs/hbds.md,
@@ -259,42 +381,16 @@ enum Next {
     Jump(usize),
     Return(Option<Value>),
     End(End),
+    /// The instruction waits for input: it runs again next turn.
+    Wait,
 }
 
 struct Vm<'r> {
     unit: &'r Unit,
-    /// The unit's modules, then those compiled from the store's code.
-    modules: Vec<Rc<Module>>,
-    /// Code the store keeps, compiled: by part and text.
-    compiled: HashMap<(String, String), usize>,
-    /// The functions that compute attributes, by class and attribute.
-    computed: HashMap<(String, String), usize>,
-    /// The bodies of process classes, by class (page 112).
-    bodies: HashMap<String, usize>,
+    o: &'r mut Owned,
     store: &'r mut Store,
     io: &'r mut dyn Io,
     language: &'r dyn Language,
-    budget: Option<u64>,
-    statements: u64,
-    frames: Vec<Frame>,
-    stack: Vec<Item>,
-    /// Transactions begun and not yet ended.
-    open: usize,
-    ses: Ses,
-    sim: Sequencing,
-    /// Every fiber; the current one's frames and stack are `frames` and
-    /// `stack`.
-    fibers: Vec<Fiber>,
-    current: usize,
-    /// The coroutines started, by module, and the processes' bodies, by
-    /// object: their fibers.
-    coroutines: HashMap<usize, usize>,
-    processes: HashMap<Id, usize>,
-    /// Variables shared with a coroutine by its first RESUME.
-    shared: Vec<Var>,
-    /// Where the main program last held: the sequencing set's errors go
-    /// there, as the reference's `give_way` places them.
-    held_at: Span,
 }
 
 /// Why an instruction fails, and where if not where it comes from.
@@ -417,6 +513,9 @@ impl hbds_rules::Host for Engine<'_, '_> {
                 hbds_values::truth(&v.expect("an expression's value")).map_err(|f| Some(f.0))
             }
             Ok(Exit::End(_)) => Err(None),
+            Ok(Exit::Yield | Exit::Input) => {
+                unreachable!("code the store calls back runs to completion")
+            }
             Err(e) => Err(Some(e.message)),
         };
         match holds {
@@ -448,6 +547,9 @@ impl hbds_rules::Host for Engine<'_, '_> {
         match exit {
             Ok(Exit::Returned(_)) => Ok(()),
             Ok(Exit::End(_)) => Err(told(None, part, what.as_deref())),
+            Ok(Exit::Yield | Exit::Input) => {
+                unreachable!("code the store calls back runs to completion")
+            }
             Err(e) => Err(told(Some(e.message), part, what.as_deref())),
         }
     }
@@ -474,7 +576,7 @@ impl<'r> Vm<'r> {
         depth: usize,
         within: bool,
     ) {
-        let m = self.modules[module].clone();
+        let m = self.o.modules[module].clone();
         let mut prefix = None;
         if m.kind == Kind::Functor && !args.is_empty() {
             prefix = match args.remove(0) {
@@ -482,7 +584,7 @@ impl<'r> Vm<'r> {
                 Item::Ref(..) | Item::Shared(_) => None,
             };
         }
-        self.frames.push(Frame {
+        self.o.frames.push(Frame {
             module,
             pc: 0,
             cells: vec![Cell::Own(Var::default()); m.slots.len()],
@@ -495,17 +597,17 @@ impl<'r> Vm<'r> {
     }
 
     fn module(&self) -> Rc<Module> {
-        self.modules[self.frames.last().expect("a frame").module].clone()
+        self.o.modules[self.o.frames.last().expect("a frame").module].clone()
     }
 
     fn frame(&self) -> &Frame {
-        self.frames.last().expect("a frame")
+        self.o.frames.last().expect("a frame")
     }
 
     /// The frame and slot a slot of the current frame stands for.
     fn resolve(&self, s: usize) -> (usize, usize) {
-        let f = self.frames.len() - 1;
-        match self.frames[f].cells[s] {
+        let f = self.o.frames.len() - 1;
+        match self.o.frames[f].cells[s] {
             Cell::Own(_) | Cell::Shared(_) => (f, s),
             Cell::Ref(g, t) => (g, t),
         }
@@ -513,18 +615,18 @@ impl<'r> Vm<'r> {
 
     fn var(&self, s: usize) -> &Var {
         let (f, t) = self.resolve(s);
-        match &self.frames[f].cells[t] {
+        match &self.o.frames[f].cells[t] {
             Cell::Own(v) => v,
-            Cell::Shared(i) => &self.shared[*i],
+            Cell::Shared(i) => &self.o.shared[*i],
             Cell::Ref(..) => unreachable!("references are resolved when made"),
         }
     }
 
     fn var_mut(&mut self, s: usize) -> &mut Var {
         let (f, t) = self.resolve(s);
-        match &mut self.frames[f].cells[t] {
+        match &mut self.o.frames[f].cells[t] {
             Cell::Own(v) => v,
-            Cell::Shared(i) => &mut self.shared[*i],
+            Cell::Shared(i) => &mut self.o.shared[*i],
             Cell::Ref(..) => unreachable!("references are resolved when made"),
         }
     }
@@ -533,29 +635,29 @@ impl<'r> Vm<'r> {
 
     /// Parks the current fiber and makes `to` current.
     fn switch(&mut self, to: usize) {
-        let from = self.current;
-        self.fibers[from].frames = std::mem::take(&mut self.frames);
-        self.fibers[from].stack = std::mem::take(&mut self.stack);
-        self.current = to;
-        self.frames = std::mem::take(&mut self.fibers[to].frames);
-        self.stack = std::mem::take(&mut self.fibers[to].stack);
+        let from = self.o.current;
+        self.o.fibers[from].frames = std::mem::take(&mut self.o.frames);
+        self.o.fibers[from].stack = std::mem::take(&mut self.o.stack);
+        self.o.current = to;
+        self.o.frames = std::mem::take(&mut self.o.fibers[to].frames);
+        self.o.stack = std::mem::take(&mut self.o.fibers[to].stack);
     }
 
     fn role(&self) -> Role {
-        self.fibers[self.current].role
+        self.o.fibers[self.o.current].role
     }
 
     /// After a failure or a jump out of a fiber: it ends, and so does each
     /// fiber between it and `entry`, as the reference's threads end with
     /// what they pass back.
     fn unwind(&mut self, entry: usize) {
-        while self.current != entry {
-            let f = self.current;
-            self.fibers[f].state = FiberState::Ended;
-            if let Role::Process(p) = self.fibers[f].role {
-                self.processes.remove(&p);
+        while self.o.current != entry {
+            let f = self.o.current;
+            self.o.fibers[f].state = FiberState::Ended;
+            if let Role::Process(p) = self.o.fibers[f].role {
+                self.o.processes.remove(&p);
             }
-            let back = self.fibers[f].resumer.unwrap_or(0);
+            let back = self.o.fibers[f].resumer.unwrap_or(0);
             self.switch(back);
         }
     }
@@ -563,17 +665,17 @@ impl<'r> Vm<'r> {
     /// A fiber whose outermost frame returned: a coroutine goes back to
     /// its resumer; a process's body ends as TERMINATE ends it.
     fn fiber_ends(&mut self) -> Run<()> {
-        let f = self.current;
-        self.fibers[f].state = FiberState::Ended;
-        match self.fibers[f].role {
+        let f = self.o.current;
+        self.o.fibers[f].state = FiberState::Ended;
+        match self.o.fibers[f].role {
             Role::Coroutine => {
-                let back = self.fibers[f].resumer.expect("a coroutine's resumer");
+                let back = self.o.fibers[f].resumer.expect("a coroutine's resumer");
                 self.switch(back);
                 Ok(())
             }
             Role::Process(p) => {
-                self.processes.remove(&p);
-                let at = self.held_at;
+                self.o.processes.remove(&p);
+                let at = self.o.held_at;
                 self.sim_op(|sim, _| sim.terminate())
                     .map_err(|f| f.at(at))?;
                 self.dispatch()
@@ -604,16 +706,16 @@ impl<'r> Vm<'r> {
     /// After HOLD or PASSIVATE, or a process's end: the sequencing set
     /// says who runs next, the main program or a process.
     fn dispatch(&mut self) -> Run<()> {
-        let at = self.held_at;
-        match self.sim.advance() {
+        let at = self.o.held_at;
+        match self.o.sim.advance() {
             Some(Agent::Process(p)) => {
-                let fiber = match self.processes.get(&p) {
+                let fiber = match self.o.processes.get(&p) {
                     Some(&f) => f,
                     None => {
                         let body = self.body(p).map_err(|f| f.at(at))?;
-                        let f = self.fibers.len();
-                        self.fibers.push(Fiber::new(Role::Process(p), None));
-                        self.processes.insert(p, f);
+                        let f = self.o.fibers.len();
+                        self.o.fibers.push(Fiber::new(Role::Process(p), None));
+                        self.o.processes.insert(p, f);
                         self.switch(f);
                         self.enter(body, Vec::new(), Some(AdtRef::Object(p)), 0, false);
                         return Ok(());
@@ -631,7 +733,7 @@ impl<'r> Vm<'r> {
     fn body(&self, p: Id) -> Run<usize> {
         let class = self.store.objects()[&p].class;
         for c in self.store.lineage(class) {
-            if let Some(&i) = self.bodies.get(&fold(&self.store.classes()[&c].name)) {
+            if let Some(&i) = self.o.bodies.get(&fold(&self.store.classes()[&c].name)) {
                 return Ok(i);
             }
         }
@@ -650,7 +752,7 @@ impl<'r> Vm<'r> {
             Agent::Main => "the main program".to_string(),
             Agent::Process(p) => store.describe(AdtRef::Object(p)),
         };
-        op(&mut self.sim, &name).map_err(Failure::from)
+        op(&mut self.o.sim, &name).map_err(Failure::from)
     }
 
     fn pop_time(&mut self) -> f64 {
@@ -665,7 +767,7 @@ impl<'r> Vm<'r> {
     /// until it is due again.
     fn give_way(&mut self, span: Span) -> Run<()> {
         if self.role() == Role::Main {
-            self.held_at = span;
+            self.o.held_at = span;
         }
         self.dispatch()
     }
@@ -677,27 +779,29 @@ impl<'r> Vm<'r> {
     /// The first RESUME of coroutine `m`: its OUT and INOUT arguments
     /// become variables it shares with the caller.
     fn start(&mut self, m: usize, n: usize) {
-        let mut args = self.stack.split_off(self.stack.len() - n);
+        let mut args = self.o.stack.split_off(self.o.stack.len() - n);
         for a in &mut args {
             if let Item::Ref(f, t) = *a {
-                let i = match &mut self.frames[f].cells[t] {
+                let i = match &mut self.o.frames[f].cells[t] {
                     Cell::Shared(i) => *i,
                     cell => {
-                        let Cell::Own(v) = std::mem::replace(cell, Cell::Shared(self.shared.len()))
+                        let Cell::Own(v) =
+                            std::mem::replace(cell, Cell::Shared(self.o.shared.len()))
                         else {
                             unreachable!("references are resolved when made")
                         };
-                        self.shared.push(v);
-                        self.shared.len() - 1
+                        self.o.shared.push(v);
+                        self.o.shared.len() - 1
                     }
                 };
                 *a = Item::Shared(i);
             }
         }
-        let fiber = self.fibers.len();
-        self.fibers
-            .push(Fiber::new(Role::Coroutine, Some(self.current)));
-        self.coroutines.insert(m, fiber);
+        let fiber = self.o.fibers.len();
+        self.o
+            .fibers
+            .push(Fiber::new(Role::Coroutine, Some(self.o.current)));
+        self.o.coroutines.insert(m, fiber);
         self.switch(fiber);
         self.enter(m, args, None, 0, false);
     }
@@ -706,15 +810,15 @@ impl<'r> Vm<'r> {
     /// that declares it.
     fn decl(&self, s: usize) -> &hbds_acode::Slot {
         let (f, t) = self.resolve(s);
-        &self.modules[self.frames[f].module].slots[t]
+        &self.o.modules[self.o.frames[f].module].slots[t]
     }
 
     fn name(&self, s: usize) -> String {
-        self.modules[self.frame().module].slots[s].name.clone()
+        self.o.modules[self.frame().module].slots[s].name.clone()
     }
 
     fn pop(&mut self) -> Value {
-        match self.stack.pop().expect("an operand") {
+        match self.o.stack.pop().expect("an operand") {
             Item::Value(v) => v,
             Item::Ref(..) | Item::Shared(_) => {
                 unreachable!("a reference where a value is expected")
@@ -723,7 +827,7 @@ impl<'r> Vm<'r> {
     }
 
     fn push(&mut self, v: Value) {
-        self.stack.push(Item::Value(v));
+        self.o.stack.push(Item::Value(v));
     }
 
     fn pop_integers(&mut self, n: usize) -> Run<Vec<i64>> {
@@ -752,9 +856,15 @@ impl<'r> Vm<'r> {
     /// Runs until the frames are back to `base` deep, the outermost
     /// above it having returned, or the program ends.
     fn exec(&mut self, base: usize) -> Result<Exit, RuntimeError> {
-        let entry = self.current;
+        let entry = self.o.current;
+        self.exec_from(entry, base)
+    }
+
+    /// [`exec`](Vm::exec) from fiber `entry`, the main program's for a
+    /// turn, whichever fiber is current.
+    fn exec_from(&mut self, entry: usize, base: usize) -> Result<Exit, RuntimeError> {
         let exit = self.run_fibers(base, entry);
-        if !matches!(exit, Ok(Exit::Returned(_))) {
+        if matches!(exit, Err(_) | Ok(Exit::End(_))) {
             self.unwind(entry);
         }
         exit
@@ -765,9 +875,21 @@ impl<'r> Vm<'r> {
     fn run_fibers(&mut self, base: usize, entry: usize) -> Result<Exit, RuntimeError> {
         loop {
             let m = self.module();
-            let f = self.frames.last_mut().expect("a frame");
-            let pc = f.pc;
-            f.pc += 1;
+            let pc = self.o.frames.last().expect("a frame").pc;
+            // A turn ends between statements, outside any callback and
+            // transaction (decision 3).
+            if let Some(left) = &mut self.o.slice {
+                if *left == 0
+                    && matches!(m.code[pc], Instr::Stmt)
+                    && self.o.nesting == 0
+                    && self.o.open == 0
+                    && self.o.stack.is_empty()
+                {
+                    return Ok(Exit::Yield);
+                }
+                *left = left.saturating_sub(1);
+            }
+            self.o.frames.last_mut().expect("a frame").pc += 1;
             let span = m.spans[pc];
             let placed = |f: Failure| RuntimeError {
                 span: f.at.unwrap_or(span),
@@ -776,19 +898,23 @@ impl<'r> Vm<'r> {
             let next = self.step(&m.code[pc], &m, span).map_err(placed)?;
             match next {
                 Next::Go => {}
-                Next::Jump(t) => self.frames.last_mut().expect("a frame").pc = t,
+                Next::Jump(t) => self.o.frames.last_mut().expect("a frame").pc = t,
                 Next::End(end) => return Ok(Exit::End(end)),
+                Next::Wait => {
+                    self.o.frames.last_mut().expect("a frame").pc = pc;
+                    return Ok(Exit::Input);
+                }
                 Next::Return(value) => {
-                    let callee = self.frames.pop().expect("a frame");
-                    let kind = self.modules[callee.module].kind;
+                    let callee = self.o.frames.pop().expect("a frame");
+                    let kind = self.o.modules[callee.module].kind;
                     let result = match kind {
                         Kind::Function => value,
                         Kind::Functor => {
-                            let m = &self.modules[callee.module];
+                            let m = &self.o.modules[callee.module];
                             let r = m.result.expect("a functor's result slot");
                             let v = match &callee.cells[r] {
                                 Cell::Own(v) => v.value.clone(),
-                                Cell::Shared(i) => self.shared[*i].value.clone(),
+                                Cell::Shared(i) => self.o.shared[*i].value.clone(),
                                 Cell::Ref(..) => None,
                             };
                             let v = v.ok_or_else(|| RuntimeError {
@@ -799,10 +925,10 @@ impl<'r> Vm<'r> {
                         }
                         _ => None,
                     };
-                    if self.current == entry && self.frames.len() == base {
+                    if self.o.current == entry && self.o.frames.len() == base {
                         return Ok(Exit::Returned(result));
                     }
-                    if self.frames.is_empty() {
+                    if self.o.frames.is_empty() {
                         self.fiber_ends().map_err(placed)?;
                         continue;
                     }
@@ -821,12 +947,14 @@ impl<'r> Vm<'r> {
         this: Option<AdtRef>,
         depth: usize,
     ) -> Result<Exit, RuntimeError> {
-        let base = self.frames.len();
-        let height = self.stack.len();
+        let base = self.o.frames.len();
+        let height = self.o.stack.len();
         self.enter(m, Vec::new(), this, depth, true);
+        self.o.nesting += 1;
         let exit = self.exec(base);
-        self.frames.truncate(base);
-        self.stack.truncate(height);
+        self.o.nesting -= 1;
+        self.o.frames.truncate(base);
+        self.o.stack.truncate(height);
         exit
     }
 
@@ -834,13 +962,13 @@ impl<'r> Vm<'r> {
     /// it leaves open, failing or jumping out, are refused, as the
     /// reference's `atomic` refuses them on the way out.
     fn callback(&mut self, m: usize, this: Option<AdtRef>) -> Result<Exit, RuntimeError> {
-        let open = self.open;
+        let open = self.o.open;
         let exit = self.nested(m, this, 0);
         if !matches!(exit, Ok(Exit::Returned(_))) {
-            for _ in open..self.open {
+            for _ in open..self.o.open {
                 let _ = self.store.end(false);
             }
-            self.open = open;
+            self.o.open = open;
         }
         exit
     }
@@ -852,10 +980,10 @@ impl<'r> Vm<'r> {
         set: impl FnOnce(&mut Ses),
         body: impl FnOnce(&mut Self) -> T,
     ) -> (T, Ses) {
-        let saved = self.ses.clone();
-        set(&mut self.ses);
+        let saved = self.o.ses.clone();
+        set(&mut self.o.ses);
         let result = body(self);
-        let ended = std::mem::replace(&mut self.ses, saved);
+        let ended = std::mem::replace(&mut self.o.ses, saved);
         (result, ended)
     }
 
@@ -872,14 +1000,14 @@ impl<'r> Vm<'r> {
 
     /// A value PREMISES read: the lowest probability is theirs.
     fn read_fact(&mut self, probability: Option<f64>) {
-        if let Some((low, _)) = &mut self.ses.premises {
+        if let Some((low, _)) = &mut self.o.ses.premises {
             *low = low.min(probability.unwrap_or(1.0));
         }
     }
 
     /// What YES or NO writes takes their reliability as its probability.
     fn stamped(&self, v: Value) -> Value {
-        match (self.ses.stamp, v) {
+        match (self.o.ses.stamp, v) {
             (Some(p), Value::One(mut fz)) => {
                 fz.prob = Some(p);
                 Value::One(fz)
@@ -892,7 +1020,7 @@ impl<'r> Vm<'r> {
     /// otherwise not known, which makes them false; elsewhere, an error.
     fn unknown(&mut self, o: Id, a: Id) -> Run<Next> {
         let what = self.store.describe(AdtRef::ObjectAttribute(o, a));
-        if self.ses.premises.is_none() {
+        if self.o.ses.premises.is_none() {
             return Err(format!("{what} has no value").into());
         }
         if let Some(code) = self.property(AdtRef::ClassAttribute(a), "ASKABLE") {
@@ -918,7 +1046,7 @@ impl<'r> Vm<'r> {
                 }
             }
         }
-        if let Some((_, unknown)) = &mut self.ses.premises {
+        if let Some((_, unknown)) = &mut self.o.ses.premises {
             *unknown = true;
         }
         Err(format!("{what} is not known").into())
@@ -934,13 +1062,13 @@ impl<'r> Vm<'r> {
             .into());
         }
         let key = (part.to_string(), text.to_string());
-        if let Some(&m) = self.compiled.get(&key) {
+        if let Some(&m) = self.o.compiled.get(&key) {
             return Ok(m);
         }
         let module = self.language.compile(part, text, what, self.unit)?;
-        self.modules.push(Rc::new(module));
-        let m = self.modules.len() - 1;
-        self.compiled.insert(key, m);
+        self.o.modules.push(Rc::new(module));
+        let m = self.o.modules.len() - 1;
+        self.o.compiled.insert(key, m);
         Ok(m)
     }
 
@@ -965,6 +1093,9 @@ impl<'r> Vm<'r> {
                 Ok(Ok(t))
             }
             Exit::End(end) => Ok(Err(end)),
+            Exit::Yield | Exit::Input => {
+                unreachable!("code the store calls back runs to completion")
+            }
         }
     }
 
@@ -985,7 +1116,7 @@ impl<'r> Vm<'r> {
             }
         };
         let object = AdtRef::Object(this);
-        if self.ses.inside == 0
+        if self.o.ses.inside == 0
             && let Some(code) = self.property(adts, "MODIFIABLE")
         {
             match self.fact_holds("MODIFIABLE", &code, object)? {
@@ -1089,7 +1220,7 @@ impl<'r> Vm<'r> {
         let class = self.store.classes()[&c].name.clone();
         let a = stored(self.store.attribute(c, name))?;
         let computed = self.store.attributes()[&a].props.computed;
-        if let Some(&m) = self.computed.get(&(fold(&class), fold(name))) {
+        if let Some(&m) = self.o.computed.get(&(fold(&class), fold(name))) {
             self.enter(m, Vec::new(), Some(AdtRef::Object(o)), 0, true);
             return Ok(Next::Go);
         }
@@ -1124,28 +1255,28 @@ impl<'r> Vm<'r> {
         let state = same(&self.store.attributes()[&a].name, hbds_simulation::STATE);
         let kept = self.store.get(o, a).cloned();
         let p = Agent::Process(o);
-        if !self.sim.knows(p) && kept.is_some() {
+        if !self.o.sim.knows(p) && kept.is_some() {
             return kept;
         }
         Some(if state {
-            let name = hbds_simulation::state_name(self.sim.state(p));
+            let name = hbds_simulation::state_name(self.o.sim.state(p));
             Value::exact(Scalar::String(name.into()))
         } else {
-            Value::exact(Scalar::Float(self.sim.clock(p)))
+            Value::exact(Scalar::Float(self.o.sim.clock(p)))
         })
     }
 
     fn step(&mut self, i: &Instr, m: &Module, span: Span) -> Run<Next> {
         match i {
             Instr::Stmt => {
-                self.statements += 1;
-                if self.budget.is_some_and(|b| self.statements > b) {
+                self.o.statements += 1;
+                if self.o.budget.is_some_and(|b| self.o.statements > b) {
                     return Err(BUDGET_SPENT.into());
                 }
             }
             Instr::Const(v) => self.push(v.clone()),
             Instr::Pop => {
-                self.stack.pop();
+                self.o.stack.pop();
             }
             Instr::Load(s) => {
                 let v = self.var(*s).value.clone();
@@ -1237,12 +1368,12 @@ impl<'r> Vm<'r> {
             }
             Instr::Ref(s) => {
                 let (f, t) = self.resolve(*s);
-                self.stack.push(Item::Ref(f, t));
+                self.o.stack.push(Item::Ref(f, t));
             }
             Instr::Bind(a, s) => {
-                let f = self.frames.len() - 1;
-                let arg = self.frames[f].args[*a].clone();
-                self.frames[f].cells[*s] = match arg {
+                let f = self.o.frames.len() - 1;
+                let arg = self.o.frames[f].args[*a].clone();
+                self.o.frames[f].cells[*s] = match arg {
                     Item::Value(v) => {
                         let v = Self::convert(v, m.slots[*s].ty)?;
                         Cell::Own(Var {
@@ -1255,8 +1386,8 @@ impl<'r> Vm<'r> {
                 };
             }
             Instr::Prefix(s) => {
-                let f = self.frames.len() - 1;
-                let v = self.frames[f].prefix.take();
+                let f = self.o.frames.len() - 1;
+                let v = self.o.frames[f].prefix.take();
                 self.var_mut(*s).value = v;
             }
             Instr::AsInteger => {
@@ -1357,7 +1488,7 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::Call(callee, n) => {
-                let args = self.stack.split_off(self.stack.len() - n);
+                let args = self.o.stack.split_off(self.o.stack.len() - n);
                 let within = self.frame().within;
                 self.enter(*callee, args, None, 0, within);
             }
@@ -1379,7 +1510,7 @@ impl<'r> Vm<'r> {
                 self.push(Value::One(y));
             }
             Instr::Print(n) => {
-                let values = self.stack.split_off(self.stack.len() - n);
+                let values = self.o.stack.split_off(self.o.stack.len() - n);
                 let texts: Vec<String> = (values.iter())
                     .map(|i| match i {
                         Item::Value(v) => self.store.show(v),
@@ -1389,6 +1520,9 @@ impl<'r> Vm<'r> {
                 self.io.write(&(texts.join(" ") + "\n"));
             }
             Instr::Read(as_text) => {
+                if self.o.nesting == 0 && !self.io.ready() {
+                    return Ok(Next::Wait);
+                }
                 let line = self.io.read_line();
                 let line = line.ok_or("READ finds no more input")?;
                 let v = match as_text {
@@ -1398,7 +1532,7 @@ impl<'r> Vm<'r> {
                 self.push(v);
             }
             Instr::Gather(n) => {
-                let values = self.stack.split_off(self.stack.len() - n);
+                let values = self.o.stack.split_off(self.o.stack.len() - n);
                 let mut items = Vec::new();
                 for i in values {
                     match i {
@@ -1441,7 +1575,7 @@ impl<'r> Vm<'r> {
             Instr::Empty(s) => hbds_lists::empty(self.list_of(*s)),
             Instr::Organize(s, circular) => self.list_of(*s).circular = *circular,
             Instr::Functor(key, spelling, n, held) => {
-                let args: Vec<Value> = (self.stack.split_off(self.stack.len() - n))
+                let args: Vec<Value> = (self.o.stack.split_off(self.o.stack.len() - n))
                     .into_iter()
                     .map(|i| match i {
                         Item::Value(v) => v,
@@ -1470,9 +1604,12 @@ impl<'r> Vm<'r> {
                 }
                 self.push(result);
             }
-            Instr::Time => self.push(Value::exact(Scalar::Float(self.sim.now()))),
+            Instr::Time => self.push(Value::exact(Scalar::Float(self.o.sim.now()))),
             Instr::Pause => match self.role() {
                 Role::Main => {
+                    if self.o.nesting == 0 && !self.io.ready() {
+                        return Ok(Next::Wait);
+                    }
                     self.io.write("PAUSE\n");
                     self.io.read_line();
                 }
@@ -1483,9 +1620,9 @@ impl<'r> Vm<'r> {
                     if role != Role::Coroutine {
                         return Err("PAUSE in a process: it HOLDs or PASSIVATEs".into());
                     }
-                    let f = self.current;
-                    self.fibers[f].state = FiberState::Paused;
-                    let back = self.fibers[f].resumer.expect("a coroutine's resumer");
+                    let f = self.o.current;
+                    self.o.fibers[f].state = FiberState::Paused;
+                    let back = self.o.fibers[f].resumer.expect("a coroutine's resumer");
                     self.switch(back);
                 }
             },
@@ -1513,7 +1650,7 @@ impl<'r> Vm<'r> {
                 self.push(named);
             }
             Instr::Text => {
-                if let Some(Item::Value(Value::Adt(r))) = self.stack.last() {
+                if let Some(Item::Value(Value::Adt(r))) = self.o.stack.last() {
                     return Err(format!("{} is not a name", self.store.describe(*r)).into());
                 }
             }
@@ -1612,10 +1749,10 @@ impl<'r> Vm<'r> {
             },
             Instr::Begin => {
                 self.store.begin();
-                self.open += 1;
+                self.o.open += 1;
             }
             Instr::Commit => {
-                self.open -= 1;
+                self.o.open -= 1;
                 stored(self.store.end(true))?;
             }
             Instr::CreateClass(embryo) => {
@@ -1652,7 +1789,7 @@ impl<'r> Vm<'r> {
                 stored(r)?;
             }
             Instr::StateChange(op, n) => {
-                let targets: Vec<Value> = (self.stack.split_off(self.stack.len() - n))
+                let targets: Vec<Value> = (self.o.stack.split_off(self.o.stack.len() - n))
                     .into_iter()
                     .map(|i| match i {
                         Item::Value(v) => v,
@@ -1741,7 +1878,7 @@ impl<'r> Vm<'r> {
                 if *negated {
                     stored(self.store.retract_link(a, relation, b))?;
                 } else {
-                    let p = probability.or(self.ses.stamp);
+                    let p = probability.or(self.o.ses.stamp);
                     let l = stored(self.store.assert_link(a, relation, b, p))?;
                     return self.trigger(Invoked::Linked(l), self.frame().depth);
                 }
@@ -1812,17 +1949,17 @@ impl<'r> Vm<'r> {
                 self.push(Value::boolean(linked));
             }
             Instr::KeepOr(t) => {
-                let top = match self.stack.last() {
+                let top = match self.o.stack.last() {
                     Some(Item::Value(v)) => v,
                     _ => unreachable!("a value"),
                 };
                 if !matches!(top, Value::List(_) | Value::Adt(_)) {
-                    self.stack.pop();
+                    self.o.stack.pop();
                     return Ok(Next::Jump(*t));
                 }
             }
             Instr::AdtFunctor(key, spelling, n) => {
-                let args: Vec<Value> = (self.stack.split_off(self.stack.len() - n))
+                let args: Vec<Value> = (self.o.stack.split_off(self.o.stack.len() - n))
                     .into_iter()
                     .map(|i| match i {
                         Item::Value(v) => v,
@@ -1880,23 +2017,23 @@ impl<'r> Vm<'r> {
                 self.push(Value::Adt(AdtRef::Class(class)));
             }
             Instr::ResumeStarted(c, has_args, t) => {
-                let Some(&fiber) = self.coroutines.get(c) else {
+                let Some(&fiber) = self.o.coroutines.get(c) else {
                     return Ok(Next::Go);
                 };
-                let name = &self.modules[*c].spelling;
+                let name = &self.o.modules[*c].spelling;
                 if *has_args {
                     return Err("arguments go with the first RESUME only".into());
                 }
-                match self.fibers[fiber].state {
+                match self.o.fibers[fiber].state {
                     FiberState::Ended => return Err(format!("`{name}` has ended").into()),
                     FiberState::Running => {
                         return Err(format!("`{name}` is running: it cannot be resumed").into());
                     }
                     FiberState::Paused => {}
                 }
-                self.frames.last_mut().expect("a frame").pc = *t;
-                self.fibers[fiber].state = FiberState::Running;
-                self.fibers[fiber].resumer = Some(self.current);
+                self.o.frames.last_mut().expect("a frame").pc = *t;
+                self.o.fibers[fiber].state = FiberState::Running;
+                self.o.fibers[fiber].resumer = Some(self.o.current);
                 self.switch(fiber);
             }
             Instr::ResumeFirst(c, n) => self.start(*c, *n),
@@ -1911,11 +2048,11 @@ impl<'r> Vm<'r> {
                 self.push(Value::Adt(AdtRef::Object(o)));
             }
             Instr::HasBody => {
-                let Some(Item::Value(Value::Adt(AdtRef::Object(p)))) = self.stack.last() else {
+                let Some(Item::Value(Value::Adt(AdtRef::Object(p)))) = self.o.stack.last() else {
                     unreachable!("a process")
                 };
                 let body = self.body(*p)?;
-                if !self.modules[body].params.is_empty() {
+                if !self.o.modules[body].params.is_empty() {
                     return Err("a process's body takes no parameters".into());
                 }
             }
@@ -1978,9 +2115,9 @@ impl<'r> Vm<'r> {
                 self.sim_op(|sim, _| sim.terminate())?;
                 match self.role() {
                     Role::Process(p) => {
-                        let f = self.current;
-                        self.fibers[f].state = FiberState::Ended;
-                        self.processes.remove(&p);
+                        let f = self.o.current;
+                        self.o.fibers[f].state = FiberState::Ended;
+                        self.o.processes.remove(&p);
                         self.dispatch()?;
                     }
                     _ => return Ok(Next::End(End::Done)),

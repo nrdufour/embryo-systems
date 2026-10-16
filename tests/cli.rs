@@ -143,7 +143,10 @@ fn a_built_program_runs_on_its_own() {
     let expected = fs::read_to_string(corpus("io.out")).unwrap();
     assert_eq!(ok(elsewhere.to_str().unwrap(), &[], &input), expected);
     let (success, _, err) = launch(elsewhere.to_str().unwrap(), &["io.adt"], "");
-    assert!(!success && err.contains("[--store DIR]"), "{err}");
+    assert!(
+        !success && err.contains("[--store DIR | --connect SOCKET]"),
+        "{err}"
+    );
 }
 
 #[test]

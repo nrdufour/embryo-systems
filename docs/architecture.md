@@ -311,6 +311,22 @@ does not need); HTTP alone (a conversation split in two); a TCP port as
 well (two doors). Who may change which a.d.t. is for later, near NINJAS
 (project 20).
 
+As built (2026-10-16, step 6a): `crates/hbds-http` is the wire, HTTP/1.1,
+the WebSocket upgrade with its SHA-1 and base64, and JSON, tested on the
+RFCs' examples; `crates/hbds-daemon` the daemon, `embryo-systems daemon
+--socket SOCKET [--store DIR] [--slice N]`. One executor thread owns the
+store; a session is a client's program, a VM `Session` that runs in
+turns of N instructions, round robin, ending only between statements
+outside any callback and transaction, or where READ waits for a line
+(decision 3). A READ inside code the store calls back cannot end a turn,
+so the executor waits on that client: rare (an ASKABLE fact), and the
+price of callbacks running to completion. `run`, `exec` and a built
+program take `--connect SOCKET`. `GET /store` and `GET /sessions` answer
+plain HTTP. Still as before until 6b and 6c: a sync per statement, and a
+sequencing set per session. `tests/daemon.rs` runs the whole corpus as
+sessions, two at once, and a client that leaves; `tests/vm.rs` runs it
+in turns of five instructions too.
+
 ### 9. Standalone builds carry what they need
 
 - **Two products:** an `.acode` file, portable compiled modules (for

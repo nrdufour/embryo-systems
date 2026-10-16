@@ -5,6 +5,8 @@ members = [
     "crates/hbds-values",
     "crates/hbds-acode",
     "crates/hbds-vm",
+    "crates/hbds-http",
+    "crates/hbds-daemon",
     "crates/hbds-lists",
     "crates/hbds-gtad",
     "crates/hbds-functors",
@@ -28,6 +30,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+hbds-daemon = { path = "crates/hbds-daemon" }
 adt81 = { path = "crates/adt81" }
 hbds-gtad = { path = "crates/hbds-gtad" }
 hbds-journal = { path = "crates/hbds-journal" }

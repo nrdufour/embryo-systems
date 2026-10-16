@@ -69,6 +69,31 @@ fn vm(unit: &hbds_acode::Unit, input: &str, budget: u64) -> Outcome {
     (io.output, r.map_err(|e| e.to_string()), store.dump())
 }
 
+/// The VM again, in turns of a few instructions, as the daemon runs a
+/// session: the same outcome.
+fn vm_in_turns(unit: &hbds_acode::Unit, input: &str, budget: u64) -> Outcome {
+    let mut io = capture(input);
+    let mut store = Store::memory();
+    let r = std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn_scoped(s, || {
+                let mut session = hbds_vm::Session::new(unit.clone(), Some(budget));
+                loop {
+                    match session.turn(&mut store, &mut io, &Adt81, Some(5)) {
+                        hbds_vm::Turn::Done(n) => return Ok(n),
+                        hbds_vm::Turn::Failed(e) => return Err(e.to_string()),
+                        hbds_vm::Turn::Yield | hbds_vm::Turn::Input => {}
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    });
+    (io.output, r, store.dump())
+}
+
 fn programs(dir: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = fs::read_dir(dir)
         .unwrap()
@@ -112,6 +137,13 @@ fn the_corpus() {
         if r != v {
             differ.push(format!(
                 "{name}\n  reference: {r:?}\n  vm:        {v:?}\n{text}"
+            ));
+        }
+        let program = lower::parse_program(&source).unwrap();
+        let t = vm_in_turns(&compile(&program), &input, BUDGET);
+        if t != v {
+            differ.push(format!(
+                "{name}, in turns\n  vm:       {v:?}\n  in turns: {t:?}"
             ));
         }
     }
