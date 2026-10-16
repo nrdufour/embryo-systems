@@ -1,0 +1,54 @@
+-- Figure 59's propagation in a water network, in time (pages 123 to 126): --
+-- the fire hydrant opened lowers the secondary pipe's pressure a moment --
+-- later, which starts the surpressor later still, which at once raises --
+-- the primary pipe's pressure, which empties the tank, whose level at --
+-- last starts the pump, its reaction holding a while first. Each reflex --
+-- waits its DELAY in the sequencing set; the main program holds while --
+-- they run. Written for the reflex engine; the times traced by hand. --
+
+program network ;
+begin
+        create "fire hydrant", "secondary pipe", "surpressor", "primary pipe", "water tank", "pump" ;
+        create "fire hydrant" . "state", "secondary pipe" . "pressure", "surpressor" . "running",
+               "primary pipe" . "pressure", "water tank" . "level", "pump" . "state" ;
+        create "fh" [ "fire hydrant" ], "s1" [ "secondary pipe" ], "u1" [ "surpressor" ],
+               "p1" [ "primary pipe" ], "t1" [ "water tank" ], "m1" [ "pump" ] ;
+        let "fh" [ "fire hydrant" ] . "state" := "closed" ;
+        let "t1" [ "water tank" ] . "level" := 55 ;
+        let "m1" [ "pump" ] . "state" := "off" ;
+
+        create "flow" ; include "flow" into "reflex" ;
+        create "opened" [ "flow" ], "lowered" [ "flow" ], "started" [ "flow" ],
+               "raised" [ "flow" ], "emptied" [ "flow" ] ;
+        let "opened" [ "flow" ] . "event" := "set" ;
+        let "opened" [ "flow" ] . "delay" := 1 ;
+        assoc "fire hydrant" . "state" with "opened" [ "flow" ] ;
+        let "opened" [ "flow" ] ' reaction :=
+            "let ""s1"" [ ""secondary pipe"" ] . ""pressure"" := 2 ; print ""pipe at"", time" ;
+        let "lowered" [ "flow" ] . "event" := "set" ;
+        let "lowered" [ "flow" ] . "delay" := 2 ;
+        assoc "secondary pipe" . "pressure" with "lowered" [ "flow" ] ;
+        let "lowered" [ "flow" ] ' reaction :=
+            "let ""u1"" [ ""surpressor"" ] . ""running"" := true ; print ""surpressor at"", time" ;
+        let "started" [ "flow" ] . "event" := "set" ;
+        assoc "surpressor" . "running" with "started" [ "flow" ] ;
+        let "started" [ "flow" ] ' reaction :=
+            "let ""p1"" [ ""primary pipe"" ] . ""pressure"" := 6 ; print ""primary at"", time" ;
+        let "raised" [ "flow" ] . "event" := "set" ;
+        let "raised" [ "flow" ] . "delay" := 3 ;
+        assoc "primary pipe" . "pressure" with "raised" [ "flow" ] ;
+        let "raised" [ "flow" ] ' reaction :=
+            "let ""t1"" [ ""water tank"" ] . ""level"" := ""t1"" [ ""water tank"" ] . ""level"" - 10 ; " &
+            "print ""tank at"", time, ""t1"" [ ""water tank"" ] . ""level""" ;
+        let "emptied" [ "flow" ] . "event" := "set" ;
+        let "emptied" [ "flow" ] . "delay" := 1 ;
+        assoc "water tank" . "level" with "emptied" [ "flow" ] ;
+        let "emptied" [ "flow" ] ' reaction :=
+            "if this . ""level"" < 50 then hold for 1 ; " &
+            "let ""m1"" [ ""pump"" ] . ""state"" := ""on"" ; print ""pump at"", time endif" ;
+
+        let "fh" [ "fire hydrant" ] . "state" := "open" ;
+        print "opened", time ;
+        hold for 20 ;
+        print "at the end", time, "m1" [ "pump" ] . "state"
+end ;

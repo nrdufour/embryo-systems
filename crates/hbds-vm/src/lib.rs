@@ -46,6 +46,9 @@ pub trait Io: Send {
     /// it: what it writes may go there.
     fn running(&mut self, _process: Agent, _owner: Option<Agent>) {}
 
+    /// A reflex launched for an object: run now, or with a delay.
+    fn reflex(&mut self, _reflex: &str, _this: &str, _delay: f64) {}
+
     /// CHAV or HYPOCHAV has run: the rules it tried and those that
     /// fired, named as PRINT names them.
     fn rules(&mut self, _engine: &str, _tried: &[String], _fired: &[String]) {}
@@ -163,10 +166,9 @@ pub struct Session {
 struct Owned {
     /// The unit's modules, then those compiled from the store's code.
     modules: Vec<Rc<Module>>,
-    /// Where each module comes from: its unit's hash and its place there;
-    /// none for code the store keeps, compiled. What a saved fiber names
-    /// its modules by.
-    origin: Vec<Option<(String, usize)>>,
+    /// Where each module comes from: what a saved fiber names its modules
+    /// by.
+    origin: Vec<Origin>,
     /// Code the store keeps, compiled: by part and text.
     compiled: HashMap<(String, String), usize>,
     /// The functions that compute attributes, by class and attribute.
@@ -183,9 +185,9 @@ struct Owned {
     mode: Mode,
     /// The kernel's bound for this turn, and the process it runs.
     bound: Bound,
-    running: Option<Id>,
+    running: Option<Agent>,
     /// The process the kernel's last turn ended on an error, if one did.
-    failed: Option<Id>,
+    failed: Option<Agent>,
     /// Whether the store's records wait for the running process's pause.
     holding: bool,
     /// Whether a reflex's reaction runs: it launches, but does not run,
@@ -199,6 +201,8 @@ struct Owned {
     /// object: their fibers.
     coroutines: HashMap<usize, usize>,
     processes: HashMap<Id, usize>,
+    /// The reflexes in time, by activation: their fibers.
+    activations: HashMap<u64, usize>,
     /// Variables shared with a coroutine by its first RESUME.
     shared: Vec<Var>,
     /// Where the main program last held: the sequencing set's errors go
@@ -259,6 +263,7 @@ impl Session {
             current: 0,
             coroutines: HashMap::new(),
             processes: HashMap::new(),
+            activations: HashMap::new(),
             shared: Vec::new(),
             held_at: Span::default(),
             program: 0,
@@ -280,7 +285,7 @@ impl Session {
         let offset = self.o.modules.len();
         let hash = hbds_core::sha1::hex(unit.text().as_bytes());
         for (i, m) in unit.modules.iter().enumerate() {
-            self.o.origin.push(Some((hash.clone(), i)));
+            self.o.origin.push(Origin::Unit(hash.clone(), i));
             let mut m = m.clone();
             relocate(&mut m, offset);
             if let Some(key) = &m.computes {
@@ -370,7 +375,7 @@ impl Session {
     }
 
     /// The process the kernel's last turn ended on an error, if one did.
-    pub fn failed(&self) -> Option<Id> {
+    pub fn failed(&self) -> Option<Agent> {
         self.o.failed
     }
 
@@ -378,6 +383,15 @@ impl Session {
     pub fn events_left(&self) -> Option<u64> {
         self.o.bound.events
     }
+}
+
+/// Where a module comes from: a unit loaded, by its hash and the
+/// module's place there; or code the store keeps, compiled, by its part,
+/// language and text.
+#[derive(Debug, Clone)]
+enum Origin {
+    Unit(String, usize),
+    Code(String, String, String),
 }
 
 /// A module's instructions that name modules, moved by `offset`.
@@ -460,10 +474,10 @@ impl Vm<'_> {
 
     fn kernel_turn(&mut self) -> Result<Turn, RuntimeError> {
         self.o.failed = None;
-        if let Some(p) = self.o.running {
-            self.sim.run_as(Agent::Process(p));
-            let owner = self.sim.owner(Agent::Process(p));
-            self.io.running(Agent::Process(p), owner);
+        if let Some(a) = self.o.running {
+            self.sim.run_as(a);
+            let owner = self.sim.owner(a);
+            self.io.running(a, owner);
         } else {
             match self.dispatch() {
                 Ok(Some(stop)) => return Ok(stop_turn(stop)),
@@ -482,10 +496,14 @@ impl Vm<'_> {
             for _ in 0..std::mem::take(&mut self.o.open) {
                 let _ = self.store.end(false);
             }
-            if let Some(p) = self.o.running.take() {
-                self.sim.run_as(Agent::Process(p));
+            if let Some(a) = self.o.running.take() {
+                self.sim.run_as(a);
                 let _ = self.sim.terminate();
-                self.o.failed = Some(p);
+                self.o.failed = Some(a);
+                if let Agent::Reflex(n) = a {
+                    self.o.activations.remove(&n);
+                    self.sim.forget(a);
+                }
                 let _ = self.checkpoint();
             }
         }
@@ -539,6 +557,8 @@ enum Role {
     /// A coroutine RESUME started.
     Coroutine,
     Process(Id),
+    /// A reflex launched with a delay, in time.
+    Reflex(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -909,8 +929,14 @@ impl<'r> Vm<'r> {
         while self.o.current != entry {
             let f = self.o.current;
             self.o.fibers[f].state = FiberState::Ended;
-            if let Role::Process(p) = self.o.fibers[f].role {
-                self.o.processes.remove(&p);
+            match self.o.fibers[f].role {
+                Role::Process(p) => {
+                    self.o.processes.remove(&p);
+                }
+                Role::Reflex(n) => {
+                    self.o.activations.remove(&n);
+                }
+                _ => {}
             }
             let back = self.o.fibers[f].resumer.unwrap_or(0);
             self.switch(back);
@@ -934,6 +960,16 @@ impl<'r> Vm<'r> {
                 let at = self.o.held_at;
                 self.sim_op(|sim, _| sim.terminate())
                     .map_err(|f| f.at(at))?;
+                self.dispatch()
+            }
+            // A reflex in time, its reaction done: forgotten.
+            Role::Reflex(n) => {
+                self.o.activations.remove(&n);
+                self.o.running = None;
+                let at = self.o.held_at;
+                self.sim_op(|sim, _| sim.terminate())
+                    .map_err(|f| f.at(at))?;
+                self.sim.forget(Agent::Reflex(n));
                 self.dispatch()
             }
             Role::Main => unreachable!("the main program ends the run"),
@@ -1000,6 +1036,15 @@ impl<'r> Vm<'r> {
                     continue;
                 };
                 let what = self.store.describe(AdtRef::Object(r));
+                let delay = hbds_reflexes::delay(self.store, r);
+                let this = self.store.describe(AdtRef::Object(o));
+                self.io.reflex(&what, &this, delay);
+                // A DELAY puts it in time, in the sequencing set (page 126).
+                if delay != 0.0 {
+                    self.sim_op(|sim, _| sim.launch(r, o, delay).map(|_| ()))?;
+                    self.keep_sequencing()?;
+                    continue;
+                }
                 let m = self.compiled("REACTION", &code.language, &code.text, &what)?;
                 self.store.begin();
                 self.o.open += 1;
@@ -1046,6 +1091,7 @@ impl<'r> Vm<'r> {
         match self.role() {
             Role::Main => Ok(self.me()),
             Role::Process(p) => Ok(Agent::Process(p)),
+            Role::Reflex(n) => Ok(Agent::Reflex(n)),
             Role::Coroutine => Err(
                 "a coroutine RESUME started is not a process: it does not HOLD, PASSIVATE nor TERMINATE"
                     .into(),
@@ -1080,8 +1126,36 @@ impl<'r> Vm<'r> {
             }
         };
         match next {
+            Some(Agent::Reflex(n)) => {
+                let agent = Agent::Reflex(n);
+                if let Some(&f) = self.o.activations.get(&n) {
+                    self.o.running = Some(agent);
+                    self.kernel_holds(agent);
+                    self.switch(f);
+                    return Ok(None);
+                }
+                let found = self.sim.reflex(n);
+                let code = found
+                    .and_then(|(r, _)| self.property(AdtRef::Object(r), hbds_reflexes::REACTION));
+                let (Some((r, o)), Some(code)) = (found, code) else {
+                    // Its reflex gone since: nothing to run.
+                    self.sim.forget(agent);
+                    return self.dispatch();
+                };
+                let what = self.store.describe(AdtRef::Object(r));
+                let m = (self.compiled("REACTION", &code.language, &code.text, &what))
+                    .map_err(|f| f.at(at))?;
+                self.o.running = Some(agent);
+                self.kernel_holds(agent);
+                let f = self.o.fibers.len();
+                self.o.fibers.push(Fiber::new(Role::Reflex(n), None));
+                self.o.activations.insert(n, f);
+                self.switch(f);
+                self.enter(m, Vec::new(), Some(AdtRef::Object(o)), 0, false);
+                return Ok(None);
+            }
             Some(Agent::Process(p)) => {
-                self.o.running = Some(p);
+                self.o.running = Some(Agent::Process(p));
                 if self.o.mode == Mode::Kernel {
                     let owner = self.sim.owner(Agent::Process(p));
                     self.io.running(Agent::Process(p), owner);
@@ -1120,6 +1194,17 @@ impl<'r> Vm<'r> {
         Ok(None)
     }
 
+    /// In the kernel, an agent about to run: what it prints goes to its
+    /// owner, and its writes wait for its pause (decision 5).
+    fn kernel_holds(&mut self, agent: Agent) {
+        if self.o.mode == Mode::Kernel {
+            let owner = self.sim.owner(agent);
+            self.io.running(agent, owner);
+            self.store.hold_records();
+            self.o.holding = true;
+        }
+    }
+
     /// The body of a process: its class's coroutine, or the nearest
     /// hyperclass's.
     fn body(&self, p: Id) -> Run<usize> {
@@ -1143,6 +1228,7 @@ impl<'r> Vm<'r> {
         let name = |a: Agent| match a {
             Agent::Main | Agent::Client(_) => "the main program".to_string(),
             Agent::Process(p) => store.describe(AdtRef::Object(p)),
+            Agent::Reflex(_) => "a reflex in time".to_string(),
         };
         op(self.sim, &name).map_err(Failure::from)
     }
@@ -1463,7 +1549,9 @@ impl<'r> Vm<'r> {
         let mut module = self.language.compile(part, text, what, self.unit)?;
         relocate(&mut module, self.offset);
         self.o.modules.push(Rc::new(module));
-        self.o.origin.push(None);
+        self.o
+            .origin
+            .push(Origin::Code(part.into(), language.into(), text.into()));
         let m = self.o.modules.len() - 1;
         self.o.compiled.insert(key, m);
         Ok(m)
@@ -2537,6 +2625,16 @@ impl<'r> Vm<'r> {
                         self.o.fibers[f].state = FiberState::Ended;
                         self.o.processes.remove(&p);
                         self.o.running = None;
+                        if let Some(stop) = self.dispatch()? {
+                            return Ok(Next::Stop(stop));
+                        }
+                    }
+                    Role::Reflex(n) => {
+                        let f = self.o.current;
+                        self.o.fibers[f].state = FiberState::Ended;
+                        self.o.activations.remove(&n);
+                        self.o.running = None;
+                        self.sim.forget(Agent::Reflex(n));
                         if let Some(stop) = self.dispatch()? {
                             return Ok(Next::Stop(stop));
                         }

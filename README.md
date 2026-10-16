@@ -129,7 +129,7 @@ The system's own steps (A-code and a VM, standalone builds, a daemon with a web 
 
 | engine | print |
 |---|---|
-| neurons (reflexes are built: docs/hbds.md, "Reflexes") | project 18, pages 116 to 131 |
+| neurons (reflexes are built, in time too: docs/hbds.md, "Reflexes") | project 18, pages 116 to 131 |
 | dialog, the Q-Graph | project 19, pages 133 to 149 |
 | constraints: MAY, MUST, CANNOT, and the CONSTRAINT hyperclass | pages 157 to 160 |
 | SFSI and ZE, the print's own file system and exchange zone, as another persistence | project 13, pages 86 to 105 |

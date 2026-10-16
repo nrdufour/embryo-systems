@@ -5,6 +5,7 @@ use hbds_simulation::*;
 fn d(a: Agent) -> String {
     match a {
         Agent::Main | Agent::Client(_) => "the main program".into(),
+        Agent::Reflex(n) => format!("reflex {n}"),
         Agent::Process(id) => format!("p{id}"),
     }
 }
@@ -180,4 +181,23 @@ fn a_set_saves_and_restores_without_its_clients() {
         Sequencing::restore(&back.save()).unwrap().save(),
         back.save()
     );
+}
+
+#[test]
+fn a_reflex_in_time_is_due_and_kept() {
+    let mut s = Sequencing::new();
+    let a = s.launch(7, 9, 2.5).unwrap();
+    s.reactivate(Agent::Process(3), When::At(1.0), &d).unwrap();
+    s.hold(5.0).unwrap();
+    assert_eq!(s.advance(), Some(Agent::Process(3)));
+    s.terminate().unwrap();
+    assert_eq!(s.advance(), Some(a));
+    assert_eq!(s.now(), 2.5);
+    assert_eq!(s.reflex(1), Some((7, 9)));
+    let back = Sequencing::restore(&s.save()).unwrap();
+    assert_eq!(back.reflex(1), Some((7, 9)));
+    assert_eq!(back.save(), s.save());
+    assert!(s.launch(7, 9, -1.0).is_err());
+    s.forget(a);
+    assert_eq!(s.reflex(1), None);
 }

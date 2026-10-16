@@ -58,6 +58,15 @@ async function schema() {
     }
     box.append(card);
   }
+  // The reflexes, each a behavior's part (figure 53).
+  const behavior = $("behavior");
+  behavior.replaceChildren();
+  for (const r of s.reflexes) {
+    const when = r.event ?? "no event";
+    const delay = r.delay && r.delay !== "0" ? `, after ${r.delay}` : "";
+    const from = r.launchers.length ? r.launchers.join(", ") : "no launcher";
+    behavior.append(el("li", null, `${r.name}: ${when} of ${from}${delay}`));
+  }
   const links = $("links");
   links.replaceChildren();
   for (const l of s.links) {
@@ -239,6 +248,11 @@ function frame(f) {
     showPace(f.pace);
   } else if ("rules" in f) {
     rules(f.rules);
+  } else if ("reflex" in f) {
+    const r = f.reflex;
+    const li = el("li", null, `${r.reflex} for ${r.this}${r.delay ? `, in ${r.delay}` : ""}`);
+    $("launches").prepend(li);
+    while ($("launches").children.length > TAIL) $("launches").lastChild.remove();
   }
 }
 

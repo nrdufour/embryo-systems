@@ -9,6 +9,7 @@ license.workspace = true
 # owning the store, clients' sessions taking turns on it, over a Unix
 # socket. No language of its own: the command lends one.
 [dependencies]
+hbds-core = { path = "../hbds-core" }
 hbds-acode = { path = "../hbds-acode" }
 hbds-gtad = { path = "../hbds-gtad" }
 hbds-http = { path = "../hbds-http" }

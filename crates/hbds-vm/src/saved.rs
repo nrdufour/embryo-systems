@@ -7,10 +7,15 @@
 use std::collections::HashMap;
 
 use hbds_core::terms::{
-    Reader, Term, adt_ref, list, optional, read_terms, value, word, write_term,
+    Reader, Term, adt_ref, list, optional, read_terms, text, value, word, write_term,
 };
 
-use super::{Cell, Fiber, FiberState, Frame, Item, Owned, Role, Session, Span, Var};
+use std::rc::Rc;
+
+use super::{
+    Cell, Fiber, FiberState, Frame, Item, Language, Origin, Owned, Role, Session, Span, Var,
+    relocate,
+};
 
 fn var(v: &Var) -> Term {
     list(vec![
@@ -108,23 +113,72 @@ struct Saver<'a> {
 }
 
 impl Saver<'_> {
-    /// A module as a saved fiber names it.
+    /// A module as a saved fiber names it: a unit's by hash and place,
+    /// code the store keeps (a reflex's reaction in time) by what it is.
     fn module_term(&self, m: usize) -> Result<Term, String> {
-        match &self.o.origin[m] {
-            Some((hash, i)) => Ok(list(vec![word(hash), word(i)])),
-            None => Err("a fiber in code the store keeps, which runs to completion".into()),
-        }
+        Ok(match &self.o.origin[m] {
+            Origin::Unit(hash, i) => list(vec![word(hash), word(i)]),
+            Origin::Code(part, language, code) => {
+                list(vec![word("code"), text(part), text(language), text(code)])
+            }
+        })
     }
 }
 
-fn read_module(r: &mut Reader, index: &HashMap<(String, usize), usize>) -> Result<usize, String> {
-    let mut m = r.list()?;
-    let key = (m.word()?.to_string(), m.parse()?);
-    m.end()?;
-    index
-        .get(&key)
-        .copied()
-        .ok_or_else(|| format!("no module {} of unit {} is loaded", key.1, key.0))
+impl Session {
+    /// A module a saved fiber names: a unit's, loaded; code, compiled
+    /// again if it is not yet.
+    fn read_module(
+        &mut self,
+        r: &mut Reader,
+        index: &HashMap<(String, usize), usize>,
+        language: &dyn Language,
+    ) -> Result<usize, String> {
+        let mut m = r.list()?;
+        let first = m.word()?.to_string();
+        if first == "code" {
+            let (part, lang, code) = (m.text()?, m.text()?, m.text()?);
+            m.end()?;
+            return self.compile_code(&part, &lang, &code, language);
+        }
+        let key = (first, m.parse()?);
+        m.end()?;
+        index
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("no module {} of unit {} is loaded", key.1, key.0))
+    }
+
+    /// Code the store keeps, compiled against the last unit, as a turn
+    /// compiles it.
+    fn compile_code(
+        &mut self,
+        part: &str,
+        lang: &str,
+        code: &str,
+        language: &dyn Language,
+    ) -> Result<usize, String> {
+        if lang != language.name() {
+            return Err(format!(
+                "code in {lang}, which {} does not run",
+                language.name()
+            ));
+        }
+        let key = (part.to_string(), code.to_string());
+        if let Some(&m) = self.o.compiled.get(&key) {
+            return Ok(m);
+        }
+        let (unit, offset) = self.units.last().ok_or("no unit loaded")?;
+        let mut module = language.compile(part, code, "the store's code", unit)?;
+        relocate(&mut module, *offset);
+        self.o.modules.push(Rc::new(module));
+        self.o
+            .origin
+            .push(Origin::Code(part.into(), lang.into(), code.into()));
+        let m = self.o.modules.len() - 1;
+        self.o.compiled.insert(key, m);
+        Ok(m)
+    }
 }
 
 impl Saver<'_> {
@@ -154,6 +208,7 @@ impl Saver<'_> {
                 Role::Main => list(vec![word("main")]),
                 Role::Coroutine => list(vec![word("coroutine")]),
                 Role::Process(p) => list(vec![word("process"), word(p)]),
+                Role::Reflex(n) => list(vec![word("reflex"), word(n)]),
             };
             let state = STATES
                 .iter()
@@ -182,6 +237,8 @@ impl Saver<'_> {
         });
         let mut processes: Vec<_> = self.o.processes.iter().collect();
         processes.sort();
+        let mut activations: Vec<_> = self.o.activations.iter().collect();
+        activations.sort();
         let terms = [
             list(fibers),
             list(coroutines),
@@ -193,6 +250,12 @@ impl Saver<'_> {
             ),
             all(&self.o.shared, var),
             list(vec![word(self.o.held_at.line), word(self.o.held_at.column)]),
+            list(
+                activations
+                    .into_iter()
+                    .map(|(n, f)| list(vec![word(n), word(f)]))
+                    .collect(),
+            ),
         ];
         let mut out = String::new();
         for (i, t) in terms.iter().enumerate() {
@@ -208,9 +271,12 @@ impl Saver<'_> {
 impl Session {
     /// The kernel's fibers as `save_fibers` wrote them, its units loaded
     /// first. The kernel starts idle: the next process due runs on.
-    pub fn restore_fibers(&mut self, text: &str) -> Result<(), String> {
+    pub fn restore_fibers(&mut self, text: &str, language: &dyn Language) -> Result<(), String> {
         let index: HashMap<(String, usize), usize> = (self.o.origin.iter().enumerate())
-            .filter_map(|(m, o)| o.clone().map(|key| (key, m)))
+            .filter_map(|(m, o)| match o {
+                Origin::Unit(hash, i) => Some(((hash.clone(), *i), m)),
+                Origin::Code(..) => None,
+            })
             .collect();
         let terms = read_terms(text)?;
         let mut r = Reader::new(&terms);
@@ -223,6 +289,7 @@ impl Session {
                 "main" => Role::Main,
                 "coroutine" => Role::Coroutine,
                 "process" => Role::Process(role.id()?),
+                "reflex" => Role::Reflex(role.parse()?),
                 w => return Err(format!("{w:?} is not a fiber's role")),
             };
             let mut frames = Vec::new();
@@ -230,7 +297,7 @@ impl Session {
             while fs.more() {
                 let mut fr = fs.list()?;
                 frames.push(Frame {
-                    module: read_module(&mut fr, &index)?,
+                    module: self.read_module(&mut fr, &index, language)?,
                     pc: fr.parse()?,
                     cells: read_all(&mut fr, read_cell)?,
                     args: read_all(&mut fr, read_item)?,
@@ -262,7 +329,7 @@ impl Session {
         let mut cs = r.list()?;
         while cs.more() {
             let mut c = cs.list()?;
-            coroutines.insert(read_module(&mut c, &index)?, c.parse()?);
+            coroutines.insert(self.read_module(&mut c, &index, language)?, c.parse()?);
             c.end()?;
         }
         let mut processes = HashMap::new();
@@ -278,6 +345,16 @@ impl Session {
             line: at.parse()?,
             column: at.parse()?,
         };
+        // The reflexes in time, which fibers saved before them lack.
+        let mut activations = HashMap::new();
+        if r.more() {
+            let mut xs = r.list()?;
+            while xs.more() {
+                let mut x = xs.list()?;
+                activations.insert(x.parse()?, x.parse()?);
+                x.end()?;
+            }
+        }
         r.end()?;
         if fibers.is_empty() {
             return Err("no fibers".into());
@@ -289,6 +366,7 @@ impl Session {
         self.o.stack = std::mem::take(&mut self.o.fibers[0].stack);
         self.o.coroutines = coroutines;
         self.o.processes = processes;
+        self.o.activations = activations;
         self.o.shared = shared;
         self.o.held_at = held_at;
         self.o.running = None;
