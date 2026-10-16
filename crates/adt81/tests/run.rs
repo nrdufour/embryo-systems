@@ -42,7 +42,10 @@ fn run(source: &str, input: &str) -> String {
         output: String::new(),
     }));
     let store = Arc::new(Mutex::new(Store::memory()));
-    let result = interp::run(program, capture.clone(), store);
+    let result = interp::run(program, capture.clone(), store.clone());
+    if let Err(e) = store.lock().unwrap().verify() {
+        panic!("{e}");
+    }
     let mut output = capture.lock().unwrap().output.clone();
     if let Err(e) = result {
         output += &format!("{e}\n");

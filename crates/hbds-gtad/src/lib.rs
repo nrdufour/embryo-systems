@@ -218,12 +218,13 @@ pub fn error<T>(message: impl Into<String>) -> Stored<T> {
 #[derive(Default)]
 pub struct Store {
     next: Id,
-    pub classes: PMap<Id, Class>,
-    pub attributes: PMap<Id, Attribute>,
-    pub objects: PMap<Id, Object>,
-    pub class_links: PMap<Id, ClassLink>,
-    pub object_links: PMap<Id, ObjectLink>,
-    pub associations: Vec<(AdtRef, AdtRef)>,
+    classes: PMap<Id, Class>,
+    attributes: PMap<Id, Attribute>,
+    objects: PMap<Id, Object>,
+    class_links: PMap<Id, ClassLink>,
+    object_links: PMap<Id, ObjectLink>,
+    associations: Vec<(AdtRef, AdtRef)>,
+    ix: Indexes,
     recorder: Option<Box<dyn Recorder>>,
     transaction: Option<Transaction>,
     counted: Counted,
@@ -262,6 +263,167 @@ struct Snapshot {
     class_links: PMap<Id, ClassLink>,
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
+    ix: Indexes,
+}
+
+/// What the model is looked up by (docs/architecture.md, decision 11),
+/// kept as it changes in `apply` and `purge` only: so a replay rebuilds
+/// it, and nothing journals it. Names are folded. A map of pairs to `()`
+/// is a set, read by ranging over its first element, the second in Id
+/// order, as the scans it replaces gave.
+#[derive(Clone, Default, PartialEq)]
+struct Indexes {
+    class_names: PMap<String, Id>,
+    object_names: PMap<(Id, String), Id>,
+    /// (class, object)
+    class_objects: PMap<(Id, Id), ()>,
+    attribute_names: PMap<(Id, String), Id>,
+    /// (class, attribute)
+    class_attributes: PMap<(Id, Id), ()>,
+    /// (folded name, attribute), whatever the class.
+    attributes_named: PMap<(String, Id), ()>,
+    /// (class, class link), by the link's two ends.
+    class_links_from: PMap<(Id, Id), ()>,
+    class_links_to: PMap<(Id, Id), ()>,
+    /// (object, object link), by the link's two ends, and (class link,
+    /// object link).
+    links_from: PMap<(Id, Id), ()>,
+    links_to: PMap<(Id, Id), ()>,
+    links_of: PMap<(Id, Id), ()>,
+    /// (hyperclass, class it includes)
+    members: PMap<(Id, Id), ()>,
+}
+
+impl Indexes {
+    fn class(&mut self, id: Id, c: &Class, on: bool) {
+        put(&mut self.class_names, fold(&c.name), id, on);
+        for h in &c.hyper {
+            put(&mut self.members, (*h, id), (), on);
+        }
+    }
+
+    fn object(&mut self, id: Id, o: &Object, on: bool) {
+        put(&mut self.object_names, (o.class, fold(&o.name)), id, on);
+        put(&mut self.class_objects, (o.class, id), (), on);
+    }
+
+    fn attribute(&mut self, id: Id, a: &Attribute, on: bool) {
+        put(&mut self.attribute_names, (a.class, fold(&a.name)), id, on);
+        put(&mut self.class_attributes, (a.class, id), (), on);
+        put(&mut self.attributes_named, (fold(&a.name), id), (), on);
+    }
+
+    fn class_link(&mut self, id: Id, l: &ClassLink, on: bool) {
+        put(&mut self.class_links_from, (l.from, id), (), on);
+        put(&mut self.class_links_to, (l.to, id), (), on);
+    }
+
+    fn object_link(&mut self, id: Id, l: &ObjectLink, on: bool) {
+        put(&mut self.links_from, (l.from, id), (), on);
+        put(&mut self.links_to, (l.to, id), (), on);
+        put(&mut self.links_of, (l.class_link, id), (), on);
+    }
+
+    fn copied(&self) -> u64 {
+        self.maps().iter().map(|m| m.copied()).sum::<u64>()
+            + self.class_names.copied()
+            + self.object_names.copied()
+            + self.attribute_names.copied()
+            + self.attributes_named.copied()
+    }
+
+    fn sets(&mut self) -> [&mut PMap<(Id, Id), ()>; 8] {
+        [
+            &mut self.class_objects,
+            &mut self.class_attributes,
+            &mut self.class_links_from,
+            &mut self.class_links_to,
+            &mut self.links_from,
+            &mut self.links_to,
+            &mut self.links_of,
+            &mut self.members,
+        ]
+    }
+
+    fn maps(&self) -> [&PMap<(Id, Id), ()>; 8] {
+        [
+            &self.class_objects,
+            &self.class_attributes,
+            &self.class_links_from,
+            &self.class_links_to,
+            &self.links_from,
+            &self.links_to,
+            &self.links_of,
+            &self.members,
+        ]
+    }
+
+    /// Back to `older`, keeping the counts of what was copied.
+    fn restore(&mut self, mut older: Indexes) {
+        self.class_names.restore(older.class_names.clone());
+        self.object_names.restore(older.object_names.clone());
+        self.attribute_names.restore(older.attribute_names.clone());
+        self.attributes_named
+            .restore(older.attributes_named.clone());
+        for (now, then) in self.sets().into_iter().zip(older.sets()) {
+            now.restore(then.clone());
+        }
+    }
+
+    /// The differences from `other`, by index name.
+    fn differences(&self, other: &Indexes) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        let mut check = |name, same: bool| {
+            if !same {
+                out.push(name);
+            }
+        };
+        check("class names", self.class_names == other.class_names);
+        check("object names", self.object_names == other.object_names);
+        check("class objects", self.class_objects == other.class_objects);
+        check(
+            "attribute names",
+            self.attribute_names == other.attribute_names,
+        );
+        check(
+            "class attributes",
+            self.class_attributes == other.class_attributes,
+        );
+        check(
+            "attributes named",
+            self.attributes_named == other.attributes_named,
+        );
+        check(
+            "class links from",
+            self.class_links_from == other.class_links_from,
+        );
+        check(
+            "class links to",
+            self.class_links_to == other.class_links_to,
+        );
+        check("links from", self.links_from == other.links_from);
+        check("links to", self.links_to == other.links_to);
+        check("links of", self.links_of == other.links_of);
+        check("members", self.members == other.members);
+        out
+    }
+}
+
+/// Adds the entry, or removes it.
+fn put<K: Ord + Clone, V: Clone>(map: &mut PMap<K, V>, key: K, val: V, on: bool) {
+    if on {
+        map.insert(key, val);
+    } else {
+        map.remove(&key);
+    }
+}
+
+/// The seconds of the pairs whose first is `first`, in order.
+fn seconds(set: &PMap<(Id, Id), ()>, first: Id) -> Vec<Id> {
+    (set.range_from(&(first, 0)))
+        .take_while(|((a, _), _)| *a == first)
+        .map(|((_, b), _)| *b)
+        .collect()
 }
 
 /// A point inside a transaction to come back to: the model then, and how
@@ -321,7 +483,8 @@ impl Store {
                 + self.attributes.copied()
                 + self.objects.copied()
                 + self.class_links.copied()
-                + self.object_links.copied(),
+                + self.object_links.copied()
+                + self.ix.copied(),
         }
     }
 
@@ -352,6 +515,7 @@ impl Store {
             class_links: self.class_links.clone(),
             object_links: self.object_links.clone(),
             associations: self.associations.clone(),
+            ix: self.ix.clone(),
         }
     }
 
@@ -363,6 +527,7 @@ impl Store {
         self.class_links.restore(s.class_links);
         self.object_links.restore(s.object_links);
         self.associations = s.associations;
+        self.ix.restore(s.ix);
     }
 
     /// Begins a transaction: the changes that follow apply at once, but
@@ -443,7 +608,7 @@ impl Store {
         }
         match change {
             Change::Class { id, name, kind } => {
-                self.classes.insert(
+                self.put_class(
                     id,
                     Class {
                         name,
@@ -455,7 +620,7 @@ impl Store {
                 );
             }
             Change::Object { id, class, name } => {
-                self.objects.insert(
+                self.put_object(
                     id,
                     Object {
                         class,
@@ -467,7 +632,7 @@ impl Store {
                 );
             }
             Change::Attribute { id, class, name } => {
-                self.attributes.insert(
+                self.put_attribute(
                     id,
                     Attribute {
                         class,
@@ -493,11 +658,9 @@ impl Store {
                     state: State::Active,
                     props: Props::default(),
                 };
-                self.class_links
-                    .insert(id, link(from, Some(relation), to, reverse));
+                self.put_class_link(id, link(from, Some(relation), to, reverse));
                 if reverse != id {
-                    self.class_links
-                        .insert(reverse, link(to, reverse_relation, from, id));
+                    self.put_class_link(reverse, link(to, reverse_relation, from, id));
                 }
             }
             Change::ObjectLink {
@@ -520,13 +683,12 @@ impl Store {
                     probability,
                     state: State::Active,
                 };
-                self.object_links
-                    .insert(id, link(class_link, from, to, reverse));
-                self.object_links.insert(reverse, link(back, to, from, id));
+                self.put_object_link(id, link(class_link, from, to, reverse));
+                self.put_object_link(reverse, link(back, to, from, id));
             }
             Change::Unlink { id } => {
-                if let Some(l) = self.object_links.remove(&id) {
-                    self.object_links.remove(&l.reverse);
+                if let Some(l) = self.drop_object_link(id) {
+                    self.drop_object_link(l.reverse);
                 }
             }
             Change::Set {
@@ -555,11 +717,13 @@ impl Store {
             Change::Include { class, hyper } => {
                 if let Some(c) = self.classes.get_mut(&class) {
                     c.hyper.insert(hyper);
+                    self.ix.members.insert((hyper, class), ());
                 }
             }
             Change::Exclude { class, hyper } => {
                 if let Some(c) = self.classes.get_mut(&class) {
                     c.hyper.remove(&hyper);
+                    self.ix.members.remove(&(hyper, class));
                 }
             }
             Change::Assoc { a, b } => {
@@ -647,29 +811,29 @@ impl Store {
     fn purge(&mut self, r: AdtRef) {
         match r {
             AdtRef::Class(id) => {
-                self.classes.remove(&id);
-                let objects: Vec<Id> = (self.objects.iter())
-                    .filter(|(_, o)| o.class == id)
-                    .map(|(i, _)| *i)
-                    .collect();
-                for o in objects {
+                self.drop_class(id);
+                for o in seconds(&self.ix.class_objects, id) {
                     self.purge(AdtRef::Object(o));
                 }
-                self.attributes.retain(|_, a| a.class != id);
-                let links: Vec<Id> = (self.class_links.iter())
-                    .filter(|(_, l)| l.from == id || l.to == id)
-                    .map(|(i, _)| *i)
-                    .collect();
+                for a in seconds(&self.ix.class_attributes, id) {
+                    self.drop_attribute(a);
+                }
+                let mut links = seconds(&self.ix.class_links_from, id);
+                links.extend(seconds(&self.ix.class_links_to, id));
                 for l in links {
                     self.purge(AdtRef::ClassLink(l));
                 }
             }
             AdtRef::Object(id) => {
-                self.objects.remove(&id);
-                self.object_links.retain(|_, l| l.from != id && l.to != id);
+                self.drop_object(id);
+                let mut links = seconds(&self.ix.links_from, id);
+                links.extend(seconds(&self.ix.links_to, id));
+                for l in links {
+                    self.drop_object_link(l);
+                }
             }
             AdtRef::ClassAttribute(id) | AdtRef::ObjectAttribute(_, id) => {
-                self.attributes.remove(&id);
+                self.drop_attribute(id);
                 let holding: Vec<Id> = (self.objects.iter())
                     .filter(|(_, o)| o.values.contains_key(&id))
                     .map(|(i, _)| *i)
@@ -679,17 +843,131 @@ impl Store {
                 }
             }
             AdtRef::ClassLink(id) => {
-                if let Some(l) = self.class_links.remove(&id) {
-                    self.class_links.remove(&l.reverse);
-                    let reverse = l.reverse;
-                    self.object_links
-                        .retain(|_, o| o.class_link != id && o.class_link != reverse);
+                if let Some(l) = self.drop_class_link(id) {
+                    self.drop_class_link(l.reverse);
+                    let mut links = seconds(&self.ix.links_of, id);
+                    links.extend(seconds(&self.ix.links_of, l.reverse));
+                    for o in links {
+                        self.drop_object_link(o);
+                    }
                 }
             }
             AdtRef::ObjectLink(id) => self.apply(Change::Unlink { id }),
         }
         self.associations
             .retain(|(a, b)| !involves(*a, r) && !involves(*b, r));
+    }
+
+    // The model's entries, with their indexes: the only way in or out.
+
+    fn put_class(&mut self, id: Id, c: Class) {
+        self.ix.class(id, &c, true);
+        self.classes.insert(id, c);
+    }
+
+    fn drop_class(&mut self, id: Id) -> Option<Class> {
+        let c = self.classes.remove(&id)?;
+        self.ix.class(id, &c, false);
+        Some(c)
+    }
+
+    fn put_object(&mut self, id: Id, o: Object) {
+        self.ix.object(id, &o, true);
+        self.objects.insert(id, o);
+    }
+
+    fn drop_object(&mut self, id: Id) -> Option<Object> {
+        let o = self.objects.remove(&id)?;
+        self.ix.object(id, &o, false);
+        Some(o)
+    }
+
+    fn put_attribute(&mut self, id: Id, a: Attribute) {
+        self.ix.attribute(id, &a, true);
+        self.attributes.insert(id, a);
+    }
+
+    fn drop_attribute(&mut self, id: Id) -> Option<Attribute> {
+        let a = self.attributes.remove(&id)?;
+        self.ix.attribute(id, &a, false);
+        Some(a)
+    }
+
+    fn put_class_link(&mut self, id: Id, l: ClassLink) {
+        self.ix.class_link(id, &l, true);
+        self.class_links.insert(id, l);
+    }
+
+    fn drop_class_link(&mut self, id: Id) -> Option<ClassLink> {
+        let l = self.class_links.remove(&id)?;
+        self.ix.class_link(id, &l, false);
+        Some(l)
+    }
+
+    fn put_object_link(&mut self, id: Id, l: ObjectLink) {
+        self.ix.object_link(id, &l, true);
+        self.object_links.insert(id, l);
+    }
+
+    fn drop_object_link(&mut self, id: Id) -> Option<ObjectLink> {
+        let l = self.object_links.remove(&id)?;
+        self.ix.object_link(id, &l, false);
+        Some(l)
+    }
+
+    /// The model holds together, every reference to something there,
+    /// and every index is what the model rebuilds. For tests.
+    pub fn verify(&self) -> Result<(), String> {
+        let class = |c: &Id| self.classes.contains_key(c);
+        let object = |o: &Id| self.objects.contains_key(o);
+        let mut dangling = Vec::new();
+        for (id, o) in &self.objects {
+            if !class(&o.class) {
+                dangling.push(format!("object {id}'s class"));
+            }
+        }
+        for (id, a) in &self.attributes {
+            if !class(&a.class) {
+                dangling.push(format!("attribute {id}'s class"));
+            }
+        }
+        for (id, l) in &self.class_links {
+            if !class(&l.from) || !class(&l.to) || !self.class_links.contains_key(&l.reverse) {
+                dangling.push(format!("class link {id}'s ends or reverse"));
+            }
+        }
+        for (id, l) in &self.object_links {
+            if !object(&l.from)
+                || !object(&l.to)
+                || !self.class_links.contains_key(&l.class_link)
+                || !self.object_links.contains_key(&l.reverse)
+            {
+                dangling.push(format!("object link {id}'s ends, class link or reverse"));
+            }
+        }
+        if !dangling.is_empty() {
+            return Err(format!("dangling: {}", dangling.join(", ")));
+        }
+        let mut ix = Indexes::default();
+        for (id, c) in &self.classes {
+            ix.class(*id, c, true);
+        }
+        for (id, o) in &self.objects {
+            ix.object(*id, o, true);
+        }
+        for (id, a) in &self.attributes {
+            ix.attribute(*id, a, true);
+        }
+        for (id, l) in &self.class_links {
+            ix.class_link(*id, l, true);
+        }
+        for (id, l) in &self.object_links {
+            ix.object_link(*id, l, true);
+        }
+        match self.ix.differences(&ix)[..] {
+            [] => Ok(()),
+            ref wrong => Err(format!("indexes out of date: {}", wrong.join(", "))),
+        }
     }
 
     // Looking up
@@ -732,13 +1010,8 @@ impl Store {
 
     /// A class by name, whatever its state.
     pub fn find_class(&self, name: &str) -> Option<Id> {
-        let mut n = 0;
-        let found = (self.classes.iter())
-            .inspect(|_| n += 1)
-            .find(|(_, c)| same(&c.name, name))
-            .map(|(i, _)| *i);
-        self.scanned(n);
-        found
+        self.scanned(1);
+        self.ix.class_names.get(&fold(name)).copied()
     }
 
     /// An active class by name.
@@ -751,13 +1024,8 @@ impl Store {
     }
 
     pub fn find_object(&self, class: Id, name: &str) -> Option<Id> {
-        let mut n = 0;
-        let found = (self.objects.iter())
-            .inspect(|_| n += 1)
-            .find(|(_, o)| o.class == class && same(&o.name, name))
-            .map(|(i, _)| *i);
-        self.scanned(n);
-        found
+        self.scanned(1);
+        self.ix.object_names.get(&(class, fold(name))).copied()
     }
 
     pub fn object(&self, class: Id, name: &str) -> Stored<Id> {
@@ -796,13 +1064,8 @@ impl Store {
     }
 
     fn own_attribute(&self, class: Id, name: &str) -> Option<Id> {
-        let mut n = 0;
-        let found = (self.attributes.iter())
-            .inspect(|_| n += 1)
-            .find(|(_, a)| a.class == class && same(&a.name, name))
-            .map(|(i, _)| *i);
-        self.scanned(n);
-        found
+        self.scanned(1);
+        self.ix.attribute_names.get(&(class, fold(name))).copied()
     }
 
     pub fn attribute(&self, class: Id, name: &str) -> Stored<Id> {
@@ -825,17 +1088,10 @@ impl Store {
     }
 
     fn own_class_link(&self, from: Id, relation: &str, to: Id) -> Option<Id> {
-        let mut n = 0;
-        let found = (self.class_links.iter())
-            .inspect(|_| n += 1)
-            .find(|(_, l)| {
-                l.from == from
-                    && l.to == to
-                    && l.relation.as_deref().is_some_and(|r| same(r, relation))
-            })
-            .map(|(i, _)| *i);
-        self.scanned(n);
-        found
+        self.class_links_from(from).into_iter().find(|i| {
+            let l = &self.class_links[i];
+            l.to == to && l.relation.as_deref().is_some_and(|r| same(r, relation))
+        })
     }
 
     pub fn class_link(&self, from: Id, relation: &str, to: Id) -> Stored<Id> {
@@ -854,14 +1110,94 @@ impl Store {
             return None;
         };
         let class_link = self.find_class_link(a.class, relation, b.class)?;
-        let mut n = 0;
-        let found = (self.object_links.iter())
-            .inspect(|_| n += 1)
-            .find(|(_, l)| l.class_link == class_link && l.from == from && l.to == to)
-            .filter(|(i, _)| self.visible(AdtRef::ObjectLink(**i)))
-            .map(|(i, _)| *i);
-        self.scanned(n);
+        (self.links_from(from).into_iter())
+            .find(|i| {
+                let l = &self.object_links[i];
+                l.class_link == class_link && l.to == to
+            })
+            .filter(|i| self.visible(AdtRef::ObjectLink(*i)))
+    }
+
+    /// The pairs of an index whose first is `first`, counted.
+    fn range(&self, set: &PMap<(Id, Id), ()>, first: Id) -> Vec<Id> {
+        let found = seconds(set, first);
+        self.scanned(found.len());
         found
+    }
+
+    /// A class's objects, oldest first, whatever their state.
+    pub fn objects_of(&self, class: Id) -> Vec<Id> {
+        self.range(&self.ix.class_objects, class)
+    }
+
+    /// A class's own attributes, oldest first.
+    pub fn attributes_of(&self, class: Id) -> Vec<Id> {
+        self.range(&self.ix.class_attributes, class)
+    }
+
+    /// The attributes of that name, in every class, oldest first.
+    pub fn attributes_named(&self, name: &str) -> Vec<Id> {
+        let name = fold(name);
+        let found: Vec<Id> = (self.ix.attributes_named.range_from(&(name.clone(), 0)))
+            .take_while(|((n, _), _)| *n == name)
+            .map(|((_, a), _)| *a)
+            .collect();
+        self.scanned(found.len());
+        found
+    }
+
+    /// The class links from a class, each direction a link, oldest first.
+    pub fn class_links_from(&self, class: Id) -> Vec<Id> {
+        self.range(&self.ix.class_links_from, class)
+    }
+
+    pub fn class_links_to(&self, class: Id) -> Vec<Id> {
+        self.range(&self.ix.class_links_to, class)
+    }
+
+    /// The object links from an object, oldest first.
+    pub fn links_from(&self, object: Id) -> Vec<Id> {
+        self.range(&self.ix.links_from, object)
+    }
+
+    pub fn links_to(&self, object: Id) -> Vec<Id> {
+        self.range(&self.ix.links_to, object)
+    }
+
+    /// The object links realizing a class link, oldest first.
+    pub fn links_of(&self, class_link: Id) -> Vec<Id> {
+        self.range(&self.ix.links_of, class_link)
+    }
+
+    /// The classes a hyperclass includes directly, oldest first.
+    pub fn members(&self, hyper: Id) -> Vec<Id> {
+        self.range(&self.ix.members, hyper)
+    }
+
+    // The model, to read; it changes only through changes.
+
+    pub fn classes(&self) -> &PMap<Id, Class> {
+        &self.classes
+    }
+
+    pub fn attributes(&self) -> &PMap<Id, Attribute> {
+        &self.attributes
+    }
+
+    pub fn objects(&self) -> &PMap<Id, Object> {
+        &self.objects
+    }
+
+    pub fn class_links(&self) -> &PMap<Id, ClassLink> {
+        &self.class_links
+    }
+
+    pub fn object_links(&self) -> &PMap<Id, ObjectLink> {
+        &self.object_links
+    }
+
+    pub fn associations(&self) -> &[(AdtRef, AdtRef)] {
+        &self.associations
     }
 
     pub fn get(&self, object: Id, attribute: Id) -> Option<&Value> {
@@ -1159,8 +1495,8 @@ impl Store {
             for h in &c.hyper {
                 out += &format!("  in {}\n", self.describe(AdtRef::Class(*h)));
             }
-            for (aid, a) in self.attributes.iter().filter(|(_, a)| a.class == *id) {
-                let _ = aid;
+            for aid in self.attributes_of(*id) {
+                let a = &self.attributes[&aid];
                 out += &format!(
                     "  attribute {}{}{}\n",
                     a.name,
@@ -1168,25 +1504,28 @@ impl Store {
                     props(&a.props)
                 );
             }
-            for (lid, l) in self.class_links.iter().filter(|(_, l)| l.from == *id) {
+            for lid in self.class_links_from(*id) {
+                let l = &self.class_links[&lid];
                 out += &format!(
                     "  link {}{}{}\n",
-                    self.describe(AdtRef::ClassLink(*lid)),
+                    self.describe(AdtRef::ClassLink(lid)),
                     state(l.state),
                     props(&l.props)
                 );
             }
-            for (oid, o) in self.objects.iter().filter(|(_, o)| o.class == *id) {
+            for oid in self.objects_of(*id) {
+                let o = &self.objects[&oid];
                 out += &format!("  object {}{}{}\n", o.name, state(o.state), props(&o.props));
                 for (a, v) in &o.values {
                     let name = self.attributes.get(a).map_or("?", |a| a.name.as_str());
                     out += &format!("    {name} = {}\n", self.show(v));
                 }
-                for (lid, l) in self.object_links.iter().filter(|(_, l)| l.from == *oid) {
+                for lid in self.links_from(oid) {
+                    let l = &self.object_links[&lid];
                     let p = l.probability.map_or(String::new(), |p| format!(" % {p}"));
                     out += &format!(
                         "    link {}{p}{}\n",
-                        self.describe(AdtRef::ObjectLink(*lid)),
+                        self.describe(AdtRef::ObjectLink(lid)),
                         state(l.state)
                     );
                 }
@@ -1287,6 +1626,92 @@ mod tests {
         s.include(ids["TOWN"], ids["HYDRO"]).unwrap();
         s.include(ids["RIVER"], ids["HYDRO"]).unwrap();
         (s, ids)
+    }
+
+    /// Random changes of every kind, some in transactions kept or refused:
+    /// after each, the indexes are what the model rebuilds.
+    #[test]
+    fn indexes_follow_every_change() {
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let mut s = Store::memory();
+        let pick = |ids: Vec<Id>, n: u64| ids.get(n as usize % ids.len().max(1)).copied();
+        let states = [State::Active, State::Hibernating, State::Destroyed];
+        for step in 0..3000 {
+            let classes: Vec<Id> = s.classes().keys().copied().collect();
+            let objects: Vec<Id> = s.objects().keys().copied().collect();
+            let attributes: Vec<Id> = s.attributes().keys().copied().collect();
+            let class_links: Vec<Id> = s.class_links().keys().copied().collect();
+            let object_links: Vec<Id> = s.object_links().keys().copied().collect();
+            let (c, d) = (pick(classes.clone(), next(97)), pick(classes, next(97)));
+            let (o, p) = (pick(objects.clone(), next(97)), pick(objects, next(97)));
+            let name = format!("n{}", next(12));
+            let target = match next(5) {
+                0 => c.map(AdtRef::Class),
+                1 => o.map(AdtRef::Object),
+                2 => pick(attributes, next(97)).map(AdtRef::ClassAttribute),
+                3 => pick(class_links, next(97)).map(AdtRef::ClassLink),
+                _ => pick(object_links, next(97)).map(AdtRef::ObjectLink),
+            };
+            let transaction = next(4) == 0;
+            if transaction {
+                s.begin();
+            }
+            let _ = match next(12) {
+                0 | 1 => s.create_class(&name, ClassKind::Class).map(|_| ()),
+                2 | 3 => c.map_or(Ok(()), |c| s.create_object(c, &name).map(|_| ())),
+                4 => c.map_or(Ok(()), |c| s.create_attribute(c, &name).map(|_| ())),
+                5 => match (c, d) {
+                    (Some(c), Some(d)) => {
+                        let back = next(2).eq(&0).then_some("back");
+                        s.create_class_link(c, &name, d, back, c == d && next(2) == 0)
+                            .map(|_| ())
+                    }
+                    _ => Ok(()),
+                },
+                6 | 7 => match (o, p) {
+                    (Some(o), Some(p)) => {
+                        let relation = s
+                            .class_links_from(s.objects()[&o].class)
+                            .into_iter()
+                            .find_map(|l| s.class_links()[&l].relation.clone());
+                        relation.map_or(Ok(()), |r| s.assert_link(o, &r, p, None).map(|_| ()))
+                    }
+                    _ => Ok(()),
+                },
+                8 => target.map_or(Ok(()), |t| {
+                    let to = states[next(3) as usize];
+                    match s.state(t) {
+                        Some(from) => s.change_state(t, from, to),
+                        None => Ok(()),
+                    }
+                }),
+                9 => target.map_or(Ok(()), |t| s.purge_adt(t)),
+                10 => match (c, d) {
+                    (Some(c), Some(d)) => s.include(c, d),
+                    _ => Ok(()),
+                },
+                _ => match (c, d) {
+                    (Some(c), Some(d)) => s.exclude(c, d),
+                    _ => Ok(()),
+                },
+            };
+            if transaction {
+                let _ = s.end(next(2) == 0);
+            }
+            if let Err(e) = s.verify() {
+                panic!("step {step}: {e}");
+            }
+        }
+        assert!(
+            s.objects().len() > 50 && s.object_links().len() > 50,
+            "too little built"
+        );
     }
 
     #[test]

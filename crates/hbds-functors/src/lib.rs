@@ -102,32 +102,29 @@ fn one(store: &Store, name: &str, p: AdtRef, args: &[String]) -> Stored<Vec<AdtR
             .map(String::as_str)
             .ok_or_else(|| Error(format!("`{name}` takes {} argument(s)", i + 1)))
     };
-    let objects_of = |c: Id| {
-        (s.objects.iter())
-            .filter(move |(_, o)| o.class == c)
-            .map(|(i, _)| Object(*i))
-    };
-    let attributes_of = |c: Id| {
-        (s.attributes.iter())
-            .filter(move |(_, a)| a.class == c)
-            .map(|(i, _)| *i)
-    };
-    let links = |f: &dyn Fn(&LinkOfObjects) -> bool| -> Vec<AdtRef> {
-        (s.object_links.iter())
-            .filter(|(_, l)| f(l))
-            .map(|(i, _)| ObjectLink(*i))
+    let objects_of = |c: Id| s.objects_of(c).into_iter().map(Object);
+    let attributes_of = |c: Id| s.attributes_of(c).into_iter();
+    // The links among `found` that `f` accepts.
+    let links = |found: Vec<Id>, f: &dyn Fn(&LinkOfObjects) -> bool| -> Vec<AdtRef> {
+        (found.into_iter())
+            .filter(|i| f(&s.object_links()[i]))
+            .map(ObjectLink)
             .collect()
     };
     let relation = |l: &LinkOfObjects| {
-        s.class_links
+        s.class_links()
             .get(&l.class_link)
             .and_then(|c| c.relation.clone())
     };
-    let class_of = |o: Id| s.objects.get(&o).map(|o| s.classes[&o.class].name.clone());
+    let class_of = |o: Id| {
+        s.objects()
+            .get(&o)
+            .map(|o| s.classes()[&o.class].name.clone())
+    };
     Ok(match (name, p) {
         ("ATT", Class(c)) => attributes_of(c).map(ClassAttribute).collect(),
         ("VATT", ClassAttribute(a)) => {
-            let c = s.attributes[&a].class;
+            let c = s.attributes()[&a].class;
             objects_of(c)
                 .map(|o| match o {
                     Object(o) => ObjectAttribute(o, a),
@@ -136,61 +133,50 @@ fn one(store: &Store, name: &str, p: AdtRef, args: &[String]) -> Stored<Vec<AdtR
                 .collect()
         }
         ("OBJ", Class(c)) => objects_of(c).collect(),
-        ("PSC" | "NSC", Class(c)) => (s.class_links.iter())
-            .filter(|(_, l)| {
-                if name == "PSC" {
-                    l.from == c
-                } else {
-                    l.to == c
-                }
-            })
-            .map(|(i, _)| ClassLink(*i))
-            .collect(),
-        ("EFF", ClassLink(l)) => links(&|o| o.class_link == l),
-        ("OATT", Object(o)) => attributes_of(s.objects[&o].class)
+        ("PSC", Class(c)) => s.class_links_from(c).into_iter().map(ClassLink).collect(),
+        ("NSC", Class(c)) => s.class_links_to(c).into_iter().map(ClassLink).collect(),
+        ("EFF", ClassLink(l)) => links(s.links_of(l), &|_| true),
+        ("OATT", Object(o)) => attributes_of(s.objects()[&o].class)
             .map(|a| ObjectAttribute(o, a))
             .collect(),
-        ("OPSC", Object(o)) => links(&|l| l.from == o),
-        ("ONSC", Object(o)) => links(&|l| l.to == o),
-        ("ATTOF", ClassAttribute(a)) => vec![Class(s.attributes[&a].class)],
+        ("OPSC", Object(o)) => links(s.links_from(o), &|_| true),
+        ("ONSC", Object(o)) => links(s.links_to(o), &|_| true),
+        ("ATTOF", ClassAttribute(a)) => vec![Class(s.attributes()[&a].class)],
         ("VATTOF", ObjectAttribute(_, a)) => vec![ClassAttribute(a)],
-        ("OBJOF", Object(o)) => vec![Class(s.objects[&o].class)],
-        ("INI", ClassLink(l)) => vec![Class(s.class_links[&l].from)],
-        ("FIN", ClassLink(l)) => vec![Class(s.class_links[&l].to)],
-        ("EFFOF", ObjectLink(l)) => vec![ClassLink(s.object_links[&l].class_link)],
+        ("OBJOF", Object(o)) => vec![Class(s.objects()[&o].class)],
+        ("INI", ClassLink(l)) => vec![Class(s.class_links()[&l].from)],
+        ("FIN", ClassLink(l)) => vec![Class(s.class_links()[&l].to)],
+        ("EFFOF", ObjectLink(l)) => vec![ClassLink(s.object_links()[&l].class_link)],
         ("OATTOF", ObjectAttribute(o, _)) => vec![Object(o)],
-        ("OINI", ObjectLink(l)) => vec![Object(s.object_links[&l].from)],
-        ("OFIN", ObjectLink(l)) => vec![Object(s.object_links[&l].to)],
-        ("CONT", Class(h)) => (s.classes.iter())
-            .filter(|(_, c)| c.hyper.contains(&h))
-            .map(|(i, _)| Class(*i))
-            .collect(),
-        ("CONTOF", Class(c)) => s.classes[&c].hyper.iter().map(|h| Class(*h)).collect(),
-        ("INV", ClassLink(l)) => vec![ClassLink(s.class_links[&l].reverse)],
-        ("OINV", ObjectLink(l)) => vec![ObjectLink(s.object_links[&l].reverse)],
+        ("OINI", ObjectLink(l)) => vec![Object(s.object_links()[&l].from)],
+        ("OFIN", ObjectLink(l)) => vec![Object(s.object_links()[&l].to)],
+        ("CONT", Class(h)) => s.members(h).into_iter().map(Class).collect(),
+        ("CONTOF", Class(c)) => s.classes()[&c].hyper.iter().map(|h| Class(*h)).collect(),
+        ("INV", ClassLink(l)) => vec![ClassLink(s.class_links()[&l].reverse)],
+        ("OINV", ObjectLink(l)) => vec![ObjectLink(s.object_links()[&l].reverse)],
         ("OPSCR", Object(o)) => {
             let r = arg(0)?;
-            links(&|l| l.from == o && relation(l).is_some_and(|x| same(&x, r)))
+            links(s.links_from(o), &|l| {
+                relation(l).is_some_and(|x| same(&x, r))
+            })
         }
         ("OPSCRC", Object(o)) => {
             let (r, c) = (arg(0)?, arg(1)?);
-            links(&|l| {
-                l.from == o
-                    && relation(l).is_some_and(|x| same(&x, r))
+            links(s.links_from(o), &|l| {
+                relation(l).is_some_and(|x| same(&x, r))
                     && class_of(l.to).is_some_and(|x| same(&x, c))
             })
         }
         ("ONSCRC", Object(o)) => {
             let (r, c) = (arg(0)?, arg(1)?);
-            links(&|l| {
-                l.to == o
-                    && relation(l).is_some_and(|x| same(&x, r))
+            links(s.links_to(o), &|l| {
+                relation(l).is_some_and(|x| same(&x, r))
                     && class_of(l.from).is_some_and(|x| same(&x, c))
             })
         }
         ("OATTN", Object(o)) => {
             let a = arg(0)?;
-            match s.find_attribute(s.objects[&o].class, a) {
+            match s.find_attribute(s.objects()[&o].class, a) {
                 Some(a) => vec![ObjectAttribute(o, a)],
                 None => Vec::new(),
             }

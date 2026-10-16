@@ -190,12 +190,29 @@ impl<K: Ord + Clone, V: Clone> PMap<K, V> {
 
     /// The entries in key order.
     pub fn iter(&self) -> Iter<'_, K, V> {
-        let mut it = Iter {
-            stack: Vec::new(),
-            left: self.len,
-        };
+        let mut it = Iter { stack: Vec::new() };
         if let Some(root) = &self.root {
             it.descend(root);
+        }
+        it
+    }
+
+    /// The entries from `start` on, in key order: an index's range, with
+    /// `take_while` for its end.
+    pub fn range_from(&self, start: &K) -> Iter<'_, K, V> {
+        let mut it = Iter { stack: Vec::new() };
+        let mut node = self.root.as_deref();
+        while let Some(n) = node {
+            match n.keys.binary_search(start) {
+                Ok(i) => {
+                    it.stack.push((n, i));
+                    break;
+                }
+                Err(i) => {
+                    it.stack.push((n, i));
+                    node = n.children.get(i).map(|c| &**c);
+                }
+            }
         }
         it
     }
@@ -366,7 +383,6 @@ fn merge<K: Clone, V: Clone>(node: &mut Node<K, V>, i: usize, copied: &mut u64) 
 pub struct Iter<'a, K, V> {
     /// The nodes on the way down, each with its next entry.
     stack: Vec<(&'a Node<K, V>, usize)>,
-    left: usize,
 }
 
 impl<'a, K, V> Iter<'a, K, V> {
@@ -398,13 +414,8 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
             if !node.leaf() {
                 self.descend(&node.children[next]);
             }
-            self.left -= 1;
             return Some(item);
         }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.left, Some(self.left))
     }
 }
 
@@ -538,6 +549,12 @@ mod tests {
                 }
             }
             same(&map, &model);
+            for start in 0..range + 2 {
+                assert!(
+                    map.range_from(&start).eq(model.range(start..)),
+                    "the range from {start} differs"
+                );
+            }
             map.retain(|k, _| k % 3 == 0);
             model.retain(|k, _| k % 3 == 0);
             same(&map, &model);

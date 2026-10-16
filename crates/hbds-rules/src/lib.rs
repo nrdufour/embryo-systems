@@ -74,7 +74,7 @@ pub fn install(store: &mut Store) -> Stored<()> {
     };
     let fact = class(store, FACT)?;
     let rule = class(store, RULE)?;
-    if !store.classes[&rule].hyper.contains(&fact) {
+    if !store.classes()[&rule].hyper.contains(&fact) {
         store.include(rule, fact)?;
     }
     for a in ATTRIBUTES {
@@ -116,14 +116,12 @@ pub fn facts(store: &Store, uses: &Uses) -> Vec<AdtRef> {
         }
     }
     for name in &uses.attributes {
-        for (id, a) in &store.attributes {
-            if same(&a.name, name) {
-                push_new(&mut out, AdtRef::ClassAttribute(*id));
-            }
+        for id in store.attributes_named(name) {
+            push_new(&mut out, AdtRef::ClassAttribute(id));
         }
     }
     for name in &uses.relations {
-        for (id, l) in &store.class_links {
+        for (id, l) in store.class_links() {
             if l.relation.as_deref().is_some_and(|r| same(r, name)) {
                 push_new(&mut out, AdtRef::ClassLink(*id));
             }
@@ -137,9 +135,9 @@ pub fn facts(store: &Store, uses: &Uses) -> Vec<AdtRef> {
 /// class attribute, an object link its class link.
 pub fn fact_of(store: &Store, r: AdtRef) -> AdtRef {
     match r {
-        AdtRef::Object(o) => AdtRef::Class(store.objects[&o].class),
+        AdtRef::Object(o) => AdtRef::Class(store.objects()[&o].class),
         AdtRef::ObjectAttribute(_, a) => AdtRef::ClassAttribute(a),
-        AdtRef::ObjectLink(l) => AdtRef::ClassLink(store.object_links[&l].class_link),
+        AdtRef::ObjectLink(l) => AdtRef::ClassLink(store.object_links()[&l].class_link),
         r => r,
     }
 }
@@ -157,7 +155,7 @@ fn realized(store: &Store, change: &Change) -> Vec<(AdtRef, AdtRef)> {
         )],
         Change::ObjectLink { id, class_link, .. } => {
             let mut out = vec![(AdtRef::ClassLink(*class_link), AdtRef::ObjectLink(*id))];
-            if let Some(l) = store.class_links.get(class_link)
+            if let Some(l) = store.class_links().get(class_link)
                 && l.reverse != *class_link
             {
                 out.push((AdtRef::ClassLink(l.reverse), AdtRef::ObjectLink(*id)));
@@ -176,15 +174,27 @@ pub fn rules(store: &Store, scope: &[Id]) -> Vec<Id> {
         return Vec::new();
     };
     let scope = if scope.is_empty() { &[rule][..] } else { scope };
-    (store.objects.iter())
-        .filter(|(id, o)| {
-            let lineage = store.lineage(o.class);
-            store.visible(AdtRef::Object(**id))
-                && lineage.contains(&rule)
-                && scope.iter().any(|s| lineage.contains(s))
+    // The classes in RULE at any depth, RULE first.
+    let mut classes = vec![rule];
+    let mut i = 0;
+    while i < classes.len() {
+        for c in store.members(classes[i]) {
+            if !classes.contains(&c) {
+                classes.push(c);
+            }
+        }
+        i += 1;
+    }
+    let mut found: Vec<Id> = (classes.into_iter())
+        .filter(|c| {
+            let lineage = store.lineage(*c);
+            scope.iter().any(|s| lineage.contains(s))
         })
-        .map(|(id, _)| *id)
-        .collect()
+        .flat_map(|c| store.objects_of(c))
+        .filter(|o| store.visible(AdtRef::Object(*o)))
+        .collect();
+    found.sort();
+    found
 }
 
 /// A part of a rule's code, if it has one.
@@ -341,7 +351,7 @@ struct Chainer<'h> {
 
 /// A rule's attribute, inherited from RULE.
 fn attribute(store: &Store, rule: Id, name: &str) -> Option<Value> {
-    let a = store.find_attribute(store.objects[&rule].class, name)?;
+    let a = store.find_attribute(store.objects()[&rule].class, name)?;
     store.get(rule, a).cloned()
 }
 
@@ -593,14 +603,14 @@ impl<'h> Chainer<'h> {
     fn links(&mut self, r: Id) {
         let store = self.host.store().lock().unwrap();
         let targets = |relation: &str| -> Vec<Id> {
-            (store.object_links.iter())
-                .filter(|(id, l)| {
-                    l.from == r
-                        && store.visible(AdtRef::ObjectLink(**id))
-                        && (store.class_links[&l.class_link].relation.as_deref())
+            (store.links_from(r).into_iter())
+                .filter(|id| {
+                    let l = &store.object_links()[id];
+                    store.visible(AdtRef::ObjectLink(*id))
+                        && (store.class_links()[&l.class_link].relation.as_deref())
                             .is_some_and(|n| same(n, relation))
                 })
-                .map(|(_, l)| l.to)
+                .map(|id| store.object_links()[&id].to)
                 .collect()
         };
         let (activated, inhibited) = (targets(ACTIVATES.0), targets(INHIBITS.0));
@@ -639,7 +649,7 @@ impl<'h> Chainer<'h> {
                     AdtRef::ObjectAttribute(o, _) => AdtRef::Object(o),
                     AdtRef::ObjectLink(l) => {
                         let store = self.host.store().lock().unwrap();
-                        AdtRef::Object(store.object_links[&l].from)
+                        AdtRef::Object(store.object_links()[&l].from)
                     }
                     r => r,
                 };
