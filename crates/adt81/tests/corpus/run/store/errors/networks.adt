@@ -1,0 +1,28 @@
+-- A FORMULA refuses an arc that crosses one of the other network --
+-- (figure 80): a cable lowered across the water lateral. --
+
+program e ;
+begin
+        create "water arc", "mv arc" ;
+        create "water arc" . "x1", "water arc" . "y1", "water arc" . "x2", "water arc" . "y2" ;
+        create "mv arc" . "x1", "mv arc" . "y1", "mv arc" . "x2", "mv arc" . "y2" ;
+        create "crossing" ; include "crossing" into "constraint" ; create "apart" [ "crossing" ] ;
+        assoc "mv arc" . "y2" with "apart" [ "crossing" ] ;
+        let "apart" [ "crossing" ] ' formula :=
+            "w, m : object ; d1, d2, d3, d4 : float ; " &
+            "each w of ""water arc"" ' obj do each m of ""mv arc"" ' obj do " &
+            "d1 := (w . ""x2"" - w . ""x1"") * (m . ""y1"" - w . ""y1"") - (w . ""y2"" - w . ""y1"") * (m . ""x1"" - w . ""x1"") ; " &
+            "d2 := (w . ""x2"" - w . ""x1"") * (m . ""y2"" - w . ""y1"") - (w . ""y2"" - w . ""y1"") * (m . ""x2"" - w . ""x1"") ; " &
+            "d3 := (m . ""x2"" - m . ""x1"") * (w . ""y1"" - m . ""y1"") - (m . ""y2"" - m . ""y1"") * (w . ""x1"" - m . ""x1"") ; " &
+            "d4 := (m . ""x2"" - m . ""x1"") * (w . ""y2"" - m . ""y1"") - (m . ""y2"" - m . ""y1"") * (w . ""x2"" - m . ""x1"") ; " &
+            "if d1 * d2 < 0. and d3 * d4 < 0. then print w, ""crosses"", m ; formula := false endif " &
+            "endeach endeach" ;
+        create "lateral" [ "water arc" ], "cable" [ "mv arc" ] ;
+        let "lateral" [ "water arc" ] . "x1" := 5. ; let "lateral" [ "water arc" ] . "y1" := 0. ;
+        let "lateral" [ "water arc" ] . "x2" := 5. ; let "lateral" [ "water arc" ] . "y2" := 4. ;
+        let "cable" [ "mv arc" ] . "x1" := 0. ; let "cable" [ "mv arc" ] . "y1" := 6. ;
+        let "cable" [ "mv arc" ] . "x2" := 10. ;
+        let "cable" [ "mv arc" ] . "y2" := 6. ;
+        print "before" ;
+        let "cable" [ "mv arc" ] . "y2" := 0.
+end ;

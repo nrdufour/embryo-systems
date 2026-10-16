@@ -67,6 +67,13 @@ async function schema() {
     const from = r.launchers.length ? r.launchers.join(", ") : "no launcher";
     behavior.append(el("li", null, `${r.name}: ${when} of ${from}${delay}`));
   }
+  // The constraints, each with its components (figure 79).
+  const constraints = $("constraints");
+  constraints.replaceChildren();
+  for (const c of s.constraints) {
+    const on = c.components.length ? c.components.join(", ") : "no component";
+    constraints.append(el("li", null, `${c.name}: on ${on}`));
+  }
   const links = $("links");
   links.replaceChildren();
   for (const l of s.links) {

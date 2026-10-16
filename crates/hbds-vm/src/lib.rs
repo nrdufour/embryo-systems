@@ -1001,10 +1001,56 @@ impl<'r> Vm<'r> {
         Ok(())
     }
 
+    /// The FORMULAs of the constraints the statement concerned, in id
+    /// order, THIS the constraint, until what they change concerns no
+    /// more: one whose verdict is false refuses the statement (pages 157
+    /// to 160), as the reference's `settle`.
+    fn settle(&mut self) -> Run<Next> {
+        let mut done = 0;
+        loop {
+            let touched = self.store.take_touched();
+            if touched.is_empty() {
+                return Ok(Next::Go);
+            }
+            for c in touched {
+                done += 1;
+                if done > hbds_constraints::LIMIT {
+                    return Err(format!(
+                        "more than {} FORMULAs run for one statement: a cycle?",
+                        hbds_constraints::LIMIT
+                    )
+                    .into());
+                }
+                let Some(code) = self.property(AdtRef::Object(c), hbds_constraints::FORMULA) else {
+                    continue;
+                };
+                let what = self.store.describe(AdtRef::Object(c));
+                let m = self.compiled("FORMULA", &code.language, &code.text, &what)?;
+                let exit = self.nested(m, Some(AdtRef::Object(c)), 0);
+                let holds = match exit.map_err(|e| within(e.into(), "FORMULA", &what))? {
+                    Exit::Returned(Some(v)) => {
+                        hbds_values::truth(&v).map_err(|f| within(fault(f), "FORMULA", &what))?
+                    }
+                    Exit::Returned(None) => true,
+                    Exit::End(end) => return Ok(Next::End(end)),
+                    Exit::Yield | Exit::Input | Exit::Stop(_) => {
+                        unreachable!("code the store calls back runs to completion")
+                    }
+                };
+                if !holds {
+                    return Err(format!("the FORMULA of {what} refuses this change").into());
+                }
+            }
+        }
+    }
+
     /// A store that has reflexes tells what each change launches.
     fn watch(&mut self) {
         if !self.store.watching() && hbds_reflexes::installed(self.store) {
             self.store.watch(hbds_reflexes::launches);
+        }
+        if !self.store.checking() && hbds_constraints::installed(self.store) {
+            self.store.check_with(hbds_constraints::touched);
         }
     }
 
@@ -1053,6 +1099,9 @@ impl<'r> Vm<'r> {
                 self.o.reacting = false;
                 match exit {
                     Ok(Exit::Returned(_)) => {
+                        if let Next::End(end) = self.settle()? {
+                            return Ok(Next::End(end));
+                        }
                         self.o.open -= 1;
                         stored(self.store.end(true))?;
                     }
@@ -1656,6 +1705,12 @@ impl<'r> Vm<'r> {
             }
             return Ok(());
         }
+        if hbds_constraints::is_system(name) {
+            if self.store.find_class(name).is_none() {
+                stored(hbds_constraints::install(self.store))?;
+            }
+            return Ok(());
+        }
         if !rules && !hbds_simulation::is_system(name) {
             return Ok(());
         }
@@ -2246,6 +2301,12 @@ impl<'r> Vm<'r> {
                 self.o.open += 1;
             }
             Instr::Commit => {
+                // At the end of a statement, its constraints settle first.
+                if self.store.outermost()
+                    && let Next::End(end) = self.settle()?
+                {
+                    return Ok(Next::End(end));
+                }
                 self.o.open -= 1;
                 stored(self.store.end(true))?;
             }
@@ -2356,6 +2417,7 @@ impl<'r> Vm<'r> {
                 if hbds_gtad::is_property(key)
                     || hbds_rules::is_property(key)
                     || hbds_reflexes::is_property(key)
+                    || hbds_constraints::is_property(key)
                 {
                     self.language
                         .check(key, &text)

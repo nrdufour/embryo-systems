@@ -16,7 +16,10 @@ pub fn functor(key: &str) -> Option<&'static Functor> {
 /// COND and ACTION (GTAD's), a rule's parts and a fact's parameters
 /// (SES's).
 pub fn is_property(key: &str) -> bool {
-    hbds_gtad::is_property(key) || hbds_rules::is_property(key) || hbds_reflexes::is_property(key)
+    hbds_gtad::is_property(key)
+        || hbds_rules::is_property(key)
+        || hbds_reflexes::is_property(key)
+        || hbds_constraints::is_property(key)
 }
 
 /// The expert-system engines, CALLed as subroutines (page 106).

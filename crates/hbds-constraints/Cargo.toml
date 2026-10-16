@@ -1,0 +1,11 @@
+[package]
+name = "hbds-constraints"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The constraint engine (pages 157 to 160), on GTAD.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-gtad = { path = "../hbds-gtad" }

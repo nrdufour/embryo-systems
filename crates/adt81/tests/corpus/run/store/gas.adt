@@ -1,0 +1,36 @@
+-- Page 159's P, V and T, two of which determine the third, as two --
+-- constraints: one solves T from P and V, the other refuses a T that --
+-- disagrees. Each FORMULA runs once, at the end of the statement that --
+-- concerned it, whatever it changed meanwhile: an ACTION setting P then --
+-- V is solved once, after both. Units are chosen so that P V = T. --
+-- Written for the constraint engine (docs/hbds.md). --
+
+program gas ;
+begin
+        create "gas" ;
+        create "gas" . "p", "gas" . "v", "gas" . "t", "gas" . "state" ;
+        let "gas" ' action := "let this . ""p"" := 1. ; let this . ""v"" := 1. ; let this . ""t"" := 1." ;
+        let "gas" . "state" ' action := "let this . ""p"" := 4. ; let this . ""v"" := 0.5" ;
+
+        create "law" ; include "law" into "constraint" ;
+        create "solve" [ "law" ], "check" [ "law" ] ;
+        assoc "gas" . "p" with "solve" [ "law" ] ;
+        assoc "gas" . "v" with "solve" [ "law" ] ;
+        let "solve" [ "law" ] ' formula :=
+            "g : object ; " &
+            "each g of ""gas"" ' obj do " &
+            "let g . ""t"" := g . ""p"" * g . ""v"" ; print ""solved"", g, g . ""t"" " &
+            "endeach" ;
+        assoc "gas" . "t" with "check" [ "law" ] ;
+        let "check" [ "law" ] ' formula :=
+            "g : object ; " &
+            "each g of ""gas"" ' obj do " &
+            "if g . ""t"" /= g . ""p"" * g . ""v"" then formula := false endif " &
+            "endeach" ;
+
+        create "g1" [ "gas" ] ;
+        let "g1" [ "gas" ] . "p" := 2. ;
+        print "t", "g1" [ "gas" ] . "t" ;
+        let "g1" [ "gas" ] . "state" := "compressed" ;
+        print "p v t", "g1" [ "gas" ] . "p", "g1" [ "gas" ] . "v", "g1" [ "gas" ] . "t"
+end ;
