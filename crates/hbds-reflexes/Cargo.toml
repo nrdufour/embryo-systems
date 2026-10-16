@@ -1,0 +1,11 @@
+[package]
+name = "hbds-reflexes"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The reflex engine (project 18, pages 116 to 126), on GTAD.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-gtad = { path = "../hbds-gtad" }

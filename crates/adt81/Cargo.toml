@@ -15,6 +15,7 @@ hbds-gtad = { path = "../hbds-gtad" }
 hbds-lists = { path = "../hbds-lists" }
 hbds-rules = { path = "../hbds-rules" }
 hbds-simulation = { path = "../hbds-simulation" }
+hbds-reflexes = { path = "../hbds-reflexes" }
 
 [dev-dependencies]
 hbds-journal = { path = "../hbds-journal" }

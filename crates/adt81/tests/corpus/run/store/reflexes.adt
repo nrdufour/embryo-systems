@@ -1,0 +1,76 @@
+-- Figures 55 to 57's reflexes on a small graph: moving a point --
+-- recomputes the length of the arcs passing by it, which recomputes the --
+-- perimeter of the areas they bound, breadth first, before the next --
+-- statement; a point created launches its own reflex; a launcher taken --
+-- back with DISSOC launches no more; what HYPOCHAV's hypotheses launch --
+-- goes with them. Written for the reflex engine (docs/hbds.md). --
+
+program graph ;
+begin
+        create "point", "arc", "area" ;
+        create "point" . "x", "point" . "y", "arc" . "length", "area" . "perimeter" ;
+        create "arc" "passes by" "point" reverse "on" ;
+        create "area" "bounded by" "arc" reverse "bounds" ;
+        create "p1" [ "point" ], "p2" [ "point" ], "p3" [ "point" ] ;
+        let "p1" [ "point" ] . "x" := 0 ; let "p1" [ "point" ] . "y" := 0 ;
+        let "p2" [ "point" ] . "x" := 3 ; let "p2" [ "point" ] . "y" := 0 ;
+        let "p3" [ "point" ] . "x" := 3 ; let "p3" [ "point" ] . "y" := 10 ;
+        create "a1" [ "arc" ], "a2" [ "arc" ] ;
+        assert "a1" [ "arc" ] "passes by" "p1" [ "point" ] ;
+        assert "a1" [ "arc" ] "passes by" "p2" [ "point" ] ;
+        assert "a2" [ "arc" ] "passes by" "p2" [ "point" ] ;
+        assert "a2" [ "arc" ] "passes by" "p3" [ "point" ] ;
+        create "z" [ "area" ] ;
+        assert "z" [ "area" ] "bounded by" "a1" [ "arc" ] ;
+        assert "z" [ "area" ] "bounded by" "a2" [ "arc" ] ;
+        let "a1" [ "arc" ] . "length" := 0. ; let "a2" [ "arc" ] . "length" := 0. ;
+
+        create "metrics" ; include "metrics" into "reflex" ;
+        create "length" [ "metrics" ], "perimeter" [ "metrics" ], "added" [ "metrics" ] ;
+        -- A point's coordinate set: the lengths of its arcs. --
+        let "length" [ "metrics" ] . "event" := "set" ;
+        assoc "point" . "x" with "length" [ "metrics" ] ;
+        assoc "point" . "y" with "length" [ "metrics" ] ;
+        let "length" [ "metrics" ] ' reaction :=
+            "l, m : list of object ; a, p : object ; first : boolean ; x, y, xp, yp, len : float ; " &
+            "l := this ' opscrc(""on"", ""arc"") ' ofin ; " &
+            "each a of l do " &
+            "len := 0. ; first := true ; " &
+            "m := a ' opscrc(""passes by"", ""point"") ' ofin ; " &
+            "each p of m do " &
+            "x := p . ""x"" ; y := p . ""y"" ; " &
+            "if not first then len := len + sqrt((x - xp) ^ 2 + (y - yp) ^ 2) endif ; " &
+            "xp := x ; yp := y ; first := false " &
+            "endeach ; " &
+            "print ""length"", a, len ; " &
+            "let a . ""length"" := len " &
+            "endeach" ;
+        -- An arc's length set: the perimeters of the areas it bounds. --
+        let "perimeter" [ "metrics" ] . "event" := "set" ;
+        assoc "arc" . "length" with "perimeter" [ "metrics" ] ;
+        let "perimeter" [ "metrics" ] ' reaction :=
+            "l, m : list of object ; z, a : object ; s : float ; " &
+            "l := this ' opscrc(""bounds"", ""area"") ' ofin ; " &
+            "each z of l do " &
+            "s := 0. ; " &
+            "m := z ' opscrc(""bounded by"", ""arc"") ' ofin ; " &
+            "each a of m do s := s + a . ""length"" endeach ; " &
+            "print ""perimeter"", z, s ; " &
+            "let z . ""perimeter"" := s " &
+            "endeach" ;
+        -- A point created. --
+        let "added" [ "metrics" ] . "event" := "create" ;
+        assoc "point" with "added" [ "metrics" ] ;
+        let "added" [ "metrics" ] ' reaction := "print ""a new point"", this" ;
+
+        let "p2" [ "point" ] . "y" := 4 ;
+        print "after", "z" [ "area" ] . "perimeter" ;
+        create "p4" [ "point" ] ;
+        print "created" ;
+        dissoc "point" . "y" from "length" [ "metrics" ] ;
+        let "p2" [ "point" ] . "y" := 4 ;
+        print "y launches no more" ;
+        create "none" ; include "none" into "rule" ;
+        call hypochav ("let ""p1"" [ ""point"" ] . ""x"" := 1", "none") ;
+        print "p1 at", "p1" [ "point" ] . "x"
+end ;

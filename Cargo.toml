@@ -13,6 +13,7 @@ members = [
     "crates/hbds-journal",
     "crates/hbds-rules",
     "crates/hbds-simulation",
+    "crates/hbds-reflexes",
     "crates/adt81",
     "crates/bench",
 ]

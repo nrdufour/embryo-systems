@@ -1,0 +1,10 @@
+length a1[arc] 5.0
+length a2[arc] 6.0
+perimeter z[area] 11.0
+perimeter z[area] 11.0
+after 11.0
+a new point p4[point]
+created
+y launches no more
+p1[point].x = 1, by hypothesis
+p1 at 0

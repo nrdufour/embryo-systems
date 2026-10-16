@@ -35,9 +35,10 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-journal` | GTAD's persistence, a `Recorder`: the journal below; SFSI and ZE would be another | core, gtad |
 | `hbds-simulation` | the discrete simulation (project 17): PROCESS, the sequencing set and figure 52's transitions; a language runs the bodies | core, gtad |
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
+| `hbds-reflexes` | the reflex engine (project 18): REFLEX, what each change launches; a language runs the reactions | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (its operators mapped onto HBDS's operations, math functions, what an unknown name means); it wires the engines together | the engines |
 | `hbds-acode` | A-code, HBDS's machine code: the format, its version, its text form, and what a unit asks of its language | core, values |
-| `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation |
+| `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation, reflexes |
 | `hbds-http` | the daemon's wire: HTTP/1.1, WebSocket, JSON | none |
 | `hbds-daemon` | the daemon: the executor owning the store, clients' sessions in turns over a Unix socket, and the client side; no language of its own | acode, gtad, http, vm |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal, acode, vm, daemon |
@@ -303,6 +304,40 @@ sequenceDiagram
     S->>M: 10: goes on after its HOLD
 ```
 
+## Reflexes
+
+The reflex engine (project 18, pages 116 to 126, figures 53 to 57): a
+reflex is the reaction of an a.d.t., its launcher, to an event; the
+reflexes of an a.d.t. are its behavior. The print gives the model, no
+syntax and no algorithm; ours, decided on 2026-10-16:
+
+- **Reflexes are objects, as rules are**: an object of a class INCLUDEd
+  INTO the system hyperclass REFLEX, created the first time a program
+  names it, with the attributes EVENT (`create` and `destroy` for a
+  class's objects, `set` for a class attribute's values, `assert` and
+  `retract` for a class link's links) and DELAY, and its code, the
+  property REACTION (statements, as an ACTION's), THIS the object
+  concerned: the one created, destroyed or set, or a link's origin.
+- **Its launchers are associated with it**: `ASSOC "point" . "x" WITH
+  "length" [ "metrics" ]`, figure 53's dotted lines; DISSOC takes one
+  back, the launchers changing along a life (page 122). This extends page
+  24's pairs with a class, a class attribute or a class link WITH an
+  object, and is our reading of what associations are for, not the
+  print's.
+- **Launched, a reflex is queued, not nested** as an ACTION: what a
+  statement's changes launch runs before the next statement starts (in
+  the main program, a process, a coroutine; not inside code the store
+  calls back), in the order launched, each REACTION its own transaction;
+  what a reaction launches runs after the others, breadth first, the
+  propagation page 118 asks to order. The launches are the transaction's:
+  a refused change, or HYPOCHAV's hypotheses undone, launches nothing.
+  More than 10 000 in one statement is a cycle, an error.
+- **Not yet**: DELAY, a launch in the sequencing set at now + delay, and
+  a reaction that HOLDs or PASSIVATEs (pages 125 and 126); NEURON (page
+  122, figure 58), once its learning is decided.
+
+`store/reflexes.adt` is figures 55 to 57 on a small graph.
+
 ## The model
 
 The six basic a.d.t. (page 46, figure 6), as the store keeps them: a
@@ -384,7 +419,8 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
   the structure's classes are named, the print does not say. BUILD records
   the structure and its prototype.
 - **What associations are for.** ASSOC and DISSOC keep their pairs (page
-  24, figure 9's multi-layer system), but no functor reads them yet.
+  24, figure 9's multi-layer system); we read one use, a reflex's
+  launchers ("Reflexes"), but no functor reads them yet.
 - **Waiting lists.** PASSIVATE may first put a process in a waiting list
   (page 114, figure 52's INTO and OUTOF); bodies share no variables, so a
   list one fills and another empties needs a home the print does not

@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -145,6 +145,13 @@ pub fn run_within(
     store: Arc<Mutex<Store>>,
     budget: Option<u64>,
 ) -> Result<u64, RuntimeError> {
+    // A store that has reflexes tells what each change launches.
+    {
+        let mut s = store.lock().unwrap();
+        if hbds_reflexes::installed(&s) {
+            s.watch(hbds_reflexes::launches);
+        }
+    }
     let mut modules = HashMap::new();
     let mut computed = HashMap::new();
     let mut bodies = HashMap::new();
@@ -186,6 +193,7 @@ pub fn run_within(
         role: Role::Main,
         statements: Arc::new(AtomicU64::new(0)),
         calling_back: Arc::new(AtomicUsize::new(0)),
+        reacting: Arc::new(AtomicBool::new(false)),
         budget,
     };
     // The interpreter recurses (statements, calls, CONDs and ACTIONs): it
@@ -225,7 +233,11 @@ impl Machine {
         loop {
             let module = &machine.program.modules[current];
             match machine.call(module, Vec::new(), None, None) {
-                Ok(_) | Err(Flow::Return | Flow::Stop) => break Ok(()),
+                // What the last statements launched runs before the end.
+                Ok(_) | Err(Flow::Return | Flow::Stop) => match machine.drain(module.span) {
+                    Err(Flow::Error(e)) => break Err(e),
+                    _ => break Ok(()),
+                },
                 Err(Flow::Restart) => {}
                 Err(Flow::Chain(q)) => match machine.modules.get(&q.key) {
                     Some(&i) if machine.program.modules[i].kind == ModuleKind::Program => {
@@ -413,6 +425,9 @@ struct Machine {
     /// How many callbacks run on this thread: code the store calls back,
     /// which runs to completion (docs/architecture.md, decision 3).
     calling_back: Arc<AtomicUsize>,
+    /// Whether a reflex's reaction runs: it launches, but does not run,
+    /// what it launches (breadth first).
+    reacting: Arc<AtomicBool>,
     /// How many statements the run may execute.
     budget: Option<u64>,
 }
@@ -984,6 +999,7 @@ impl Machine {
         if self.budget.is_some_and(|b| done > b) {
             return Err(error(s.span, BUDGET_SPENT));
         }
+        self.drain(s.span)?;
         match &s.kind {
             StmtKind::Assign { target, value } => {
                 let v = self.eval(value, f)?;
@@ -1922,19 +1938,70 @@ impl Machine {
         holds.map_err(|flow| within(flow, kind, &what, span))
     }
 
-    /// FACT and RULE, created the first time a program names them.
+    /// FACT and RULE, PROCESS, REFLEX, created the first time a program
+    /// names them.
     fn system(&self, name: &str, span: Span) -> Exec<()> {
         let rules = hbds_rules::is_system(name);
-        if !rules && !hbds_simulation::is_system(name) {
+        let reflexes = hbds_reflexes::is_system(name);
+        if !rules && !reflexes && !hbds_simulation::is_system(name) {
             return Ok(());
         }
         let mut store = self.store.lock().unwrap();
         if store.find_class(name).is_some() {
             return Ok(());
         }
-        match rules {
-            true => stored(hbds_rules::install(&mut store), span),
-            false => stored(hbds_simulation::install(&mut store), span),
+        match (rules, reflexes) {
+            (true, _) => stored(hbds_rules::install(&mut store), span),
+            (_, true) => stored(hbds_reflexes::install(&mut store), span),
+            _ => stored(hbds_simulation::install(&mut store), span),
+        }
+    }
+
+    /// The reflexes launched so far, run before the next statement, in
+    /// the order they were launched, each REACTION its own transaction,
+    /// THIS the object concerned; what they launch runs after them,
+    /// breadth first (docs/hbds.md, "Reflexes"). Not inside code the
+    /// store calls back, nor inside a reaction.
+    fn drain(&self, span: Span) -> Exec<()> {
+        if self.calling_back.load(Ordering::Relaxed) > 0 || self.reacting.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let mut done = 0;
+        loop {
+            let launched = self.store.lock().unwrap().take_launched();
+            if launched.is_empty() {
+                return Ok(());
+            }
+            for (r, o) in launched {
+                done += 1;
+                if done > hbds_reflexes::LIMIT {
+                    return Err(error(
+                        span,
+                        format!(
+                            "more than {} reflexes launched at once: a cycle?",
+                            hbds_reflexes::LIMIT
+                        ),
+                    ));
+                }
+                let Some(code) = self.property(AdtRef::Object(r), hbds_reflexes::REACTION) else {
+                    continue;
+                };
+                let what = self.describe(AdtRef::Object(r));
+                self.ours(&code, "REACTION", &what, span)?;
+                let fragment = lower::parse_fragment(&code.text).map_err(|e| {
+                    error(span, format!("the REACTION of {what} does not parse: {e}"))
+                })?;
+                let mut f = Frame {
+                    this: Some(AdtRef::Object(o)),
+                    ..Frame::default()
+                };
+                self.reacting.store(true, Ordering::Relaxed);
+                let ran = self.atomic(span, |m| {
+                    m.called_back(|| m.run_fragment(&fragment, &mut f))
+                });
+                self.reacting.store(false, Ordering::Relaxed);
+                ran.map_err(|flow| within(flow, "REACTION", &what, span))?;
+            }
         }
     }
 
@@ -2295,7 +2362,6 @@ impl Machine {
         ))
     }
 
-    /// An ACTION's statements, its declarations its own locals.
     /// A local variable, its initial value or constant set, an array
     /// filled, a list empty: a module's, or an ACTION's.
     fn local(&self, d: &Declaration, f: &mut Frame) -> Exec<()> {
@@ -2323,6 +2389,7 @@ impl Machine {
         Ok(())
     }
 
+    /// An ACTION's statements, its declarations its own locals.
     fn run_fragment(&self, fragment: &Fragment, f: &mut Frame) -> Exec<()> {
         for item in &fragment.items {
             match item {
