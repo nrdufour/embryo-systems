@@ -78,6 +78,10 @@ impl Language for Adt81 {
                 Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),
                 Err(e) => Err(format!("the ACTION of {what} does not parse: {e}")),
             },
+            "FORMULA" => match lower::parse_formula(text) {
+                Ok(f) => Ok(Compiler::new(&callees).formula(part, &f)),
+                Err(e) => Err(format!("the FORMULA of {what} does not parse: {e}")),
+            },
             "REACTION" => match lower::parse_fragment(text) {
                 Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),
                 Err(e) => Err(format!("the REACTION of {what} does not parse: {e}")),
@@ -337,6 +341,31 @@ impl<'p> Compiler<'p> {
             Span::default(),
             None,
             None,
+            None,
+        )
+    }
+
+    /// A constraint's FORMULA: statements, as an ACTION's, that give its
+    /// verdict, the local `formula`, as a functor gives its own name.
+    fn formula(mut self, part: &str, f: &Fragment) -> AModule {
+        for item in &f.items {
+            match item {
+                Item::Local(d) => self.local(d),
+                Item::Parameter(p) => self.fail(p.span, "a FORMULA has no parameters"),
+                Item::Stmt(s) => self.stmt(s),
+            }
+        }
+        let end = self.here();
+        self.end_returns(end);
+        self.emit(Instr::Return, Span::default());
+        let verdict = self.names.get(&fold(hbds_constraints::VERDICT)).copied();
+        self.finish(
+            part,
+            part,
+            Kind::Functor,
+            Span::default(),
+            None,
+            verdict,
             None,
         )
     }
@@ -814,7 +843,11 @@ impl<'p> Compiler<'p> {
                 self.emit(Instr::Commit, s.span);
             }
             StmtKind::Design(o) => self.create(o, true, s.span),
-            StmtKind::StateChange(op, o) => self.state_change(*op, o, s.span),
+            StmtKind::StateChange(op, o) => {
+                self.emit(Instr::Begin, s.span);
+                self.state_change(*op, o, s.span);
+                self.emit(Instr::Commit, s.span);
+            }
             StmtKind::Let { target, value } => {
                 self.emit(Instr::Begin, s.span);
                 self.let_(target, value, s.span);

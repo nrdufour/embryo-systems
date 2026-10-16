@@ -362,12 +362,30 @@ statements, no syntax for the rest, and no algorithm. Decided on
   either. Written either way, by the reverse relation, a pair is one.
   The store refuses, so both engines refuse alike, and it journals what
   holds as it journals links.
-- **Not yet**: the hyperclass CONSTRAINT and its FORMULA (page 159,
-  figure 79), the components joined to it by ASSOC; figure 80's
-  networks.
+- **A constraint is an object of a class INCLUDEd INTO CONSTRAINT**, the
+  system hyperclass created the first time a program names it (page 159,
+  figure 79). Its FORMULA, a property as COND is, is statements, "an
+  algorithm" as a process's body is, THIS the constraint.
+- **Its components are the a.d.t. associated with it**, `ASSOC "water
+  arc" WITH "apart" ["crossing"]` (page 159: "any a.d.t. may be
+  associated with another"): a class, whose objects are created,
+  destroyed or set; a class attribute, whose values are set; a class
+  link, whose links are asserted or retracted; an object, which changes.
+- **A FORMULA runs once, at the end of a statement** that concerned it,
+  inside the statement's transaction, constraints in id order: so a
+  statement, or an ACTION it runs, may set P then V before T is solved.
+  What a FORMULA changes runs the FORMULAs it concerns in turn, 10 000
+  at most for one statement. Its verdict is its local `formula`, true
+  unless it says otherwise, as a functor's own name holds its result;
+  false refuses the whole statement. A DESTROY is a transaction now, as
+  every statement changing the store is, so that a FORMULA can refuse it.
+- **Not yet**: figure 78's fuzzy panorama, whose statements the print
+  does not give.
 
 `store/modalities.adt` holds vehicles and arcs; `store/errors/must.adt`,
-`cannot.adt` and `mustdestroy.adt` are the three refusals.
+`cannot.adt` and `mustdestroy.adt` are the three refusals. `store/gas.adt`
+solves page 159's P, V and T, `store/networks.adt` is figure 80 in the
+plane; `store/errors/formula.adt` and `networks.adt` are refused.
 
 ## The model
 

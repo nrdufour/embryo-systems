@@ -1,0 +1,53 @@
+-- Figure 80 reduced to the plane: no arc of the water network crosses --
+-- an arc of the medium-voltage network (pages 159 and 160). Both arc --
+-- classes are components of one constraint; its FORMULA checks every --
+-- pair of placed arcs, a crossing being two segments each of whose ends --
+-- lie on either side of the other. An arc is placed once its ends are --
+-- set: its class's ACTION creates it unplaced. Written for the --
+-- constraint engine (docs/hbds.md). --
+
+program networks ;
+begin
+        create "water arc", "mv arc" ;
+        create "water arc" . "x1", "water arc" . "y1", "water arc" . "x2", "water arc" . "y2",
+               "water arc" . "placed" ;
+        create "mv arc" . "x1", "mv arc" . "y1", "mv arc" . "x2", "mv arc" . "y2", "mv arc" . "placed" ;
+        let "water arc" ' action := "let this . ""placed"" := false" ;
+        let "mv arc" ' action := "let this . ""placed"" := false" ;
+
+        create "crossing" ; include "crossing" into "constraint" ;
+        create "apart" [ "crossing" ] ;
+        assoc "water arc" with "apart" [ "crossing" ] ;
+        assoc "mv arc" with "apart" [ "crossing" ] ;
+        let "apart" [ "crossing" ] ' formula :=
+            "w, m : object ; d1, d2, d3, d4 : float ; " &
+            "each w of ""water arc"" ' obj / w . ""placed"" do " &
+            "each m of ""mv arc"" ' obj / m . ""placed"" do " &
+            "d1 := (w . ""x2"" - w . ""x1"") * (m . ""y1"" - w . ""y1"") - (w . ""y2"" - w . ""y1"") * (m . ""x1"" - w . ""x1"") ; " &
+            "d2 := (w . ""x2"" - w . ""x1"") * (m . ""y2"" - w . ""y1"") - (w . ""y2"" - w . ""y1"") * (m . ""x2"" - w . ""x1"") ; " &
+            "d3 := (m . ""x2"" - m . ""x1"") * (w . ""y1"" - m . ""y1"") - (m . ""y2"" - m . ""y1"") * (w . ""x1"" - m . ""x1"") ; " &
+            "d4 := (m . ""x2"" - m . ""x1"") * (w . ""y2"" - m . ""y1"") - (m . ""y2"" - m . ""y1"") * (w . ""x2"" - m . ""x1"") ; " &
+            "if d1 * d2 < 0. and d3 * d4 < 0. then " &
+            "print w, ""crosses"", m ; formula := false endif " &
+            "endeach endeach" ;
+
+        -- The water main runs east along y = 0; a lateral north at x = 5. --
+        create "main" [ "water arc" ], "lateral" [ "water arc" ] ;
+        let "main" [ "water arc" ] . "x1" := 0. ; let "main" [ "water arc" ] . "y1" := 0. ;
+        let "main" [ "water arc" ] . "x2" := 10. ; let "main" [ "water arc" ] . "y2" := 0. ;
+        let "main" [ "water arc" ] . "placed" := true ;
+        let "lateral" [ "water arc" ] . "x1" := 5. ; let "lateral" [ "water arc" ] . "y1" := 0. ;
+        let "lateral" [ "water arc" ] . "x2" := 5. ; let "lateral" [ "water arc" ] . "y2" := 4. ;
+        let "lateral" [ "water arc" ] . "placed" := true ;
+
+        -- The cable runs above both, from (0, 6) to (10, 6). --
+        create "cable" [ "mv arc" ] ;
+        let "cable" [ "mv arc" ] . "x1" := 0. ; let "cable" [ "mv arc" ] . "y1" := 6. ;
+        let "cable" [ "mv arc" ] . "x2" := 10. ; let "cable" [ "mv arc" ] . "y2" := 6. ;
+        let "cable" [ "mv arc" ] . "placed" := true ;
+        print "the cable is placed" ;
+
+        -- Its east end lowered to (10, 5): still clear of the lateral. --
+        let "cable" [ "mv arc" ] . "y2" := 5. ;
+        print "the cable is lowered", "cable" [ "mv arc" ] . "y2"
+end ;

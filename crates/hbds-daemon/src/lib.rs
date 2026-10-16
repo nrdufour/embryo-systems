@@ -764,7 +764,38 @@ fn schema_json(store: &Store) -> Json {
         ("classes".to_string(), Json::Array(classes)),
         ("links".to_string(), Json::Array(links)),
         ("reflexes".to_string(), Json::Array(reflexes_json(store))),
+        (
+            "constraints".to_string(),
+            Json::Array(constraints_json(store)),
+        ),
     ]))
+}
+
+/// The constraints (figure 79): name, the components associated with it.
+fn constraints_json(store: &Store) -> Vec<Json> {
+    let Some((&constraint, _)) =
+        (store.classes().iter()).find(|(_, c)| hbds_core::same(&c.name, "CONSTRAINT"))
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (&id, o) in store.objects().iter() {
+        if !store.lineage(o.class).contains(&constraint) {
+            continue;
+        }
+        let components = (store.associations().iter())
+            .filter(|(_, b)| *b == AdtRef::Object(id))
+            .map(|(c, _)| Json::String(store.describe(*c)))
+            .collect();
+        out.push(Json::Object(BTreeMap::from([
+            (
+                "name".to_string(),
+                Json::String(store.describe(AdtRef::Object(id))),
+            ),
+            ("components".to_string(), Json::Array(components)),
+        ])));
+    }
+    out
 }
 
 /// The reflexes, a behavior each (figure 53): name, event, delay, the

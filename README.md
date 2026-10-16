@@ -57,6 +57,8 @@ has one; `just bench-record` writes both.
 - **COND and ACTION:** the constraints and actions a.d.t. carry run when the a.d.t. changes. A statement is a transaction: it is kept whole, or refused whole.
 - **Discrete simulation:** processes, objects of classes in the hyperclass PROCESS, run their bodies as coroutines, ordered by a sequencing set as in SIMULA 67; the main program's HOLD lets them run, and ACTIVATE, REACTIVATE, CANCEL, DELAY, KILL, PASSIVATE and TERMINATE move them as figure 52 has it.
 - **Expert systems:** rules are objects of classes in the hyperclass RULE, their premises and consequents code compiled when written; CHAV chains them forward, HYPOCHAV from hypotheses, with the print's ten parameters (priority, reliabilities, askability, activation and inhibition among them), and INRULE, OUTRULE, INFACT and OUTFACT walk them.
+- **Reflexes:** objects of classes in the hyperclass REFLEX react to their launchers' events, breadth first after the launching statement, or later in simulated time when they have a DELAY.
+- **Constraints:** MAY, MUST and CANNOT hold pairs of objects to a link; objects of classes in the hyperclass CONSTRAINT run their FORMULA at the end of each statement that concerned their components, and may refuse it.
 - **The polycopié's own code runs:** pages 127-128's computed attributes ARC.LENGTH and AREA.PERIMETER give the right answers on a test schema, once three print errors are corrected.
 
 Every departure from the print, and every decision the print left open, is recorded with its page in [docs/adt81.md](docs/adt81.md) and [docs/hbds.md](docs/hbds.md).
@@ -131,7 +133,6 @@ The system's own steps (A-code and a VM, standalone builds, a daemon with a web 
 |---|---|
 | neurons (reflexes are built, in time too: docs/hbds.md, "Reflexes") | project 18, pages 116 to 131 |
 | dialog, the Q-Graph | project 19, pages 133 to 149 |
-| the CONSTRAINT hyperclass (MAY, MUST, CANNOT are built: docs/hbds.md, "Constraints") | pages 157 to 160 |
 | SFSI and ZE, the print's own file system and exchange zone, as another persistence | project 13, pages 86 to 105 |
 | NINJAS, protection against object-oriented viruses | project 20, page 150 |
 | ADTmin, precompilers to C, Ada, Pascal and Fortran | page 161 |

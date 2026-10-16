@@ -1394,6 +1394,44 @@ fn reflex_base(rng: &mut Rng) -> String {
     text
 }
 
+/// Constraints over the schema: a value set, an object created, a link
+/// asserted concern FORMULAs that print, set values, or refuse, so that
+/// they run once per statement, settle, and refuse it whole.
+fn constraint_base(rng: &mut Rng) -> String {
+    let line = |text: &mut String, s: &str| *text += &format!("        {s} ;\n");
+    let mut text = String::new();
+    line(
+        &mut text,
+        "create \"kx\" ; include \"kx\" into \"constraint\"",
+    );
+    line(&mut text, "create \"k0\" [ \"kx\" ], \"k1\" [ \"kx\" ]");
+    let components = [
+        "\"c0\" . \"a0\"",
+        "\"c0\" . \"a1\"",
+        "\"c0\"",
+        "\"c0\" \"r\" \"c1\"",
+        "\"o0\" [ \"c0\" ]",
+    ];
+    let formulas = [
+        "print \"\"formula\"\", this",
+        "let \"\"o1\"\" [ \"\"c0\"\" ] . \"\"a1\"\" := 3",
+        "formula := false",
+        "if \"\"o0\"\" [ \"\"c0\"\" ] . \"\"a0\"\" > 2 then formula := false endif",
+    ];
+    for k in 0..2 {
+        let c = format!("\"k{k}\" [ \"kx\" ]");
+        line(
+            &mut text,
+            &format!("assoc {} with {c}", components[rng.below(components.len())]),
+        );
+        if !rng.one_in(5) {
+            let formula = formulas[rng.below(formulas.len())];
+            line(&mut text, &format!("let {c} ' formula := \"{formula}\""));
+        }
+    }
+    text
+}
+
 /// A program of a few modules that checks, mostly, and its input: for
 /// the VM's gate. Deterministic, as `program` is.
 pub fn runnable(seed: u64) -> (String, String) {
@@ -1491,6 +1529,9 @@ pub fn runnable(seed: u64) -> (String, String) {
             }
             if rng.one_in(3) {
                 text += &reflex_base(&mut rng);
+            }
+            if rng.one_in(3) {
+                text += &constraint_base(&mut rng);
             }
             if processes {
                 text += "        create \"w\" ; include \"w\" into \"process\" ;\n";

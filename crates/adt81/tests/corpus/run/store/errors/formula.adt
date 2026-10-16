@@ -1,0 +1,16 @@
+-- A FORMULA refuses the statement: page 159's T set apart from P and V. --
+
+program e ;
+begin
+        create "gas" ; create "gas" . "p", "gas" . "v", "gas" . "t" ;
+        create "law" ; include "law" into "constraint" ; create "check" [ "law" ] ;
+        assoc "gas" . "t" with "check" [ "law" ] ;
+        let "check" [ "law" ] ' formula :=
+            "g : object ; each g of ""gas"" ' obj do " &
+            "if g . ""t"" /= g . ""p"" * g . ""v"" then formula := false endif endeach" ;
+        create "g1" [ "gas" ] ;
+        let "g1" [ "gas" ] . "p" := 2. ; let "g1" [ "gas" ] . "v" := 3. ;
+        let "g1" [ "gas" ] . "t" := 6. ;
+        print "before" ;
+        let "g1" [ "gas" ] . "t" := 7.
+end ;

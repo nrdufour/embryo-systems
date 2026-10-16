@@ -828,7 +828,7 @@ fn the_ui_forwards_to_the_socket() {
     let _ = ui.wait();
     assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
     assert!(
-        answer.ends_with("{\"classes\":[],\"links\":[],\"reflexes\":[]}\n"),
+        answer.ends_with("{\"classes\":[],\"constraints\":[],\"links\":[],\"reflexes\":[]}\n"),
         "{answer}"
     );
 }
@@ -993,4 +993,37 @@ fn a_reflex_in_time_outlives_a_crash() {
     let mut feed = Feed::open(&daemon);
     daemon.post("/pace", "{\"pace\": \"fast\"}");
     assert_eq!(feed.until("seen"), "{\"output\":\"seen o[c] 5.0\\n\"}");
+}
+
+/// A gas whose T a constraint holds to P V (page 159).
+const LAW: &str = "program law ;\nbegin\n        create \"gas\" ; create \"gas\" . \"p\", \"gas\" . \"v\", \"gas\" . \"t\" ;\n        create \"law\" ; include \"law\" into \"constraint\" ; create \"check\" [ \"law\" ] ;\n        assoc \"gas\" . \"t\" with \"check\" [ \"law\" ] ;\n        let \"check\" [ \"law\" ] ' formula := \"g : object ; each g of \"\"gas\"\" ' obj do if g . \"\"t\"\" /= g . \"\"p\"\" * g . \"\"v\"\" then formula := false endif endeach\" ;\n        create \"g1\" [ \"gas\" ] ;\n        let \"g1\" [ \"gas\" ] . \"p\" := 2. ; let \"g1\" [ \"gas\" ] . \"v\" := 3. ;\n        let \"g1\" [ \"gas\" ] . \"t\" := 6.\nend ;\n";
+
+const BREAK_LAW: &str =
+    "program breaks ;\nbegin\n        let \"g1\" [ \"gas\" ] . \"t\" := 7.\nend ;\n";
+
+#[test]
+fn a_constraint_refuses_a_session_and_the_store_keeps_its_law() {
+    let dir = store_dir("daemon-law-store");
+    let law = write("daemon-law", "law.adt", LAW);
+    let breaks = write("daemon-law", "breaks.adt", BREAK_LAW);
+    {
+        let daemon = Daemon::with("law", &["--store", &dir]);
+        assert_eq!(within(spawn(daemon.client(&law)), 20), "");
+        let refused = spawn(daemon.client(&breaks)).wait_with_output().unwrap();
+        let err = String::from_utf8_lossy(&refused.stderr);
+        assert!(!refused.status.success());
+        assert!(
+            err.contains("the FORMULA of check[law] refuses this change"),
+            "{err}"
+        );
+        let schema = daemon.get("/schema");
+        assert!(
+            schema
+                .contains("\"constraints\":[{\"components\":[\"gas.t\"],\"name\":\"check[law]\"}]"),
+            "{schema}"
+        );
+    }
+    let daemon = Daemon::with("law", &["--store", &dir]);
+    let dump = daemon.get("/store");
+    assert!(dump.contains("    t = 6.0\n"), "{dump}");
 }

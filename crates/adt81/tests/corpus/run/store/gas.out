@@ -1,0 +1,5 @@
+solved g1[gas] 1.0
+solved g1[gas] 2.0
+t 2.0
+solved g1[gas] 2.0
+p v t 4.0 0.5 2.0

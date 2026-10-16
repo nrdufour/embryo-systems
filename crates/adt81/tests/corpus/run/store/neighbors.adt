@@ -1,0 +1,24 @@
+-- Page 158's area of at most so many neighbors, as a constraint on the --
+-- link: each link asserted or retracted runs its FORMULA, which counts --
+-- every area's neighbors by OPSCRC, OFIN and CARD (figure 76). Written --
+-- for the constraint engine (docs/hbds.md). --
+
+program neighbors ;
+begin
+        create "area" ; create "area" "neighbor" "area" reflexive ;
+        create "bound" ; include "bound" into "constraint" ;
+        create "most" [ "bound" ] ;
+        assoc "area" "neighbor" "area" with "most" [ "bound" ] ;
+        let "most" [ "bound" ] ' formula :=
+            "a : object ; " &
+            "each a of ""area"" ' obj do " &
+            "if a ' opscrc(""neighbor"", ""area"") ' ofin ' card > 2 then formula := false endif " &
+            "endeach ; print ""checked""" ;
+        create "a1" [ "area" ], "a2" [ "area" ], "a3" [ "area" ], "a4" [ "area" ] ;
+        assert "a1" [ "area" ] "neighbor" "a2" [ "area" ] ;
+        assert "a1" [ "area" ] "neighbor" "a3" [ "area" ] ;
+        print "two" ;
+        assert "a1" [ "area" ] not "neighbor" "a2" [ "area" ] ;
+        assert "a1" [ "area" ] "neighbor" "a4" [ "area" ] ;
+        print "a1 has", "a1" [ "area" ] ' opscrc("neighbor", "area") ' ofin ' card
+end ;

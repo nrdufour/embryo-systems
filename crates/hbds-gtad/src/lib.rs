@@ -263,6 +263,10 @@ pub type Stored<T> = Result<T, Error>;
 /// Of a change about to be made, the launches it makes: (reflex, object).
 pub type Watcher = fn(&Store, &Change, &mut Vec<(Id, Id)>);
 
+/// What tells, of a change, the constraints it concerns (pages 157 to
+/// 160): their FORMULAs run at the end of the statement.
+pub type Checker = fn(&Store, &Change, &mut BTreeSet<Id>);
+
 pub fn error<T>(message: impl Into<String>) -> Stored<T> {
     Err(Error(message.into()))
 }
@@ -293,6 +297,12 @@ pub struct Store {
     /// The launches not yet run, (reflex, object), in order: in the
     /// transaction's snapshot, so that a refused change launches nothing.
     launched: Vec<(Id, Id)>,
+    /// What tells, of each change, the constraints it concerns: the
+    /// constraint engine's, once CONSTRAINT exists.
+    checker: Option<Checker>,
+    /// The constraints concerned since their FORMULAs last ran: in the
+    /// snapshot, as `launched` is.
+    touched: BTreeSet<Id>,
     transaction: Option<Transaction>,
     counted: Counted,
 }
@@ -335,6 +345,7 @@ struct Snapshot {
     fibers: Option<String>,
     sequencing: Option<String>,
     launched: Vec<(Id, Id)>,
+    touched: BTreeSet<Id>,
     ix: Indexes,
 }
 
@@ -574,6 +585,11 @@ impl Store {
             watcher(self, &change, &mut launches);
             self.launched.extend(launches);
         }
+        if let Some(checker) = self.checker {
+            let mut touched = std::mem::take(&mut self.touched);
+            checker(self, &change, &mut touched);
+            self.touched = touched;
+        }
         if let Some(t) = &mut self.transaction {
             t.changes.push(change.clone());
         } else {
@@ -602,6 +618,7 @@ impl Store {
             fibers: self.fibers.clone(),
             sequencing: self.sequencing.clone(),
             launched: self.launched.clone(),
+            touched: self.touched.clone(),
             ix: self.ix.clone(),
         }
     }
@@ -619,6 +636,7 @@ impl Store {
         self.fibers = s.fibers;
         self.sequencing = s.sequencing;
         self.launched = s.launched;
+        self.touched = s.touched;
         self.ix.restore(s.ix);
     }
 
@@ -662,6 +680,31 @@ impl Store {
             kept.extend(t.changes);
         }
         Ok(())
+    }
+
+    /// From now on, `checker` tells the constraints each change concerns.
+    pub fn check_with(&mut self, checker: Checker) {
+        self.checker = Some(checker);
+    }
+
+    /// Whether a checker tells this store's constraints concerned.
+    pub fn checking(&self) -> bool {
+        self.checker.is_some()
+    }
+
+    /// The constraints concerned since last taken, in id order.
+    pub fn take_touched(&mut self) -> Vec<Id> {
+        std::mem::take(&mut self.touched).into_iter().collect()
+    }
+
+    pub fn has_touched(&self) -> bool {
+        !self.touched.is_empty()
+    }
+
+    /// Whether the transaction open is the outermost: the one whose end
+    /// decides, at the end of a statement.
+    pub fn outermost(&self) -> bool {
+        self.transaction.as_ref().is_some_and(|t| t.depth == 1)
     }
 
     /// From now on, `watcher` tells what each change launches.

@@ -22,6 +22,19 @@ pub fn parse_fragment(source: &str) -> Lowered<Fragment> {
     fragment(&parser::parse_fragment(source)?)
 }
 
+/// A FORMULA's statements, after the declaration of its verdict,
+/// `formula`, true unless they say otherwise (as a functor's own name
+/// holds its result).
+pub fn parse_formula(source: &str) -> Lowered<Fragment> {
+    let mut items = parse_fragment(&format!(
+        "{} : boolean init true",
+        hbds_constraints::VERDICT
+    ))?
+    .items;
+    items.extend(parse_fragment(source)?.items);
+    Ok(Fragment { items })
+}
+
 pub fn program(tree: &Tree) -> Lowered<Program> {
     let modules = trees(tree).map(module).collect::<Lowered<_>>()?;
     Ok(Program { modules })

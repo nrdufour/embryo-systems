@@ -151,6 +151,9 @@ pub fn run_within(
         if hbds_reflexes::installed(&s) {
             s.watch(hbds_reflexes::launches);
         }
+        if hbds_constraints::installed(&s) {
+            s.check_with(hbds_constraints::touched);
+        }
     }
     let mut modules = HashMap::new();
     let mut computed = HashMap::new();
@@ -1193,7 +1196,9 @@ impl Machine {
                 self.atomic(s.span, |m| m.create(o, ClassKind::Class, f, s.span))
             }
             StmtKind::Design(o) => self.create(o, ClassKind::Embryo, f, s.span),
-            StmtKind::StateChange(op, o) => self.state_change(*op, o, f, s.span),
+            StmtKind::StateChange(op, o) => {
+                self.atomic(s.span, |m| m.state_change(*op, o, f, s.span))
+            }
             StmtKind::Let { target, value } => {
                 self.atomic(s.span, |m| m.let_(target, value, f, s.span))
             }
@@ -1988,16 +1993,18 @@ impl Machine {
     fn system(&self, name: &str, span: Span) -> Exec<()> {
         let rules = hbds_rules::is_system(name);
         let reflexes = hbds_reflexes::is_system(name);
-        if !rules && !reflexes && !hbds_simulation::is_system(name) {
+        let constraints = hbds_constraints::is_system(name);
+        if !rules && !reflexes && !constraints && !hbds_simulation::is_system(name) {
             return Ok(());
         }
         let mut store = self.store.lock().unwrap();
         if store.find_class(name).is_some() {
             return Ok(());
         }
-        match (rules, reflexes) {
-            (true, _) => stored(hbds_rules::install(&mut store), span),
-            (_, true) => stored(hbds_reflexes::install(&mut store), span),
+        match (rules, reflexes, constraints) {
+            (true, _, _) => stored(hbds_rules::install(&mut store), span),
+            (_, true, _) => stored(hbds_reflexes::install(&mut store), span),
+            (_, _, true) => stored(hbds_constraints::install(&mut store), span),
             _ => stored(hbds_simulation::install(&mut store), span),
         }
     }
@@ -2387,12 +2394,73 @@ impl Machine {
 
     /// Runs `body` as one transaction of the store: its changes, and those
     /// of the ACTIONs it runs, are kept together or refused together.
+    /// At the end of a statement, its constraints settle first.
     fn atomic(&self, span: Span, body: impl FnOnce(&Self) -> Exec<()>) -> Exec<()> {
         self.store.lock().unwrap().begin();
-        let result = body(self);
+        let mut result = body(self);
+        if result.is_ok() && self.store.lock().unwrap().outermost() {
+            result = self.settle(span);
+        }
         let ended = self.store.lock().unwrap().end(result.is_ok());
         result?;
         stored(ended, span)
+    }
+
+    /// The FORMULAs of the constraints the statement concerned, in id
+    /// order, THIS the constraint, until what they change concerns no
+    /// more: one whose verdict is false refuses the statement (pages 157
+    /// to 160).
+    fn settle(&self, span: Span) -> Exec<()> {
+        let mut done = 0;
+        loop {
+            let touched = self.store.lock().unwrap().take_touched();
+            if touched.is_empty() {
+                return Ok(());
+            }
+            for c in touched {
+                done += 1;
+                if done > hbds_constraints::LIMIT {
+                    return Err(error(
+                        span,
+                        format!(
+                            "more than {} FORMULAs run for one statement: a cycle?",
+                            hbds_constraints::LIMIT
+                        ),
+                    ));
+                }
+                let Some(code) = self.property(AdtRef::Object(c), hbds_constraints::FORMULA) else {
+                    continue;
+                };
+                let what = self.describe(AdtRef::Object(c));
+                self.ours(&code, "FORMULA", &what, span)?;
+                let fragment = lower::parse_formula(&code.text).map_err(|e| {
+                    error(span, format!("the FORMULA of {what} does not parse: {e}"))
+                })?;
+                let mut f = Frame {
+                    this: Some(AdtRef::Object(c)),
+                    ..Frame::default()
+                };
+                self.called_back(|| self.run_fragment(&fragment, &mut f))
+                    .map_err(|flow| within(flow, "FORMULA", &what, span))?;
+                let verdict = f.vars[&fold(hbds_constraints::VERDICT)]
+                    .lock()
+                    .unwrap()
+                    .value
+                    .clone();
+                let holds = match verdict {
+                    Some(v) => {
+                        at(v.truth(), span).map_err(|flow| within(flow, "FORMULA", &what, span))?
+                    }
+                    None => true,
+                };
+                if !holds {
+                    return Err(error(
+                        span,
+                        format!("the FORMULA of {what} refuses this change"),
+                    ));
+                }
+            }
+        }
     }
 
     /// The CONDs and ACTIONs a change runs: the class's, class
