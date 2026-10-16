@@ -1,0 +1,35 @@
+-- Page 159's MUST and CANNOT between objects, MAY lifting them: a --
+-- vehicle must follow another, so the link is asserted and stays; --
+-- MAY lifts it, and RETRACT takes it back. Arcs of two networks cannot --
+-- intersect: the link goes, and stays out. Written either way, by the --
+-- reverse relation, a pair is one. Written for the constraint engine. --
+
+program modalities ;
+begin
+        create "vehicle", "arc" ;
+        create "vehicle" "follow" "vehicle" reverse "followed by" ;
+        create "arc" "intersect" "arc" reflexive ;
+        create "a" [ "vehicle" ], "b" [ "vehicle" ], "c" [ "vehicle" ] ;
+        create "w" [ "arc" ], "m" [ "arc" ] ;
+
+        "b" [ "vehicle" ] must "follow" "a" [ "vehicle" ] ;
+        print "b follows a", "b" [ "vehicle" ] "follow" "a" [ "vehicle" ] ;
+        print "a followed by b", "a" [ "vehicle" ] "followed by" "b" [ "vehicle" ] ;
+        "a" [ "vehicle" ] may "followed by" "b" [ "vehicle" ] ;
+        assert "b" [ "vehicle" ] not "follow" "a" [ "vehicle" ] ;
+        print "lifted, retracted", "b" [ "vehicle" ] "follow" "a" [ "vehicle" ] ;
+
+        assert "w" [ "arc" ] "intersect" "m" [ "arc" ] ;
+        print "intersect", "w" [ "arc" ] "intersect" "m" [ "arc" ] ;
+        "w" [ "arc" ] cannot "intersect" "m" [ "arc" ] ;
+        print "cannot", "w" [ "arc" ] "intersect" "m" [ "arc" ] ;
+        "w" [ "arc" ] may "intersect" "m" [ "arc" ] ;
+        assert "w" [ "arc" ] "intersect" "m" [ "arc" ] ;
+        print "may again", "w" [ "arc" ] "intersect" "m" [ "arc" ] ;
+
+        "c" [ "vehicle" ] must "follow" "b" [ "vehicle" ] ;
+        "c" [ "vehicle" ] cannot "follow" "b" [ "vehicle" ] ;
+        print "must then cannot", "c" [ "vehicle" ] "follow" "b" [ "vehicle" ] ;
+        destroy "c" [ "vehicle" ] ;
+        print "c destroyed"
+end ;

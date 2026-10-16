@@ -1,0 +1,10 @@
+-- A link that MUST be is not retracted, even by its reverse (page 159). --
+
+program e ;
+begin
+        create "vehicle" ; create "vehicle" "follow" "vehicle" reverse "followed by" ;
+        create "a" [ "vehicle" ], "b" [ "vehicle" ] ;
+        "b" [ "vehicle" ] must "follow" "a" [ "vehicle" ] ;
+        print "before" ;
+        assert "a" [ "vehicle" ] not "followed by" "b" [ "vehicle" ]
+end ;

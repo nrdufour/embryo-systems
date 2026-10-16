@@ -1,0 +1,2 @@
+before
+9:9: runtime error: b[vehicle] MUST "follow" a[vehicle]: the link is not retracted

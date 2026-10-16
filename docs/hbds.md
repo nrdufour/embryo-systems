@@ -346,6 +346,29 @@ syntax and no algorithm; ours, decided on 2026-10-16:
 `store/reflexes.adt` is figures 55 to 57 on a small graph,
 `store/network.adt` figure 59's water network, in time.
 
+## Constraints
+
+The constraint engine (pages 157 to 160, the 1994 Ottawa paper): beside
+COND and ACTION, which concern their carrier only, relations "must",
+"must not", "cannot", and not only "may" (page 157). The print gives two
+statements, no syntax for the rest, and no algorithm. Decided on
+2026-10-16:
+
+- **MAY, MUST and CANNOT hold a pair of objects to a link** of their
+  classes (page 159: `A ["VEHICLE"] MUST "follow" B ["VEHICLE"]`), and
+  the holding stands: MUST asserts the link, then refuses retracting it
+  and destroying either object; CANNOT retracts it, then refuses
+  asserting it; MAY, what a link between classes says (page 158), lifts
+  either. Written either way, by the reverse relation, a pair is one.
+  The store refuses, so both engines refuse alike, and it journals what
+  holds as it journals links.
+- **Not yet**: the hyperclass CONSTRAINT and its FORMULA (page 159,
+  figure 79), the components joined to it by ASSOC; figure 80's
+  networks.
+
+`store/modalities.adt` holds vehicles and arcs; `store/errors/must.adt`,
+`cannot.adt` and `mustdestroy.adt` are the three refusals.
+
 ## The model
 
 The six basic a.d.t. (page 46, figure 6), as the store keeps them: a

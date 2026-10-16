@@ -1,0 +1,10 @@
+-- A link that CANNOT be is not asserted (page 159). --
+
+program e ;
+begin
+        create "arc" ; create "arc" "intersect" "arc" reflexive ;
+        create "w" [ "arc" ], "m" [ "arc" ] ;
+        "w" [ "arc" ] cannot "intersect" "m" [ "arc" ] ;
+        print "before" ;
+        assert "w" [ "arc" ] "intersect" "m" [ "arc" ]
+end ;

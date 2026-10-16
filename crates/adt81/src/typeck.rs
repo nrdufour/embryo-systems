@@ -434,7 +434,8 @@ impl<'c> Checker<'c> {
                 }
                 self.expr(value);
             }
-            StmtKind::Assert(Assertion::Link { from, to, .. }) => {
+            StmtKind::Assert(Assertion::Link { from, to, .. })
+            | StmtKind::Modality { from, to, .. } => {
                 self.object(from);
                 self.object(to);
             }

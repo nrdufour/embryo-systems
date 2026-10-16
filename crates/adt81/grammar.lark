@@ -186,6 +186,7 @@ list_statement: "INSERT"i list_expression ("," list_expression)* "INTO"i name ((
 
 adt_statement: create | state_change | adt_assignment | assertion | specify
     | include | exclude | associate | dissociate | design | compose | build
+    | modality
 
 // Classes and objects share one list: with bare names they read alike, and
 // the checker keeps the list homogeneous.
@@ -222,6 +223,11 @@ property: adt "'" name
 // note corrects to a link name. decision: the relationship is a string
 // literal. listing: page 154 gives it a probability, % 0.80.
 assertion: "ASSERT"i (object "NOT"i? STRING ("%" real)? object | name)
+
+// gap: page 159 holds two objects to a link with MUST and CANNOT, which the
+// BNF lacks; MAY, what a link between classes says (page 158), lifts
+// either. decision: a standing modality per pair (docs/hbds.md).
+modality: object ("MAY"i | "MUST"i | "CANNOT"i) STRING object
 
 // fix: page 24 gives this rule the name of page 19's parameter
 // specification. listing: page 49 writes a colon and COMPUTED, page 154

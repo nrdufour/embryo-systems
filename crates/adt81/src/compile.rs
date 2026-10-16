@@ -840,6 +840,23 @@ impl<'p> Compiler<'p> {
             StmtKind::Assert(Assertion::Name(_)) => {
                 self.fail(s.span, "ASSERT of a name: not yet");
             }
+            StmtKind::Modality {
+                from,
+                modal,
+                relation,
+                to,
+            } => {
+                self.object(from, s.span);
+                self.object(to, s.span);
+                let modal = match modal {
+                    Modal::May => hbds_acode::Modal::May,
+                    Modal::Must => hbds_acode::Modal::Must,
+                    Modal::Cannot => hbds_acode::Modal::Cannot,
+                };
+                self.emit(Instr::Begin, s.span);
+                self.emit(Instr::Modality(relation.text.clone(), modal), s.span);
+                self.emit(Instr::Commit, s.span);
+            }
             StmtKind::Specify {
                 items,
                 spec,

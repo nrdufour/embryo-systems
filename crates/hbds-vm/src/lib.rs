@@ -2369,6 +2369,28 @@ impl<'r> Vm<'r> {
                     }
                 })?;
             }
+            Instr::Modality(relation, modal) => {
+                let b = self.pop_object();
+                let a = self.pop_object();
+                let r = relation.as_str();
+                match modal {
+                    hbds_acode::Modal::May => stored(self.store.hold_to(a, r, b, None))?,
+                    hbds_acode::Modal::Cannot => {
+                        stored(
+                            self.store
+                                .hold_to(a, r, b, Some(hbds_gtad::Modality::Cannot)),
+                        )?;
+                        stored(self.store.retract_link(a, r, b))?;
+                    }
+                    hbds_acode::Modal::Must => {
+                        stored(self.store.hold_to(a, r, b, Some(hbds_gtad::Modality::Must)))?;
+                        if self.store.object_link(a, r, b).is_none() {
+                            let l = stored(self.store.assert_link(a, r, b, self.o.ses.stamp))?;
+                            return self.trigger(Invoked::Linked(l), self.frame().depth);
+                        }
+                    }
+                }
+            }
             Instr::Assert(relation, probability, negated) => {
                 let b = self.pop_object();
                 let a = self.pop_object();
