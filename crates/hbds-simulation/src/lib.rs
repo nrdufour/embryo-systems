@@ -50,6 +50,9 @@ pub enum Agent {
     Main,
     Process(Id),
     Client(u64),
+    /// A reflex launched with a delay, in time (project 18, page 126):
+    /// the set knows which reflex, for which object.
+    Reflex(u64),
 }
 
 impl Agent {
@@ -99,6 +102,10 @@ pub struct Sequencing {
     /// The clients that have acted on time: each the active agent, as
     /// SIMULA's main program is, until it holds or ends.
     engaged: BTreeSet<Agent>,
+    /// The reflexes launched with a delay: each activation's reflex and
+    /// object, and the number the next one takes.
+    reflexes: BTreeMap<u64, (Id, Id)>,
+    next_reflex: u64,
 }
 
 impl Default for Sequencing {
@@ -120,6 +127,8 @@ impl Sequencing {
             current: Agent::Main,
             owners: BTreeMap::new(),
             engaged: BTreeSet::new(),
+            reflexes: BTreeMap::new(),
+            next_reflex: 1,
         }
     }
 
@@ -133,6 +142,8 @@ impl Sequencing {
             current: Agent::Main,
             owners: BTreeMap::new(),
             engaged: BTreeSet::new(),
+            reflexes: BTreeMap::new(),
+            next_reflex: 1,
         }
     }
 
@@ -157,6 +168,38 @@ impl Sequencing {
         }
     }
 
+    /// A reflex launched with `delay`: due at now + delay, behind those
+    /// due then, its activation's agent.
+    pub fn launch(&mut self, reflex: Id, this: Id, delay: f64) -> Result<Agent, String> {
+        let delay = Self::time(delay, "a reflex's DELAY")?;
+        if delay < 0.0 {
+            return Err(format!("a DELAY of {delay}: a delay is not negative"));
+        }
+        let a = Agent::Reflex(self.next_reflex);
+        self.next_reflex += 1;
+        self.reflexes.insert(self.next_reflex - 1, (reflex, this));
+        let t = self.now + delay;
+        self.insert(a, t);
+        self.set_state(a, State::Hold, t);
+        let owner = self.owner_of_current();
+        self.owners.insert(a, owner);
+        Ok(a)
+    }
+
+    /// An activation's reflex and object.
+    pub fn reflex(&self, n: u64) -> Option<(Id, Id)> {
+        self.reflexes.get(&n).copied()
+    }
+
+    /// Who what the running agent starts reports to: its own owner, if it
+    /// has one, so that a chain reports to the client behind it.
+    fn owner_of_current(&self) -> Agent {
+        self.owners
+            .get(&self.current)
+            .copied()
+            .unwrap_or(self.current)
+    }
+
     /// Who activated `p` first.
     pub fn owner(&self, p: Agent) -> Option<Agent> {
         self.owners.get(&p).copied()
@@ -173,6 +216,10 @@ impl Sequencing {
         self.remove(a);
         self.states.remove(&a);
         self.engaged.remove(&a);
+        self.owners.remove(&a);
+        if let Agent::Reflex(n) = a {
+            self.reflexes.remove(&n);
+        }
     }
 
     pub fn current(&self) -> Agent {
@@ -199,7 +246,7 @@ impl Sequencing {
         (self.states.iter())
             .filter_map(|(a, (s, c))| match a {
                 Agent::Process(id) => Some((*id, *s, *c)),
-                Agent::Main | Agent::Client(_) => None,
+                Agent::Main | Agent::Client(_) | Agent::Reflex(_) => None,
             })
             .collect()
     }
@@ -271,7 +318,8 @@ impl Sequencing {
             None => self.insert(p, t),
         }
         self.set_state(p, State::Hold, t);
-        self.owners.entry(p).or_insert(self.current);
+        let owner = self.owner_of_current();
+        self.owners.entry(p).or_insert(owner);
         Ok(())
     }
 
@@ -360,6 +408,7 @@ fn agent_term(a: Agent) -> Term {
         Agent::Main => list(vec![word("main")]),
         Agent::Process(p) => list(vec![word("process"), word(p)]),
         Agent::Client(c) => list(vec![word("client"), word(c)]),
+        Agent::Reflex(n) => list(vec![word("reflex"), word(n)]),
     }
 }
 
@@ -369,6 +418,7 @@ fn read_agent(r: &mut Reader) -> Result<Agent, String> {
         "main" => Agent::Main,
         "process" => Agent::Process(a.id()?),
         "client" => Agent::Client(a.parse()?),
+        "reflex" => Agent::Reflex(a.parse()?),
         w => return Err(format!("{w:?} is not an agent")),
     };
     a.end()?;
@@ -408,6 +458,12 @@ impl Sequencing {
                     .collect(),
             ),
             list(self.engaged.iter().map(|a| agent_term(*a)).collect()),
+            list(
+                (self.reflexes.iter())
+                    .map(|(n, (r, o))| list(vec![word(n), word(r), word(o)]))
+                    .collect(),
+            ),
+            word(self.next_reflex),
         ];
         let mut out = String::new();
         for (i, t) in terms.iter().enumerate() {
@@ -459,6 +515,17 @@ impl Sequencing {
         while items.more() {
             engaged.insert(read_agent(&mut items)?);
         }
+        // The reflexes in time, which a set saved before them lacks.
+        let (mut reflexes, mut next_reflex) = (BTreeMap::new(), 1);
+        if r.more() {
+            let mut items = r.list()?;
+            while items.more() {
+                let mut i = items.list()?;
+                reflexes.insert(i.parse()?, (i.id()?, i.id()?));
+                i.end()?;
+            }
+            next_reflex = r.parse()?;
+        }
         r.end()?;
         let client = |a: &Agent| matches!(a, Agent::Client(_));
         set.retain(|(_, a)| !client(a));
@@ -476,6 +543,8 @@ impl Sequencing {
             },
             owners,
             engaged,
+            reflexes,
+            next_reflex,
         })
     }
 }

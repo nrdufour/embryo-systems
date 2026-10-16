@@ -123,7 +123,7 @@ main {
     "schema time"
     "schema sessions"
     "repl rules"
-    "journal journal";
+    "reflexes journal";
   gap: 12px;
   padding: 12px 16px;
 }
@@ -131,7 +131,7 @@ main {
 @media (max-width: 800px) {
   main {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "schema" "time" "sessions" "repl" "rules" "journal";
+    grid-template-areas: "schema" "time" "sessions" "repl" "rules" "reflexes" "journal";
   }
 }
 
@@ -165,6 +165,31 @@ main {
 
 #rules-panel {
   grid-area: rules;
+}
+
+#reflexes-panel {
+  grid-area: reflexes;
+}
+
+.behavior,
+.launches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.behavior li,
+.launches li {
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.launches {
+  max-height: 200px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
 }
 
 .repl {

@@ -828,7 +828,7 @@ fn the_ui_forwards_to_the_socket() {
     let _ = ui.wait();
     assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
     assert!(
-        answer.ends_with("{\"classes\":[],\"links\":[]}\n"),
+        answer.ends_with("{\"classes\":[],\"links\":[],\"reflexes\":[]}\n"),
         "{answer}"
     );
 }
@@ -959,4 +959,38 @@ fn real_time_goes_on_after_a_restart() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// A reflex in time: "watch" on "c" . "a", DELAY 5, printing.
+const DELAYED: &str = "program delayed ;\nbegin\n        create \"c\" ; create \"c\" . \"a\" ; create \"o\" [ \"c\" ] ;\n        create \"rx\" ; include \"rx\" into \"reflex\" ; create \"watch\" [ \"rx\" ] ;\n        let \"watch\" [ \"rx\" ] . \"event\" := \"set\" ;\n        let \"watch\" [ \"rx\" ] . \"delay\" := 5 ;\n        assoc \"c\" . \"a\" with \"watch\" [ \"rx\" ] ;\n        let \"watch\" [ \"rx\" ] ' reaction := \"print \"\"seen\"\", this, time\" ;\n        let \"o\" [ \"c\" ] . \"a\" := 1 ;\n        print \"set\"\nend ;\n";
+
+#[test]
+fn a_reflex_in_time_outlives_a_crash() {
+    let dir = store_dir("daemon-reflex-store");
+    let start = write("daemon-reflex", "delayed.adt", DELAYED);
+    {
+        let daemon = Daemon::with("reflex", &["--store", &dir, "--pace", "paused"]);
+        let mut feed = Feed::open(&daemon);
+        assert_eq!(within(spawn(daemon.client(&start)), 20), "set\n");
+        let launched = feed.until("\"reflex\"");
+        assert_eq!(
+            launched,
+            "{\"reflex\":{\"delay\":5,\"reflex\":\"watch[rx]\",\"this\":\"o[c]\"}}"
+        );
+        let schema = daemon.get("/schema");
+        assert!(
+            schema.contains("\"reflexes\":[{\"delay\":\"5\",\"event\":\"set\",\"launchers\":[\"c.a\"],\"name\":\"watch[rx]\"}]"),
+            "{schema}"
+        );
+    }
+    // Killed before time moved: the launch is still due, and runs.
+    let daemon = Daemon::with("reflex", &["--store", &dir, "--pace", "paused"]);
+    let time = daemon.get("/time");
+    assert!(
+        time.contains("{\"agent\":\"watch[rx] for o[c]\",\"at\":5}"),
+        "{time}"
+    );
+    let mut feed = Feed::open(&daemon);
+    daemon.post("/pace", "{\"pace\": \"fast\"}");
+    assert_eq!(feed.until("seen"), "{\"output\":\"seen o[c] 5.0\\n\"}");
 }

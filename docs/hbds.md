@@ -332,11 +332,19 @@ syntax and no algorithm; ours, decided on 2026-10-16:
   propagation page 118 asks to order. The launches are the transaction's:
   a refused change, or HYPOCHAV's hypotheses undone, launches nothing.
   More than 10 000 in one statement is a cycle, an error.
-- **Not yet**: DELAY, a launch in the sequencing set at now + delay, and
-  a reaction that HOLDs or PASSIVATEs (pages 125 and 126); NEURON (page
-  122, figure 58), once its learning is decided.
+- **A DELAY puts it in time** (pages 125 and 126: "inserted into SQS"):
+  launched with a DELAY other than 0, a reflex goes into the sequencing
+  set at now + delay, an agent of its own, and its REACTION runs when
+  the simulation reaches it, as a process's body: it may HOLD, its own
+  statements run what they launch, and it is forgotten once done. In the
+  daemon the kernel runs it, it reports to the client behind the chain,
+  and it persists with the kernel's fibers.
+- **Not yet**: NEURON (page 122, figure 58), once its learning is
+  decided; a reflex DELAYed or CANCELed by another (page 125), which
+  would need a launch one can designate.
 
-`store/reflexes.adt` is figures 55 to 57 on a small graph.
+`store/reflexes.adt` is figures 55 to 57 on a small graph,
+`store/network.adt` figure 59's water network, in time.
 
 ## The model
 

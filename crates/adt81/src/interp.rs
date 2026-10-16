@@ -190,6 +190,7 @@ pub fn run_within(
         bodies: Arc::new(bodies),
         sim: Arc::new(Mutex::new(Sequencing::new())),
         processes: Arc::new(Mutex::new(HashMap::new())),
+        reflexes: Arc::new(Mutex::new(HashMap::new())),
         role: Role::Main,
         statements: Arc::new(AtomicU64::new(0)),
         calling_back: Arc::new(AtomicUsize::new(0)),
@@ -208,6 +209,7 @@ pub fn run_within(
     // Paused coroutines wait for a RESUME that will not come: let them go.
     machine.coroutines.lock().unwrap().clear();
     machine.processes.lock().unwrap().clear();
+    machine.reflexes.lock().unwrap().clear();
     result?;
     // The processes as the run leaves them: implicitly persistent (page
     // 112), the sequencing set gone with the run.
@@ -418,6 +420,8 @@ struct Machine {
     sim: Arc<Mutex<Sequencing>>,
     /// Each process's body, a coroutine, once it started.
     processes: Arc<Mutex<HashMap<Id, Coroutine>>>,
+    /// Each reflex in time's reaction, a coroutine, once it started.
+    reflexes: Arc<Mutex<HashMap<u64, Coroutine>>>,
     /// Who this thread runs for.
     role: Role,
     /// Statements executed, on every thread.
@@ -439,6 +443,8 @@ enum Role {
     Process(Id),
     /// A coroutine RESUME started.
     Coroutine,
+    /// A reflex launched with a delay, in time.
+    Reflex(u64),
 }
 
 /// The expert-system engines' way into ADT'81: they decide what runs
@@ -1099,7 +1105,7 @@ impl Machine {
             StmtKind::Reproc => Err(error(s.span, "the meaning of REPROC is not established")),
             StmtKind::Pause if self.link.is_some() => {
                 self.gives_way("PAUSE", s.span)?;
-                if let Role::Process(_) = self.role {
+                if let Role::Process(_) | Role::Reflex(_) = self.role {
                     return Err(error(s.span, "PAUSE in a process: it HOLDs or PASSIVATEs"));
                 }
                 self.pause()
@@ -1986,6 +1992,12 @@ impl Machine {
                 let Some(code) = self.property(AdtRef::Object(r), hbds_reflexes::REACTION) else {
                     continue;
                 };
+                // A DELAY puts it in time, in the sequencing set (page 126).
+                let delay = hbds_reflexes::delay(&self.store.lock().unwrap(), r);
+                if delay != 0.0 {
+                    self.sim_op(span, |sim, _| sim.launch(r, o, delay).map(|_| ()))?;
+                    continue;
+                }
                 let what = self.describe(AdtRef::Object(r));
                 self.ours(&code, "REACTION", &what, span)?;
                 let fragment = lower::parse_fragment(&code.text).map_err(|e| {
@@ -2037,6 +2049,7 @@ impl Machine {
         match a {
             Agent::Main | Agent::Client(_) => "the main program".into(),
             Agent::Process(p) => self.describe(AdtRef::Object(p)),
+            Agent::Reflex(_) => "a reflex in time".into(),
         }
     }
 
@@ -2069,6 +2082,7 @@ impl Machine {
         match self.role {
             Role::Main => Ok(Agent::Main),
             Role::Process(p) => Ok(Agent::Process(p)),
+            Role::Reflex(n) => Ok(Agent::Reflex(n)),
             Role::Coroutine => Err(error(
                 span,
                 "a coroutine RESUME started is not a process: it does not HOLD, PASSIVATE nor TERMINATE",
@@ -2132,15 +2146,92 @@ impl Machine {
     /// After HOLD or PASSIVATE: a body gives control back to the
     /// sequencing set; the main program runs it until it is due again.
     fn give_way(&self, span: Span) -> Exec<()> {
-        if let Role::Process(_) = self.role {
+        if let Role::Process(_) | Role::Reflex(_) = self.role {
             return self.pause();
         }
         loop {
             let next = self.sim.lock().unwrap().advance();
             match next {
                 Some(Agent::Process(p)) => self.run_process(p, span)?,
+                Some(Agent::Reflex(n)) => self.run_reflex(n, span)?,
                 Some(Agent::Main | Agent::Client(_)) | None => return Ok(()),
             }
+        }
+    }
+
+    /// A reflex in time, its reaction run from where it stopped, until it
+    /// holds, passivates or ends; ended, it is forgotten.
+    fn run_reflex(&self, n: u64, span: Span) -> Exec<()> {
+        let started = self.reflexes.lock().unwrap().contains_key(&n);
+        let back = if started {
+            let map = self.reflexes.lock().unwrap();
+            let co = &map[&n];
+            co.go
+                .send(())
+                .map_err(|_| error(span, "the reflex is gone"))?;
+            co.back.clone()
+        } else {
+            let agent = Agent::Reflex(n);
+            let found = self.sim.lock().unwrap().reflex(n);
+            let code =
+                found.and_then(|(r, _)| self.property(AdtRef::Object(r), hbds_reflexes::REACTION));
+            let (Some((r, o)), Some(code)) = (found, code) else {
+                // Its reflex gone since: nothing to run.
+                self.sim.lock().unwrap().forget(agent);
+                return Ok(());
+            };
+            let what = self.describe(AdtRef::Object(r));
+            self.ours(&code, "REACTION", &what, span)?;
+            let fragment = lower::parse_fragment(&code.text)
+                .map_err(|e| error(span, format!("the REACTION of {what} does not parse: {e}")))?;
+            let (go, go_rx) = channel();
+            let (back_tx, back) = channel();
+            let back = Arc::new(Mutex::new(back));
+            let link = Arc::new(Link {
+                back: back_tx,
+                go: Mutex::new(go_rx),
+            });
+            let mut machine = self.clone();
+            machine.link = Some(link.clone());
+            machine.role = Role::Reflex(n);
+            machine.calling_back = Arc::new(AtomicUsize::new(0));
+            machine.reacting = Arc::new(AtomicBool::new(false));
+            self.reflexes.lock().unwrap().insert(
+                n,
+                Coroutine {
+                    go,
+                    back: back.clone(),
+                    state: State::Running,
+                },
+            );
+            let spawned = thread::Builder::new().stack_size(STACK).spawn(move || {
+                let mut f = Frame {
+                    this: Some(AdtRef::Object(o)),
+                    ..Frame::default()
+                };
+                // In time, as a process's body: its errors are its own.
+                let ended = machine.run_fragment(&fragment, &mut f);
+                let _ = link.back.send(Event::Ended(ended));
+            });
+            spawned.map_err(|e| error(span, format!("no thread for the reflex: {e}")))?;
+            back
+        };
+        let event = back.lock().unwrap().recv();
+        match event {
+            Ok(Event::Paused) => Ok(()),
+            Ok(Event::Ended(ended)) => {
+                self.reflexes.lock().unwrap().remove(&n);
+                let agent = Agent::Reflex(n);
+                let terminated = self.sim.lock().unwrap().state(agent) == Lifecycle::Terminated;
+                let done = match ended {
+                    Err(Flow::Stop) if terminated => Ok(()),
+                    Ok(()) | Err(Flow::Return) => self.sim_op(span, |sim, _| sim.terminate()),
+                    Err(flow) => Err(flow),
+                };
+                self.sim.lock().unwrap().forget(agent);
+                done
+            }
+            Err(_) => Err(Flow::Stop),
         }
     }
 

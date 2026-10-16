@@ -179,6 +179,15 @@ struct Wire {
     rules: Vec<Json>,
 }
 
+/// A reflex launched, as the feed tells it.
+fn reflex_json(reflex: &str, this: &str, delay: f64) -> Json {
+    Json::Object(BTreeMap::from([
+        ("reflex".to_string(), Json::String(reflex.into())),
+        ("this".to_string(), Json::String(this.into())),
+        ("delay".to_string(), Json::Number(delay)),
+    ]))
+}
+
 /// A CHAV or HYPOCHAV run as the feed tells it.
 fn rules_json(engine: &str, tried: &[String], fired: &[String]) -> Json {
     let names = |v: &[String]| Json::Array(v.iter().map(|n| Json::String(n.clone())).collect());
@@ -235,6 +244,11 @@ impl hbds_vm::Io for Wire {
     fn rules(&mut self, engine: &str, tried: &[String], fired: &[String]) {
         self.rules.push(rules_json(engine, tried, fired));
     }
+
+    fn reflex(&mut self, reflex: &str, this: &str, delay: f64) {
+        self.rules
+            .push(Json::one("reflex", reflex_json(reflex, this, delay)));
+    }
 }
 
 struct Client {
@@ -287,6 +301,13 @@ impl hbds_vm::Io for Router {
 
     fn rules(&mut self, engine: &str, tried: &[String], fired: &[String]) {
         self.report(rules_json(engine, tried, fired));
+    }
+
+    fn reflex(&mut self, reflex: &str, this: &str, delay: f64) {
+        broadcast(
+            &mut self.feed,
+            Json::one("reflex", reflex_json(reflex, this, delay)),
+        );
     }
 
     fn running(&mut self, process: Agent, owner: Option<Agent>) {
@@ -642,6 +663,14 @@ fn time_json(sim: &Sequencing, store: &Store) -> Json {
         Agent::Process(p) => store.describe(AdtRef::Object(p)),
         Agent::Client(id) => format!("client {id}"),
         Agent::Main => "the main program".into(),
+        Agent::Reflex(n) => match sim.reflex(n) {
+            Some((r, o)) => format!(
+                "{} for {}",
+                store.describe(AdtRef::Object(r)),
+                store.describe(AdtRef::Object(o))
+            ),
+            None => format!("reflex {n}"),
+        },
     };
     let due = (sim.due().into_iter())
         .map(|(t, a)| {
@@ -734,7 +763,51 @@ fn schema_json(store: &Store) -> Json {
     Json::Object(BTreeMap::from([
         ("classes".to_string(), Json::Array(classes)),
         ("links".to_string(), Json::Array(links)),
+        ("reflexes".to_string(), Json::Array(reflexes_json(store))),
     ]))
+}
+
+/// The reflexes, a behavior each (figure 53): name, event, delay, the
+/// launchers associated with it.
+fn reflexes_json(store: &Store) -> Vec<Json> {
+    let Some(reflex) = store
+        .classes()
+        .iter()
+        .find(|(_, c)| hbds_core::same(&c.name, "REFLEX"))
+    else {
+        return Vec::new();
+    };
+    let reflex = *reflex.0;
+    let mut out = Vec::new();
+    for (&id, o) in store.objects().iter() {
+        if !store.lineage(o.class).contains(&reflex) || id == reflex {
+            continue;
+        }
+        let value = |name: &str| {
+            let a = store.find_attribute(o.class, name)?;
+            o.values.get(&a).map(|v| store.show(v))
+        };
+        let launchers = (store.associations().iter())
+            .filter(|(_, b)| *b == AdtRef::Object(id))
+            .map(|(l, _)| Json::String(store.describe(*l)))
+            .collect();
+        out.push(Json::Object(BTreeMap::from([
+            (
+                "name".to_string(),
+                Json::String(store.describe(AdtRef::Object(id))),
+            ),
+            (
+                "event".to_string(),
+                value("EVENT").map_or(Json::Null, Json::String),
+            ),
+            (
+                "delay".to_string(),
+                value("DELAY").map_or(Json::Null, Json::String),
+            ),
+            ("launchers".to_string(), Json::Array(launchers)),
+        ])));
+    }
+    out
 }
 
 /// The page's files, embedded (decision 8).
@@ -788,7 +861,7 @@ fn executor(
         }
     }
     if let Some(text) = store.fibers()
-        && let Err(e) = kernel.restore_fibers(text)
+        && let Err(e) = kernel.restore_fibers(text, language)
     {
         eprintln!("the store's processes do not read: {e}");
     }
@@ -953,7 +1026,12 @@ fn executor(
             // What the turn kept, and the rules it ran, before its end.
             changes(&mut store, &mut feed);
             for report in std::mem::take(&mut c.wire.rules) {
-                rules_to_feed(&mut feed, report, "session", id);
+                match report {
+                    Json::Object(o) if o.contains_key("reflex") => {
+                        broadcast(&mut feed, Json::Object(o))
+                    }
+                    report => rules_to_feed(&mut feed, report, "session", id),
+                }
             }
             let gone = match turn {
                 Turn::Yield | Turn::Idle | Turn::Due(_) => false,
@@ -1022,7 +1100,7 @@ fn executor(
                 // standalone run ends; with no client, the daemon's log
                 // says it.
                 Turn::Failed(e) => {
-                    let owner = kernel.failed().and_then(|p| sim.owner(Agent::Process(p)));
+                    let owner = kernel.failed().and_then(|a| sim.owner(a));
                     match owner {
                         Some(Agent::Client(id)) if clients.contains_key(&id) => {
                             let c = clients.remove(&id).expect("a client");
