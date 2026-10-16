@@ -98,7 +98,9 @@ flowchart BT
 | crate | what |
 |---|---|
 | `crates/hbds-core` | the vocabulary the engines share: values, a.d.t. references and kinds, specifications |
-| `crates/hbds-gtad` | the a.d.t. engine: model, changes, states, transactions |
+| `crates/hbds-values` | what operations do to values: every number type, widening, fuzziness carried along, arrays |
+| `crates/hbds-maps` | the persistent B-tree the store keeps its model and indexes in |
+| `crates/hbds-gtad` | the a.d.t. engine: model, indexes, changes, states, transactions |
 | `crates/hbds-lists` | the list engine: cursors, circular lists, list functors |
 | `crates/hbds-functors` | the functor engine: the catalogue of pages 76 to 80 |
 | `crates/hbds-journal` | GTAD's persistence, a journal in the spirit of the print's DAYFILE |

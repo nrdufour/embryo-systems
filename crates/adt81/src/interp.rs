@@ -2498,8 +2498,7 @@ impl Machine {
                 format!("`{}` applies to a list", c.name.spelling),
             ));
         };
-        let add = |a: &Value, b: &Value| value::binary(BinaryOp::Add, a, b).map_err(|f| f.0);
-        let result = hbds_lists::apply(&c.name.key, &mut list, &args, &add);
+        let result = hbds_lists::apply(&c.name.key, &mut list, &args);
         let result = result.map_err(|m| error(span, m))?;
         // The functors that move the cursor or take an element out change
         // the list a variable holds.

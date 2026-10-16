@@ -14,13 +14,14 @@ import sys
 ALLOWED = {
     "hbds-core": set(),
     "hbds-maps": set(),
-    "hbds-lists": {"hbds-core"},
+    "hbds-values": {"hbds-core"},
+    "hbds-lists": {"hbds-core", "hbds-values"},
     "hbds-gtad": {"hbds-core", "hbds-maps"},
     "hbds-functors": {"hbds-core", "hbds-gtad"},
     "hbds-journal": {"hbds-core", "hbds-gtad"},
     "hbds-rules": {"hbds-core", "hbds-gtad"},
     "hbds-simulation": {"hbds-core", "hbds-gtad"},
-    "adt81": {"hbds-core", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules", "hbds-simulation"},
+    "adt81": {"hbds-core", "hbds-values", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules", "hbds-simulation"},
     "embryo-systems": {"adt81", "hbds-gtad", "hbds-journal"},
     "embryo-systems-bench": {"adt81", "hbds-gtad"},
 }

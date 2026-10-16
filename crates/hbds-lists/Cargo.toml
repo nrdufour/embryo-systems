@@ -8,3 +8,4 @@ license.workspace = true
 # The list engine (project 14, page 80).
 [dependencies]
 hbds-core = { path = "../hbds-core" }
+hbds-values = { path = "../hbds-values" }

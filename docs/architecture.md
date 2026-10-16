@@ -150,6 +150,14 @@ Not chosen: opcodes tagged by language (all duplicated with the second
 language); every operation a call into a language's library (slow, and
 nothing shared).
 
+As built (2026-10-15, step 3): `crates/hbds-values`, on hbds-core alone,
+with its own `Op` and `Unary`, named for what they compute, and
+conversions to SPECIFY's `Base`; ADT'81 maps its operators onto them in
+`crates/adt81/src/value.rs`, which keeps `Ask` and the math functions.
+`Op` prints as the print writes it, for messages. UNION, INTER and COMPL
+stay the list engine's, so that hbds-lists can take SIGMA's addition from
+hbds-values without a cycle. Values' text was already hbds-core's.
+
 ### 5. Persistence: exact processes, compaction, group commit
 
 - **The world is data, code and the simulation.** A-code modules are

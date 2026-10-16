@@ -27,14 +27,15 @@ language is a crate that uses them. Decided on 2026-10-15.
 | crate | what | depends on |
 |---|---|---|
 | `hbds-core` | the shared vocabulary: values (numbers of every kind, fuzziness, lists, arrays, a.d.t.), a.d.t. references, types and kinds, specifications, functor signatures; data, no logic | nothing |
-| `hbds-lists` | the list engine (project 14, page 80): cursors, circular lists, the list functors, union, intersection, complement | core |
+| `hbds-values` | what operations do to values, whatever the language: every number type and the widening between them, comparisons, text, arrays (page 153), fuzziness propagated (pages 152, 153); `Op`, the operations a language maps its operators onto | core |
+| `hbds-lists` | the list engine (project 14, page 80): cursors, circular lists, the list functors, union, intersection, complement; SIGMA adds as hbds-values does | core, values |
 | `hbds-maps` | the persistent ordered map the store keeps its model in: a B-tree whose versions share nodes, so a transaction's snapshot costs nothing | nothing |
 | `hbds-gtad` | the a.d.t. engine (project 12): the model, its changes, its indexes and lookups, states; persistence behind its `Recorder` trait | core, maps |
 | `hbds-functors` | the functor engine (project 15): the catalogue on a.d.t. and its implementation on GTAD | core, gtad |
 | `hbds-journal` | GTAD's persistence, a `Recorder`: the journal below; SFSI and ZE would be another | core, gtad |
 | `hbds-simulation` | the discrete simulation (project 17): PROCESS, the sequencing set and figure 52's transitions; a language runs the bodies | core, gtad |
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
-| `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (arithmetic and fuzzy propagation, math functions, what an unknown name means); it wires the engines together | the engines |
+| `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (its operators mapped onto HBDS's operations, math functions, what an unknown name means); it wires the engines together | the engines |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal |
 | `embryo-systems-bench` | the benchmarks, `just bench`: the programs of `bench/scenarios` on a ladder of sizes, against `bench/work.txt` and `bench/<host>.txt` | adt81, gtad |
 
@@ -385,6 +386,7 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `crates/hbds-gtad` | the model, its changes, lookups |
 | `crates/hbds-functors`, `crates/hbds-lists` | the functors on a.d.t., and the list engine |
 | `crates/hbds-core` | values, specifications, the vocabulary |
+| `crates/hbds-values` | arithmetic, widening, comparisons and fuzzy propagation on values |
 | `crates/hbds-journal` | the journal's format, recording and replay |
 | `crates/hbds-rules` | the expert systems: the model, the functors, the chaining |
 | `crates/hbds-simulation` | the simulation: PROCESS, the sequencing set |
