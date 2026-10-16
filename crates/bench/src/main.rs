@@ -19,8 +19,8 @@ use adt81::interp::{self, Io};
 use adt81::lower;
 use hbds_gtad::{Store, Work};
 
-/// Runs of each size; the median is kept.
-const RUNS: usize = 3;
+/// Runs of each size, after one to warm up; the median is kept.
+const RUNS: usize = 5;
 /// How far a time may move before the gate fails.
 const MARGIN: f64 = 0.15;
 /// Times below this are printed but not gated: noise is most of them.
@@ -87,6 +87,12 @@ const SCENARIOS: &[Scenario] = &[
         expected: |n| format!("21.0 {}\n", 20 * n),
     },
     Scenario {
+        name: "values",
+        sizes: &[32_000, 64_000, 128_000, 256_000],
+        input: |n| format!("{n}\n"),
+        expected: |n| format!("{}\n", n * n),
+    },
+    Scenario {
         name: "language",
         sizes: &[125_000, 250_000, 500_000, 1_000_000],
         input: |n| format!("{n}\n"),
@@ -143,7 +149,7 @@ fn measure(s: &Scenario, source: &str, n: u64) -> Result<Measure, String> {
     let input = (s.input)(n);
     let expected = (s.expected)(n);
     let mut runs = Vec::new();
-    for _ in 0..RUNS {
+    for run in 0..=RUNS {
         let lines: Vec<String> = input.lines().map(String::from).collect();
         let pipe = Arc::new(Mutex::new(Pipe {
             lines: lines.into_iter(),
@@ -159,6 +165,9 @@ fn measure(s: &Scenario, source: &str, n: u64) -> Result<Measure, String> {
             return Err(format!("printed {out:?}, where {expected:?} was expected"));
         }
         let work = store.lock().unwrap().work();
+        if run == 0 {
+            continue;
+        }
         runs.push(Measure {
             ms,
             statements,

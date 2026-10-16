@@ -630,7 +630,7 @@ impl Machine {
             rank: value::rank(shape.rank),
             lows,
             dims,
-            cells: vec![fill; size],
+            cells: vec![fill; size].into(),
         }))
     }
 
@@ -829,7 +829,7 @@ impl Machine {
         match &mut var.value {
             Some(Value::Array(a)) => {
                 let i = at(offset(a, &indices), target.name.span)?;
-                a.cells[i] = v;
+                Arc::make_mut(&mut a.cells)[i] = v;
                 Ok(())
             }
             _ => Err(error(
@@ -966,7 +966,7 @@ impl Machine {
                         name: name.clone(),
                         indices: Vec::new(),
                     };
-                    for item in items {
+                    for item in items.iter().cloned() {
                         self.assign(&var, item, f, name.span)?;
                         if let Some(c) = filter
                             && !self.truth(c, f)?
@@ -1066,7 +1066,7 @@ impl Machine {
                 let mut new = Vec::new();
                 for i in items {
                     match self.eval(i, f)? {
-                        Value::List(l) => new.extend(l.items),
+                        Value::List(l) => new.extend(l.items.iter().cloned()),
                         v => new.push(v),
                     }
                 }
@@ -1096,7 +1096,7 @@ impl Machine {
                 let mut out = Vec::new();
                 for i in items {
                     match self.eval(i, f)? {
-                        Value::List(l) => out.extend(l.items),
+                        Value::List(l) => out.extend(l.items.iter().cloned()),
                         v => out.push(v),
                     }
                 }
@@ -1352,7 +1352,7 @@ impl Machine {
     /// else read as a literal, fuzzy ones included.
     fn parse_input(&self, line: &str, ty: &Ty, span: Span) -> Exec<Value> {
         if matches!(ty, Ty::String | Ty::Character) {
-            return Ok(Value::exact(Scalar::String(line.to_string())));
+            return Ok(Value::exact(Scalar::String(line.into())));
         }
         let parsed = lower::parse_fragment(&format!("x := {line}"));
         let value = match parsed.ok().as_ref().map(|p| p.items.as_slice()) {
@@ -1427,7 +1427,7 @@ impl Machine {
                 let mut chars = s.chars();
                 Ok(Value::exact(match (chars.next(), chars.next()) {
                     (Some(c), None) => Scalar::Character(c),
-                    _ => Scalar::String(s.clone()),
+                    _ => Scalar::String(s.clone().into()),
                 }))
             }
             ExprKind::Boolean(b) => Ok(Value::boolean(*b)),
@@ -1562,7 +1562,7 @@ impl Machine {
         let args = args
             .iter()
             .map(|a| match a.scalar() {
-                Some(Scalar::String(s)) => Ok(s.clone()),
+                Some(Scalar::String(s)) => Ok(s.to_string()),
                 Some(Scalar::Character(c)) => Ok(c.to_string()),
                 _ => Err(error(span, format!("`{}` takes strings", name.spelling))),
             })
@@ -1605,7 +1605,7 @@ impl Machine {
                 ..
             }) => {
                 self.system(&s, span)?;
-                Ok(Ok(s))
+                Ok(Ok(s.to_string()))
             }
             Value::One(Fz {
                 x: Scalar::Character(c),
@@ -1804,7 +1804,7 @@ impl Machine {
             if let Some(line) = line {
                 let v = match self.parse_input(line.trim(), &Ty::Unknown, span) {
                     Ok(v) => v,
-                    Err(_) => Value::exact(Scalar::String(line.trim().to_string())),
+                    Err(_) => Value::exact(Scalar::String(line.trim().into())),
                 };
                 stored(self.store.lock().unwrap().set(o, a, v.clone()), span)?;
                 self.trigger(Invoked::Set(o, a), &Frame::default(), span)?;
@@ -2097,7 +2097,7 @@ impl Machine {
             };
             let v = self.eval(args.next().ok_or_else(wrong)?, f)?;
             let text = match v.scalar() {
-                Some(Scalar::String(s)) => s.clone(),
+                Some(Scalar::String(s)) => s.to_string(),
                 _ => return Err(wrong()),
             };
             let code = Code {
@@ -2410,7 +2410,7 @@ impl Machine {
             LetTarget::Property { adt, name } => {
                 let target = self.adt(adt, f, span)?;
                 let text = match v.scalar() {
-                    Some(Scalar::String(s)) => s.clone(),
+                    Some(Scalar::String(s)) => s.to_string(),
                     Some(Scalar::Character(c)) => c.to_string(),
                     _ => {
                         return Err(error(
@@ -2479,7 +2479,7 @@ impl Machine {
         let prefix = match prefix {
             Value::List(mut l) if c.name.key == "SIGMA" => {
                 let store = self.store.lock().unwrap();
-                for item in &mut l.items {
+                for item in Arc::make_mut(&mut l.items).iter_mut() {
                     if let Value::Adt(AdtRef::ObjectAttribute(o, a)) = item {
                         let v = store.get(*o, *a).cloned();
                         *item = v.ok_or_else(|| {
@@ -2568,7 +2568,7 @@ fn constant(c: &Constant) -> Value {
             value::rational(*n as i128, *d as i128).unwrap_or(Scalar::Rational(*n, 1))
         }
         Constant::Boolean(b) => Scalar::Boolean(*b),
-        Constant::String(s) => Scalar::String(s.clone()),
+        Constant::String(s) => Scalar::String(s.clone().into()),
     })
 }
 
