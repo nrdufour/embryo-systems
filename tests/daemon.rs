@@ -926,3 +926,37 @@ fn rules_firing_reach_the_feed() {
     let third = feed.until("\"rules\"");
     assert!(third.contains("\"engine\":\"HYPOCHAV\""), "{third}");
 }
+
+#[test]
+fn real_time_goes_on_after_a_restart() {
+    let dir = store_dir("daemon-real-restart-store");
+    let start = write("daemon-real-restart", "start.adt", COUNTER);
+    let before = {
+        let daemon = Daemon::with(
+            "real-restart",
+            &["--store", &dir, "--pace", "fast", "--horizon", "500"],
+        );
+        assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+        let t = Instant::now();
+        while daemon.now() < 500.0 {
+            assert!(t.elapsed() < Duration::from_secs(20), "time stands still");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        daemon.now()
+    };
+    // Restarted at real time, ten times the clock: it goes on from 500 at
+    // once, not from 0.
+    let daemon = Daemon::with(
+        "real-restart",
+        &["--store", &dir, "--pace", "real", "--factor", "10"],
+    );
+    let t = Instant::now();
+    while daemon.now() <= before {
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "frozen at {}",
+            daemon.now()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}

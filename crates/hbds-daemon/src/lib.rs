@@ -795,7 +795,8 @@ fn executor(
     store.observe();
     let mut told_time = sim.now();
     let mut clock = pace.clock;
-    let mut real_from = (Instant::now(), 0.0);
+    // Real time goes on from the time restored, not from 0.
+    let mut real_from = (Instant::now(), sim.now());
     loop {
         let b = bound(clock, real_from);
         let in_time = |clients: &BTreeMap<u64, Client>, sim: &Sequencing| {
