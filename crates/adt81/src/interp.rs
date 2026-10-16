@@ -130,6 +130,20 @@ pub fn run_counted(
     io: Arc<Mutex<dyn Io>>,
     store: Arc<Mutex<Store>>,
 ) -> Result<u64, RuntimeError> {
+    run_within(program, io, store, None)
+}
+
+/// What the run is refused, by the budget's statement: the VM says the
+/// same, so that a program that never ends is an outcome both share.
+pub const BUDGET_SPENT: &str = "the statement budget is spent";
+
+/// [`run_counted`], stopped at the statement past `budget`, if any.
+pub fn run_within(
+    program: Program,
+    io: Arc<Mutex<dyn Io>>,
+    store: Arc<Mutex<Store>>,
+    budget: Option<u64>,
+) -> Result<u64, RuntimeError> {
     let mut modules = HashMap::new();
     let mut computed = HashMap::new();
     let mut bodies = HashMap::new();
@@ -170,6 +184,7 @@ pub fn run_counted(
         processes: Arc::new(Mutex::new(HashMap::new())),
         role: Role::Main,
         statements: Arc::new(AtomicU64::new(0)),
+        budget,
     };
     // The interpreter recurses (statements, calls, CONDs and ACTIONs): it
     // runs on a thread of its own, with the stack that takes.
@@ -393,6 +408,8 @@ struct Machine {
     role: Role,
     /// Statements executed, on every thread.
     statements: Arc<AtomicU64>,
+    /// How many statements the run may execute.
+    budget: Option<u64>,
 }
 
 /// Who a thread of the interpreter runs for.
@@ -974,7 +991,10 @@ impl Machine {
     }
 
     fn stmt(&self, s: &Stmt, f: &mut Frame) -> Exec<()> {
-        self.statements.fetch_add(1, Ordering::Relaxed);
+        let done = self.statements.fetch_add(1, Ordering::Relaxed) + 1;
+        if self.budget.is_some_and(|b| done > b) {
+            return Err(error(s.span, BUDGET_SPENT));
+        }
         match &s.kind {
             StmtKind::Assign { target, value } => {
                 let v = self.eval(value, f)?;
@@ -1380,26 +1400,8 @@ impl Machine {
         }
     }
 
-    /// A line of input as a value of type `ty`: text as it is, anything
-    /// else read as a literal, fuzzy ones included.
     fn parse_input(&self, line: &str, ty: &Ty, span: Span) -> Exec<Value> {
-        if matches!(ty, Ty::String | Ty::Character) {
-            return Ok(Value::exact(Scalar::String(line.into())));
-        }
-        let parsed = lower::parse_fragment(&format!("x := {line}"));
-        let value = match parsed.ok().as_ref().map(|p| p.items.as_slice()) {
-            Some(
-                [
-                    Item::Stmt(Stmt {
-                        kind: StmtKind::Assign { value, .. },
-                        ..
-                    }),
-                ],
-            ) => value.clone(),
-            _ => return Err(error(span, format!("READ cannot read {line:?}"))),
-        };
-        self.eval(&value, &mut Frame::default())
-            .map_err(|_| error(span, format!("READ cannot read {line:?}")))
+        input(line, ty).map_err(|m| error(span, m))
     }
 
     // Expressions
@@ -1455,13 +1457,7 @@ impl Machine {
                 }
                 Ok(Value::Many(out))
             }
-            ExprKind::String(s) => {
-                let mut chars = s.chars();
-                Ok(Value::exact(match (chars.next(), chars.next()) {
-                    (Some(c), None) => Scalar::Character(c),
-                    _ => Scalar::String(s.clone().into()),
-                }))
-            }
+            ExprKind::String(s) => Ok(string(s)),
             ExprKind::Boolean(b) => Ok(Value::boolean(*b)),
             ExprKind::This => f.this.map(Value::Adt).ok_or_else(|| {
                 error(
@@ -2563,6 +2559,71 @@ fn offset(a: &value::Array, indices: &[i64]) -> Computed<usize> {
     Ok(at)
 }
 
+/// A line of input as a value of type `ty`: text as it is, anything else
+/// a constant, a literal (fuzzy ones included) or an expression of them
+/// and the math functions. The VM reads with it too.
+pub fn input(line: &str, ty: &Ty) -> Result<Value, String> {
+    if matches!(ty, Ty::String | Ty::Character) {
+        return Ok(Value::exact(Scalar::String(line.into())));
+    }
+    let cannot = || format!("READ cannot read {line:?}");
+    let parsed = lower::parse_fragment(&format!("x := {line}"));
+    let value = match parsed.ok().as_ref().map(|p| p.items.as_slice()) {
+        Some(
+            [
+                Item::Stmt(Stmt {
+                    kind: StmtKind::Assign { value, .. },
+                    ..
+                }),
+            ],
+        ) => value.clone(),
+        _ => return Err(cannot()),
+    };
+    constant_value(&value).map_err(|_| cannot())
+}
+
+/// A constant expression's value: literals, operators and the math
+/// functions; nothing that reads a variable, a module or the store.
+fn constant_value(e: &Expr) -> Computed<Value> {
+    let not_constant = || value::Fault("not a constant".into());
+    match &e.kind {
+        ExprKind::Number(n) => Ok(Value::One(literal(n)?)),
+        ExprKind::Multiple(values) => {
+            let mut out = Vec::new();
+            for (negative, n) in values {
+                let fz = literal(n)?;
+                out.push(if *negative {
+                    value::unary_fz(UnaryOp::Neg, &fz)?
+                } else {
+                    fz
+                });
+            }
+            Ok(Value::Many(out))
+        }
+        ExprKind::String(s) => Ok(string(s)),
+        ExprKind::Boolean(b) => Ok(Value::boolean(*b)),
+        ExprKind::Unary(op, x) => value::unary(*op, &constant_value(x)?),
+        ExprKind::Binary(op, l, r) => value::binary(*op, &constant_value(l)?, &constant_value(r)?),
+        ExprKind::Call(c) if builtins::is_function(&c.name.key) => match c.args.as_slice() {
+            [arg] => match constant_value(arg)? {
+                Value::One(x) => math(&c.name.key, &x).map(Value::One),
+                _ => Err(not_constant()),
+            },
+            _ => Err(not_constant()),
+        },
+        _ => Err(not_constant()),
+    }
+}
+
+/// A string literal's value: a character if it has one.
+pub fn string(s: &str) -> Value {
+    let mut chars = s.chars();
+    Value::exact(match (chars.next(), chars.next()) {
+        (Some(c), None) => Scalar::Character(c),
+        _ => Scalar::String(s.into()),
+    })
+}
+
 fn real(r: &Real) -> f64 {
     match r {
         Real::Integer(i) => *i as f64,
@@ -2570,7 +2631,7 @@ fn real(r: &Real) -> f64 {
     }
 }
 
-fn literal(n: &FuzzyNumber) -> Computed<Fz> {
+pub fn literal(n: &FuzzyNumber) -> Computed<Fz> {
     let int = |i: u64| i64::try_from(i).map_err(|_| value::Fault("integer overflow".into()));
     let x = match n.value {
         Number::Real(Real::Integer(i)) => Scalar::Integer(int(i)?),
@@ -2588,7 +2649,7 @@ fn literal(n: &FuzzyNumber) -> Computed<Fz> {
     })
 }
 
-fn constant(c: &Constant) -> Value {
+pub fn constant(c: &Constant) -> Value {
     Value::exact(match c {
         Constant::Integer(i) => Scalar::Integer(*i),
         Constant::Float(x) => Scalar::Float(*x),
@@ -2604,7 +2665,7 @@ fn constant(c: &Constant) -> Value {
 }
 
 /// Our math functions, each with its derivative for the approximation.
-fn math(key: &str, x: &Fz) -> Computed<Fz> {
+pub fn math(key: &str, x: &Fz) -> Computed<Fz> {
     let integral = |fz: Fz| -> Computed<Fz> {
         match fz.x {
             Scalar::Float(v) if v.abs() < 9.2e18 => Ok(Fz {
