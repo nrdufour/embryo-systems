@@ -34,6 +34,7 @@ cargo run -q -- store /tmp/hydro                                   # what the st
 | `embryo-systems daemon --socket SOCKET [--store DIR]` | serves a store on a Unix socket; `run`, `exec` and built programs take `--connect SOCKET` to run there, clients taking turns |
 | `embryo-systems build FILE -o OUT` | writes OUT, an executable carrying the program: `OUT [--store DIR]` runs it, anywhere on this platform |
 | `embryo-systems check FILE` | undeclared and misused names, type errors |
+| `embryo-systems compact DIR` | rewrites a store's journal as the shortest that rebuilds it |
 | `embryo-systems store DIR` | prints a store's contents |
 | `embryo-systems fmt FILE` | the program in canonical form |
 | `embryo-systems parse FILE`, `lex FILE` | the syntax tree, the tokens |

@@ -62,7 +62,11 @@ Taken on 2026-10-15:
   made it goes on, as ZE forces its writes (page 103). Opening a store
   replays its journal through the same code that recorded it. A last line
   cut short by a crash is dropped, with a warning; a corrupt line elsewhere
-  stops the opening, naming the line. Compaction is for later.
+  stops the opening, naming the line. Since 2026-10-16 (version 2 of the
+  journal) each transaction ends with a `commit` line, and one a crash
+  left without it is dropped whole; in the daemon a thread of its own
+  syncs what queues up together, and the journal is compacted, rewritten
+  as the shortest one rebuilding the store (`embryo-systems compact DIR`).
 - **One opening at a time.** An open store holds a lock on `DIR/lock`, so
   a second run, or `store DIR`, on it is refused instead of writing the
   same journal. The system releases the lock when the process ends, even
