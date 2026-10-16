@@ -202,6 +202,11 @@ impl<'t> Reader<'t> {
         self.terms.next().ok_or_else(|| "a term is missing".into())
     }
 
+    /// Whether terms are left.
+    pub fn more(&self) -> bool {
+        self.terms.len() > 0
+    }
+
     pub fn word(&mut self) -> Result<&'t str, String> {
         match self.term()? {
             Term::Word(w) => Ok(w),

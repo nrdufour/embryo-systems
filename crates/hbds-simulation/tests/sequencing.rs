@@ -153,3 +153,31 @@ fn processes_known_and_recorded() {
     assert_eq!(stored(&store, p, STATE).unwrap().to_string(), "PASSIVE");
     assert_eq!(stored(&store, p, CLOCK).unwrap().to_string(), "7.5");
 }
+
+#[test]
+fn a_set_saves_and_restores_without_its_clients() {
+    let mut s = Sequencing::kernel();
+    s.run_as(Agent::Client(7));
+    s.reactivate(Agent::Process(3), When::At(2.5), &d).unwrap();
+    s.reactivate(Agent::Process(4), When::Now, &d).unwrap();
+    s.hold(1.0).unwrap();
+    assert_eq!(s.advance(), Some(Agent::Process(4)));
+    s.hold(4.0).unwrap();
+    let text = s.save();
+    let back = Sequencing::restore(&text).unwrap();
+    assert_eq!(back.now(), s.now());
+    // The client's agent is gone; the processes are due as they were.
+    let due: Vec<_> = s
+        .due()
+        .into_iter()
+        .filter(|(_, a)| !matches!(a, Agent::Client(_)))
+        .collect();
+    assert_eq!(back.due(), due);
+    assert_eq!(back.clock(Agent::Process(3)), 2.5);
+    assert_eq!(back.owner(Agent::Process(4)), None);
+    assert!(!back.knows(Agent::Client(7)));
+    assert_eq!(
+        Sequencing::restore(&back.save()).unwrap().save(),
+        back.save()
+    );
+}

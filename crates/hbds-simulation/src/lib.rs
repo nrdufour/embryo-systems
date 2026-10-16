@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use hbds_core::terms::{Reader, Term, float, list, read_terms, word, write_term};
 use hbds_core::value::{Scalar, Value};
 use hbds_core::{AdtRef, Id, same};
 use hbds_gtad::{ClassKind, Store, Stored};
@@ -351,6 +352,131 @@ impl Sequencing {
         self.current = a;
         self.set_state(a, State::Active, t);
         Some(a)
+    }
+}
+
+fn agent_term(a: Agent) -> Term {
+    match a {
+        Agent::Main => list(vec![word("main")]),
+        Agent::Process(p) => list(vec![word("process"), word(p)]),
+        Agent::Client(c) => list(vec![word("client"), word(c)]),
+    }
+}
+
+fn read_agent(r: &mut Reader) -> Result<Agent, String> {
+    let mut a = r.list()?;
+    let agent = match a.word()? {
+        "main" => Agent::Main,
+        "process" => Agent::Process(a.id()?),
+        "client" => Agent::Client(a.parse()?),
+        w => return Err(format!("{w:?} is not an agent")),
+    };
+    a.end()?;
+    Ok(agent)
+}
+
+const STATES: [(State, &str); 4] = [
+    (State::Active, "active"),
+    (State::Hold, "hold"),
+    (State::Passive, "passive"),
+    (State::Terminated, "terminated"),
+];
+
+impl Sequencing {
+    /// The set as text, for the daemon's journal (docs/architecture.md,
+    /// decision 5): the time, who runs, who is due when, every agent's
+    /// state and clock, the owners and the clients in time.
+    pub fn save(&self) -> String {
+        let state = |s: State| word(STATES.iter().find(|(t, _)| *t == s).expect("a state").1);
+        let terms = [
+            float(self.now),
+            agent_term(self.current),
+            list(
+                self.set
+                    .iter()
+                    .map(|(t, a)| list(vec![float(*t), agent_term(*a)]))
+                    .collect(),
+            ),
+            list(
+                (self.states.iter())
+                    .map(|(a, (s, c))| list(vec![agent_term(*a), state(*s), float(*c)]))
+                    .collect(),
+            ),
+            list(
+                (self.owners.iter())
+                    .map(|(p, o)| list(vec![agent_term(*p), agent_term(*o)]))
+                    .collect(),
+            ),
+            list(self.engaged.iter().map(|a| agent_term(*a)).collect()),
+        ];
+        let mut out = String::new();
+        for (i, t) in terms.iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            write_term(t, &mut out);
+        }
+        out
+    }
+
+    /// The set `save` wrote, without the clients: they did not outlive
+    /// the daemon that ran them.
+    pub fn restore(text: &str) -> Result<Sequencing, String> {
+        let terms = read_terms(text)?;
+        let mut r = Reader::new(&terms);
+        let now = r.parse::<f64>()?;
+        let current = read_agent(&mut r)?;
+        let mut set = Vec::new();
+        let mut items = r.list()?;
+        while items.more() {
+            let mut i = items.list()?;
+            set.push((i.parse::<f64>()?, read_agent(&mut i)?));
+            i.end()?;
+        }
+        let mut states = BTreeMap::new();
+        let mut items = r.list()?;
+        while items.more() {
+            let mut i = items.list()?;
+            let a = read_agent(&mut i)?;
+            let w = i.word()?;
+            let s = STATES
+                .iter()
+                .find(|(_, n)| *n == w)
+                .ok_or(format!("{w:?} is not a state"))?
+                .0;
+            states.insert(a, (s, i.parse::<f64>()?));
+            i.end()?;
+        }
+        let mut owners = BTreeMap::new();
+        let mut items = r.list()?;
+        while items.more() {
+            let mut i = items.list()?;
+            owners.insert(read_agent(&mut i)?, read_agent(&mut i)?);
+            i.end()?;
+        }
+        let mut engaged = BTreeSet::new();
+        let mut items = r.list()?;
+        while items.more() {
+            engaged.insert(read_agent(&mut items)?);
+        }
+        r.end()?;
+        let client = |a: &Agent| matches!(a, Agent::Client(_));
+        set.retain(|(_, a)| !client(a));
+        states.retain(|a, _| !client(a));
+        owners.retain(|_, o| !client(o));
+        engaged.clear();
+        Ok(Sequencing {
+            now,
+            set,
+            states,
+            current: if client(&current) {
+                Agent::Main
+            } else {
+                current
+            },
+            owners,
+            engaged,
+        })
     }
 }
 

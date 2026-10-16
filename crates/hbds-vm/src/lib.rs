@@ -16,6 +16,8 @@ use hbds_acode::{
 };
 use hbds_core::{AdtRef, Id, fold, same};
 use hbds_gtad::{ClassKind, Code, State as AdtState, Store, Stored};
+mod saved;
+
 use hbds_simulation::When;
 /// The sequencing set a turn is lent, and who runs in it.
 pub use hbds_simulation::{Agent, Sequencing};
@@ -157,6 +159,10 @@ pub struct Session {
 struct Owned {
     /// The unit's modules, then those compiled from the store's code.
     modules: Vec<Rc<Module>>,
+    /// Where each module comes from: its unit's hash and its place there;
+    /// none for code the store keeps, compiled. What a saved fiber names
+    /// its modules by.
+    origin: Vec<Option<(String, usize)>>,
     /// Code the store keeps, compiled: by part and text.
     compiled: HashMap<(String, String), usize>,
     /// The functions that compute attributes, by class and attribute.
@@ -176,6 +182,8 @@ struct Owned {
     running: Option<Id>,
     /// The process the kernel's last turn ended on an error, if one did.
     failed: Option<Id>,
+    /// Whether the store's records wait for the running process's pause.
+    holding: bool,
     /// Every fiber; the current one's frames and stack are `frames` and
     /// `stack`.
     fibers: Vec<Fiber>,
@@ -221,6 +229,7 @@ impl Session {
     fn empty(budget: Option<u64>, mode: Mode) -> Session {
         let o = Owned {
             modules: Vec::new(),
+            origin: Vec::new(),
             compiled: HashMap::new(),
             computed: HashMap::new(),
             bodies: HashMap::new(),
@@ -237,6 +246,7 @@ impl Session {
             },
             running: None,
             failed: None,
+            holding: false,
             fibers: vec![Fiber::new(Role::Main, None)],
             current: 0,
             coroutines: HashMap::new(),
@@ -260,7 +270,9 @@ impl Session {
     /// already running keep theirs (decision 10). Where they start.
     pub fn load(&mut self, unit: Unit) -> usize {
         let offset = self.o.modules.len();
+        let hash = hbds_core::sha1::hex(unit.text().as_bytes());
         for (i, m) in unit.modules.iter().enumerate() {
+            self.o.origin.push(Some((hash.clone(), i)));
             let mut m = m.clone();
             relocate(&mut m, offset);
             if let Some(key) = &m.computes {
@@ -452,6 +464,7 @@ impl Vm<'_> {
                 self.sim.run_as(Agent::Process(p));
                 let _ = self.sim.terminate();
                 self.o.failed = Some(p);
+                let _ = self.checkpoint();
             }
         }
         match exit? {
@@ -905,6 +918,31 @@ impl<'r> Vm<'r> {
         }
     }
 
+    /// A pause in the kernel: what the process wrote since it last paused
+    /// is journalled in one write with the fibers and the set as they now
+    /// are, so that after a crash it resumes here, and nothing runs twice.
+    fn checkpoint(&mut self) -> Run<()> {
+        if !std::mem::take(&mut self.o.holding) {
+            return Ok(());
+        }
+        let fibers = Session::save_fibers_of(self.o).map_err(Failure::from)?;
+        let extra = vec![
+            hbds_gtad::Change::Fibers { text: fibers },
+            hbds_gtad::Change::Sequencing {
+                text: self.sim.save(),
+            },
+        ];
+        stored(self.store.release_records(extra))
+    }
+
+    /// A client changed the store's set: kept with what it did.
+    fn keep_sequencing(&mut self) -> Run<()> {
+        if let Mode::Client(_) = self.o.mode {
+            stored(self.store.keep_sequencing(self.sim.save()))?;
+        }
+        Ok(())
+    }
+
     /// The agent the main fiber is: the main program, or a client's.
     fn me(&self) -> Agent {
         match self.o.mode {
@@ -938,6 +976,9 @@ impl<'r> Vm<'r> {
     /// its bound, or at a client due.
     fn dispatch(&mut self) -> Run<Option<Stop>> {
         let at = self.o.held_at;
+        if self.o.mode == Mode::Kernel {
+            self.checkpoint()?;
+        }
         let next = match self.o.mode {
             Mode::Client(_) => return Ok(Some(Stop::Held)),
             Mode::Standalone => self.sim.advance(),
@@ -961,6 +1002,10 @@ impl<'r> Vm<'r> {
                 if self.o.mode == Mode::Kernel {
                     let owner = self.sim.owner(Agent::Process(p));
                     self.io.running(owner);
+                    // Its writes wait for its pause, to be journalled with
+                    // what it then is (decision 5).
+                    self.store.hold_records();
+                    self.o.holding = true;
                 }
                 let fiber = match self.o.processes.get(&p) {
                     Some(&f) => f,
@@ -1335,6 +1380,7 @@ impl<'r> Vm<'r> {
         let mut module = self.language.compile(part, text, what, self.unit)?;
         relocate(&mut module, self.offset);
         self.o.modules.push(Rc::new(module));
+        self.o.origin.push(None);
         let m = self.o.modules.len() - 1;
         self.o.compiled.insert(key, m);
         Ok(m)
@@ -2343,19 +2389,23 @@ impl<'r> Vm<'r> {
                 };
                 let p = self.pop_process();
                 self.sim_op(|sim, d| sim.reactivate(p, when, d))?;
+                self.keep_sequencing()?;
             }
             Instr::Cancel => {
                 let p = self.pop_process();
                 self.sim_op(|sim, d| sim.cancel(p, d))?;
+                self.keep_sequencing()?;
             }
             Instr::Kill => {
                 let p = self.pop_process();
                 self.sim_op(|sim, d| sim.kill(p, d))?;
+                self.keep_sequencing()?;
             }
             Instr::Delay => {
                 let dt = self.pop_time();
                 let p = self.pop_process();
                 self.sim_op(|sim, d| sim.delay(p, dt, d))?;
+                self.keep_sequencing()?;
             }
             Instr::Running(what) => {
                 self.running(what)?;
@@ -2373,6 +2423,7 @@ impl<'r> Vm<'r> {
             Instr::Hold => {
                 let dt = self.pop_time();
                 self.sim_op(|sim, _| sim.hold(dt))?;
+                self.keep_sequencing()?;
                 if let Some(stop) = self.give_way(span)? {
                     return Ok(Next::Stop(stop));
                 }

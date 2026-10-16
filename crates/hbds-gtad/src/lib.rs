@@ -24,6 +24,16 @@ pub trait Recorder: Send {
     fn record_all(&mut self, changes: &[Change]) -> Result<(), String> {
         changes.iter().try_for_each(|c| self.record(c))
     }
+
+    /// From now on, what is recorded waits, in order, for [`release`](
+    /// Recorder::release): the daemon's kernel, between a process's two
+    /// pauses (docs/architecture.md, decision 5).
+    fn hold(&mut self) {}
+
+    /// What waited, then `extra`, as one transaction.
+    fn release(&mut self, extra: &[Change]) -> Result<(), String> {
+        self.record_all(extra)
+    }
 }
 
 /// Properties of an a.d.t., set by a program: pages 156 to 158.
@@ -204,6 +214,14 @@ pub enum Change {
         hash: String,
         text: String,
     },
+    /// The daemon's kernel's fibers, and its sequencing set, as their
+    /// engines write them: the last one kept (decision 5).
+    Fibers {
+        text: String,
+    },
+    Sequencing {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -232,6 +250,9 @@ pub struct Store {
     associations: Vec<(AdtRef, AdtRef)>,
     /// The modules kept, by hash, in the order they came.
     modules: Vec<(String, String)>,
+    /// The kernel's fibers and sequencing set, last kept.
+    fibers: Option<String>,
+    sequencing: Option<String>,
     ix: Indexes,
     recorder: Option<Box<dyn Recorder>>,
     transaction: Option<Transaction>,
@@ -272,6 +293,8 @@ struct Snapshot {
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
     modules: Vec<(String, String)>,
+    fibers: Option<String>,
+    sequencing: Option<String>,
     ix: Indexes,
 }
 
@@ -525,6 +548,8 @@ impl Store {
             object_links: self.object_links.clone(),
             associations: self.associations.clone(),
             modules: self.modules.clone(),
+            fibers: self.fibers.clone(),
+            sequencing: self.sequencing.clone(),
             ix: self.ix.clone(),
         }
     }
@@ -538,6 +563,8 @@ impl Store {
         self.object_links.restore(s.object_links);
         self.associations = s.associations;
         self.modules = s.modules;
+        self.fibers = s.fibers;
+        self.sequencing = s.sequencing;
         self.ix.restore(s.ix);
     }
 
@@ -742,6 +769,8 @@ impl Store {
                     self.modules.push((hash, text));
                 }
             }
+            Change::Fibers { text } => self.fibers = Some(text),
+            Change::Sequencing { text } => self.sequencing = Some(text),
             Change::Assoc { a, b } => {
                 if !self.associations.contains(&(a, b)) {
                     self.associations.push((a, b));
@@ -1482,6 +1511,40 @@ impl Store {
         &self.modules
     }
 
+    /// The kernel's fibers and sequencing set, as last kept.
+    pub fn fibers(&self) -> Option<&str> {
+        self.fibers.as_deref()
+    }
+
+    pub fn sequencing(&self) -> Option<&str> {
+        self.sequencing.as_deref()
+    }
+
+    /// Keeps the sequencing set as a client changed it.
+    pub fn keep_sequencing(&mut self, text: String) -> Stored<()> {
+        self.commit(Change::Sequencing { text })
+    }
+
+    /// From now on, what is recorded waits for [`release_records`](
+    /// Store::release_records), in order.
+    pub fn hold_records(&mut self) {
+        if let Some(r) = &mut self.recorder {
+            r.hold();
+        }
+    }
+
+    /// Applies `extra`, then records what waited and `extra` as one
+    /// transaction.
+    pub fn release_records(&mut self, extra: Vec<Change>) -> Stored<()> {
+        for c in &extra {
+            self.apply(c.clone());
+        }
+        match &mut self.recorder {
+            Some(r) => r.release(&extra).map_err(Error),
+            None => Ok(()),
+        }
+    }
+
     /// The shortest sequence of changes that rebuilds this store, ids
     /// kept: what compaction writes (docs/architecture.md, decision 5).
     pub fn changes(&self) -> Vec<Change> {
@@ -1599,6 +1662,12 @@ impl Store {
                 hash: hash.clone(),
                 text: text.clone(),
             });
+        }
+        if let Some(text) = &self.fibers {
+            out.push(Change::Fibers { text: text.clone() });
+        }
+        if let Some(text) = &self.sequencing {
+            out.push(Change::Sequencing { text: text.clone() });
         }
         let states = (self
             .classes
