@@ -727,3 +727,108 @@ fn an_administrator_kills_a_session() {
     );
     assert_eq!(within(spawn(daemon.client(&short)), 20), "short\n");
 }
+
+impl Daemon {
+    /// A GET's whole answer, head and body.
+    fn raw(&self, path: &str) -> String {
+        let mut s = UnixStream::connect(&self.socket).unwrap();
+        write!(s, "GET {path} HTTP/1.1\r\n\r\n").unwrap();
+        let mut text = String::new();
+        s.read_to_string(&mut text).unwrap();
+        text
+    }
+}
+
+#[test]
+fn the_page_is_served() {
+    let daemon = Daemon::start("page");
+    for (path, kind, has) in [
+        (
+            "/",
+            "text/html",
+            "<script type=\"module\" src=\"/app.js\"></script>",
+        ),
+        ("/app.js", "text/javascript", "/events"),
+        ("/style.css", "text/css", "prefers-color-scheme"),
+    ] {
+        let answer = daemon.raw(path);
+        assert!(answer.starts_with("HTTP/1.1 200 OK"), "{path}: {answer}");
+        assert!(
+            answer.contains(&format!("content-type: {kind}")),
+            "{path}: {answer}"
+        );
+        assert!(answer.contains(has), "{path}");
+    }
+    assert!(daemon.raw("/nothing").starts_with("HTTP/1.1 404"));
+}
+
+#[test]
+fn the_schema_and_the_processes_as_json() {
+    let daemon = Daemon::with("schema", &["--pace", "paused"]);
+    let builds = write(
+        "daemon-schema",
+        "builds.adt",
+        "program builds ;\nbegin\n        create \"town\", \"river\", \"place\" ;\n        create \"town\" . \"size\", \"river\" . \"length\" ;\n        include \"town\" into \"place\" ;\n        create \"river\" \"crosses\" \"town\" reverse \"crossed by\" ;\n        create \"lyon\" [ \"town\" ], \"vienne\" [ \"town\" ]\nend ;\n",
+    );
+    assert_eq!(within(spawn(daemon.client(&builds)), 20), "");
+    let schema = hbds_http::json::Json::parse(&daemon.get("/schema")).unwrap();
+    let classes = match schema.get("classes") {
+        Some(hbds_http::json::Json::Array(c)) => c.clone(),
+        s => panic!("{s:?}"),
+    };
+    let town = (classes.iter())
+        .find(|c| c.get("name").and_then(|n| n.as_str()) == Some("town"))
+        .expect("town");
+    assert_eq!(town.get("attributes").unwrap().to_string(), "[\"size\"]");
+    assert_eq!(town.get("objects").unwrap().to_string(), "2");
+    let place = (classes.iter())
+        .find(|c| c.get("name").and_then(|n| n.as_str()) == Some("place"))
+        .expect("place");
+    assert_eq!(
+        town.get("hyper").unwrap().to_string(),
+        format!("[{}]", place.get("id").unwrap())
+    );
+    let links = schema.get("links").unwrap().to_string();
+    assert!(
+        links.contains("\"relation\":\"crosses\",\"reverse\":\"crossed by\""),
+        "{links}"
+    );
+    // A process, as /time shows it.
+    let start = write("daemon-schema", "start.adt", COUNTER);
+    assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+    let time = daemon.get("/time");
+    assert!(
+        time.contains("\"processes\":[{\"clock\":0,\"name\":\"w1[w]\",\"state\":\"HOLD\"}]"),
+        "{time}"
+    );
+}
+
+#[test]
+fn the_ui_forwards_to_the_socket() {
+    let daemon = Daemon::start("forward");
+    let mut ui = Command::new(BIN)
+        .args(["ui", "--connect", daemon.socket(), "--port", "0"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut url = String::new();
+    BufReader::new(ui.stdout.take().unwrap())
+        .read_line(&mut url)
+        .unwrap();
+    let address = url
+        .trim()
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string();
+    let mut tcp = std::net::TcpStream::connect(&address).unwrap();
+    write!(tcp, "GET /schema HTTP/1.1\r\n\r\n").unwrap();
+    let mut answer = String::new();
+    tcp.read_to_string(&mut answer).unwrap();
+    let _ = ui.kill();
+    let _ = ui.wait();
+    assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
+    assert!(
+        answer.ends_with("{\"classes\":[],\"links\":[]}\n"),
+        "{answer}"
+    );
+}

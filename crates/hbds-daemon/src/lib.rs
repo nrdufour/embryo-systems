@@ -58,6 +58,7 @@ enum Msg {
     /// The pace set, if given; what it is now, answered.
     Pace(Option<Clock>, Sender<String>),
     Time(Sender<String>),
+    Schema(Sender<String>),
 }
 
 /// How the store's time moves (docs/architecture.md, decision 6).
@@ -374,6 +375,21 @@ fn connection(
             let text = answer.recv().unwrap_or_default();
             Response::text(200, "OK", &format!("{text}\n")).write(&mut writer)
         }
+        ("GET", path) if PAGE.iter().any(|(p, _, _)| *p == path) => {
+            let (_, kind, text) = PAGE.iter().find(|(p, _, _)| *p == path).expect("a file");
+            let mut r = Response::new(200, "OK", *text);
+            r.headers.insert("content-type".into(), kind.to_string());
+            r.write(&mut writer)
+        }
+        ("GET", "/schema") => {
+            let (reply, answer) = mpsc::channel();
+            let _ = tx.send(Msg::Schema(reply));
+            let text = answer.recv().unwrap_or_default();
+            let mut r = Response::new(200, "OK", format!("{text}\n"));
+            r.headers
+                .insert("content-type".into(), "application/json".into());
+            r.write(&mut writer)
+        }
         ("GET", "/time") => {
             let (reply, answer) = mpsc::channel();
             let _ = tx.send(Msg::Time(reply));
@@ -588,11 +604,110 @@ fn time_json(sim: &Sequencing, store: &Store) -> Json {
             ]))
         })
         .collect();
+    let processes = (sim.processes().into_iter())
+        .filter(|(p, _, _)| store.objects().get(p).is_some())
+        .map(|(p, state, clock)| {
+            Json::Object(BTreeMap::from([
+                ("name".to_string(), Json::String(name(Agent::Process(p)))),
+                (
+                    "state".to_string(),
+                    Json::String(hbds_vm::state_name(state).into()),
+                ),
+                ("clock".to_string(), Json::Number(clock)),
+            ]))
+        })
+        .collect();
     Json::Object(BTreeMap::from([
         ("now".to_string(), Json::Number(sim.now())),
         ("due".to_string(), Json::Array(due)),
+        ("processes".to_string(), Json::Array(processes)),
     ]))
 }
+
+/// The store's model as `GET /schema` gives it: classes with their
+/// attributes, hyperclasses and objects' count; the links between them.
+fn schema_json(store: &Store) -> Json {
+    let n = |x: u64| Json::Number(x as f64);
+    let mut counts: BTreeMap<u64, u64> = BTreeMap::new();
+    for (_, o) in store.objects().iter() {
+        *counts.entry(o.class).or_default() += 1;
+    }
+    let classes = (store.classes().iter())
+        .map(|(&id, c)| {
+            let kind = match &c.kind {
+                hbds_gtad::ClassKind::Class => "class",
+                hbds_gtad::ClassKind::Embryo => "embryo",
+                hbds_gtad::ClassKind::Prototype(_) => "prototype",
+                hbds_gtad::ClassKind::Structure(_) => "structure",
+            };
+            let attributes = (store.attributes_of(id).into_iter())
+                .map(|a| Json::String(store.attributes()[&a].name.clone()))
+                .collect();
+            Json::Object(BTreeMap::from([
+                ("id".to_string(), n(id)),
+                ("name".to_string(), Json::String(c.name.clone())),
+                ("kind".to_string(), Json::String(kind.into())),
+                (
+                    "state".to_string(),
+                    Json::String(hbds_gtad::state_name(c.state).into()),
+                ),
+                (
+                    "hyper".to_string(),
+                    Json::Array(c.hyper.iter().map(|&h| n(h)).collect()),
+                ),
+                ("attributes".to_string(), Json::Array(attributes)),
+                (
+                    "objects".to_string(),
+                    n(counts.get(&id).copied().unwrap_or(0)),
+                ),
+            ]))
+        })
+        .collect();
+    let links = (store.class_links().iter())
+        .filter_map(|(&id, l)| {
+            let relation = l.relation.clone()?;
+            let back = store
+                .class_links()
+                .get(&l.reverse)
+                .and_then(|r| r.relation.clone());
+            // A pair once: from its first direction, when both are named.
+            if back.is_some() && l.reverse < id {
+                return None;
+            }
+            let reverse = back.map_or(Json::Null, Json::String);
+            Some(Json::Object(BTreeMap::from([
+                ("id".to_string(), n(id)),
+                ("from".to_string(), n(l.from)),
+                ("relation".to_string(), Json::String(relation)),
+                ("to".to_string(), n(l.to)),
+                ("reverse".to_string(), reverse),
+            ])))
+        })
+        .collect();
+    Json::Object(BTreeMap::from([
+        ("classes".to_string(), Json::Array(classes)),
+        ("links".to_string(), Json::Array(links)),
+    ]))
+}
+
+/// The page's files, embedded (decision 8).
+const PAGE: [(&str, &str, &str); 3] = [
+    (
+        "/",
+        "text/html; charset=utf-8",
+        include_str!("../ui/index.html"),
+    ),
+    (
+        "/app.js",
+        "text/javascript; charset=utf-8",
+        include_str!("../ui/app.js"),
+    ),
+    (
+        "/style.css",
+        "text/css; charset=utf-8",
+        include_str!("../ui/style.css"),
+    ),
+];
 
 /// The executor: owns the store and its time; runs each ready session
 /// for a slice in turn, round robin, and the kernel's processes between
@@ -760,6 +875,9 @@ fn executor(
                 }
                 Msg::Time(reply) => {
                     let _ = reply.send(time_json(&sim, &store).to_string());
+                }
+                Msg::Schema(reply) => {
+                    let _ = reply.send(schema_json(&store).to_string());
                 }
             }
         }
