@@ -1,12 +1,13 @@
 //! The list engine (project 14; page 80): lists of any values, each with
 //! a cursor, linear or circular; the list functors, which move the cursor
-//! or take an element out; union, intersection and complement. The
-//! arithmetic SIGMA needs is a language's, given to it.
+//! or take an element out; union, intersection and complement. SIGMA
+//! adds as HBDS adds (hbds-values).
 
 use std::sync::Arc;
 
 use hbds_core::value::{List, Scalar, Value};
 use hbds_core::{Functor, Gives, Takes};
+use hbds_values::Op;
 
 use Gives::*;
 use Takes::*;
@@ -50,13 +51,8 @@ fn integer(v: &Value) -> Listed<i64> {
 }
 
 /// A list functor applied to `l`, which the functors that move the cursor
-/// or take an element out change. `add` adds two values, for SIGMA.
-pub fn apply(
-    key: &str,
-    l: &mut List,
-    args: &[Value],
-    add: &dyn Fn(&Value, &Value) -> Listed<Value>,
-) -> Listed<Value> {
+/// or take an element out change.
+pub fn apply(key: &str, l: &mut List, args: &[Value]) -> Listed<Value> {
     let position = |v: &Value, l: &List| -> Listed<usize> {
         let p = integer(v)?;
         match usize::try_from(p) {
@@ -133,7 +129,7 @@ pub fn apply(
         ("SIGMA", []) => {
             let mut sum = Value::integer(0);
             for v in l.items.iter() {
-                sum = add(&sum, v)?;
+                sum = hbds_values::binary(Op::Add, &sum, v).map_err(|f| f.0)?;
             }
             sum
         }
@@ -202,16 +198,9 @@ mod tests {
         List::new(xs.iter().map(|x| Value::integer(*x)).collect())
     }
 
-    fn add(a: &Value, b: &Value) -> Listed<Value> {
-        match (a.scalar(), b.scalar()) {
-            (Some(Scalar::Integer(x)), Some(Scalar::Integer(y))) => Ok(Value::integer(x + y)),
-            _ => Err("integers only".into()),
-        }
-    }
-
     fn run(key: &str, l: &mut List, args: &[i64]) -> Listed<Value> {
         let args: Vec<Value> = args.iter().map(|x| Value::integer(*x)).collect();
-        apply(key, l, &args, &add)
+        apply(key, l, &args)
     }
 
     #[test]

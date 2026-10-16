@@ -13,6 +13,7 @@ dependencies = [
  "hbds-lists",
  "hbds-rules",
  "hbds-simulation",
+ "hbds-values",
 ]
 
 [[package]]
@@ -65,6 +66,7 @@ name = "hbds-lists"
 version = "0.1.0"
 dependencies = [
  "hbds-core",
+ "hbds-values",
 ]
 
 [[package]]
@@ -85,4 +87,11 @@ version = "0.1.0"
 dependencies = [
  "hbds-core",
  "hbds-gtad",
+]
+
+[[package]]
+name = "hbds-values"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
 ]

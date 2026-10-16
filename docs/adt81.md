@@ -311,7 +311,9 @@ PRINT writes its values on one line. A runtime error stops it, with its
 position. Classes, objects, attributes and links live in the HBDS store,
 where COND and ACTION run as they change, rules as CHAV and HYPOCHAV
 chain them, and processes as the main program holds
-([hbds.md](hbds.md)).
+([hbds.md](hbds.md)). Arithmetic, widening, comparisons and fuzziness
+are HBDS's, `crates/hbds-values`, whatever the language; the rules below
+are ADT'81's reading of them.
 
 Decided on 2026-10-15:
 
@@ -382,7 +384,7 @@ expression written as a string), and fragments.
 | `crates/adt81/tests/names.rs` | name resolution, rule by rule |
 | `crates/adt81/src/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |
 | `crates/adt81/tests/types.rs` | kinds and types, rule by rule |
-| `crates/adt81/src/value.rs`, `interp.rs` | values and their fuzzy arithmetic, and the interpreter |
+| `crates/adt81/src/value.rs`, `interp.rs` | ADT'81's operators and types mapped onto `crates/hbds-values`, and the interpreter |
 | `crates/adt81/src/uses.rs` | what a rule's code reads or writes, compiled when it is written, for SES |
 | `crates/adt81/tests/corpus/run/` | programs with their input and expected output, runtime errors included |
 | `crates/adt81/tests/run.rs` | runs them |

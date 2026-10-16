@@ -1,0 +1,11 @@
+[package]
+name = "hbds-values"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# What operations do to values (docs/architecture.md, decision 4): every
+# number type, fuzziness propagated (pages 152, 153), arrays.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
