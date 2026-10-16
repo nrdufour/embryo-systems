@@ -24,6 +24,7 @@ pub fn check_types(program: &Program, resolution: &Resolution) -> Vec<Diagnostic
             module,
             scope,
             diagnostics: &mut diagnostics,
+            loops: 0,
         };
         c.module();
     }
@@ -37,6 +38,8 @@ struct Checker<'c> {
     module: &'c Module,
     scope: &'c Scope,
     diagnostics: &'c mut Vec<Diagnostic>,
+    /// The loops around the statement being checked, in its module.
+    loops: usize,
 }
 
 /// What a called name stands for.
@@ -44,6 +47,22 @@ enum Callee<'c> {
     Module(&'c Module),
     External(&'c ExternalKind),
     Unknown,
+}
+
+/// EXIT, NEXT and RELOOP count the loops around them in their module
+/// (docs/adt81.md, "Running").
+pub fn too_far(kind: ExitKind, n: i64, loops: usize) -> String {
+    let word = match kind {
+        ExitKind::Exit => "EXIT",
+        ExitKind::Next => "NEXT",
+        ExitKind::Reloop => "RELOOP",
+    };
+    let around = match loops {
+        0 => "no loop is around it".to_string(),
+        1 => "one loop is around it".to_string(),
+        k => format!("{k} loops are around it"),
+    };
+    format!("{word} {n} counts {n} loop(s), and {around} in its module")
 }
 
 fn returns_of_module(m: &Module) -> Typed {
@@ -181,6 +200,12 @@ impl<'c> Checker<'c> {
         self.stmts(&self.module.body);
     }
 
+    fn loop_body(&mut self, body: &[Stmt]) {
+        self.loops += 1;
+        self.stmts(body);
+        self.loops -= 1;
+    }
+
     fn stmts(&mut self, stmts: &[Stmt]) {
         for s in stmts {
             self.stmt(s);
@@ -243,7 +268,7 @@ impl<'c> Checker<'c> {
                 if let Some(c) = condition {
                     self.condition(c);
                 }
-                self.stmts(body);
+                self.loop_body(body);
                 if let Some(u) = until {
                     self.condition(u);
                 }
@@ -277,11 +302,11 @@ impl<'c> Checker<'c> {
                 if let Some(f) = filter {
                     self.condition(f);
                 }
-                self.stmts(body);
+                self.loop_body(body);
             }
             StmtKind::Vect { range, body } => {
                 self.range(range);
-                self.stmts(body);
+                self.loop_body(body);
             }
             StmtKind::Parallel(branches) => {
                 for b in branches {
@@ -316,10 +341,25 @@ impl<'c> Checker<'c> {
                     self.stmts(o);
                 }
             }
-            StmtKind::Exit { count, .. } => {
+            StmtKind::Exit { kind, count } => {
                 if let Some(c) = count {
                     let t = self.expr(c);
                     self.expect(&t, &Ty::Integer, "the number of loops", c.span);
+                }
+                // A count written out is checked here, a computed one when
+                // it runs.
+                let n = match count.as_ref().map(|c| &c.kind) {
+                    None => Some(1),
+                    Some(ExprKind::Number(FuzzyNumber {
+                        value: Number::Real(Real::Integer(n)),
+                        ..
+                    })) => Some(*n),
+                    _ => None,
+                };
+                if let Some(n) = n
+                    && n > self.loops as u64
+                {
+                    self.error(s.span, too_far(*kind, n as i64, self.loops));
                 }
             }
             StmtKind::Return

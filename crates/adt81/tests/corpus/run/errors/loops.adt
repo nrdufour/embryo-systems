@@ -1,0 +1,12 @@
+-- Runtime error: a computed EXIT counts more loops than there are --
+-- around it in its module. --
+
+program e ;
+local n : integer ;
+begin
+        n := 2 ;
+        loop do
+                print "in" ;
+                exit n
+        endloop
+end ;

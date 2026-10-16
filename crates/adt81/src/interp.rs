@@ -313,6 +313,9 @@ struct Frame {
     this: Option<AdtRef>,
     /// How many COND and ACTION this frame runs within.
     depth: usize,
+    /// The loops around the statement running, in this module: what
+    /// EXIT, NEXT and RELOOP may count.
+    loops: usize,
 }
 
 /// The rule code running, for the expert-system engines (docs/hbds.md,
@@ -934,6 +937,42 @@ impl Machine {
         }
     }
 
+    /// EACH: the body for each element of the list `of` gives when it
+    /// starts, those `filter` accepts.
+    fn each(
+        &self,
+        name: &Name,
+        of: &Expr,
+        filter: Option<&Expr>,
+        body: &[Stmt],
+        f: &mut Frame,
+    ) -> Exec<()> {
+        'again: loop {
+            let items = match self.eval(of, f)? {
+                Value::List(l) => l.items,
+                v => return Err(error(of.span, format!("EACH goes over a list, not {v}"))),
+            };
+            let var = Variable {
+                name: name.clone(),
+                indices: Vec::new(),
+            };
+            for item in items.iter().cloned() {
+                self.assign(&var, item, f, name.span)?;
+                if let Some(c) = filter
+                    && !self.truth(c, f)?
+                {
+                    continue;
+                }
+                match self.iteration(body, f)? {
+                    Step::Go => {}
+                    Step::Leave => return Ok(()),
+                    Step::Again => continue 'again,
+                }
+            }
+            return Ok(());
+        }
+    }
+
     fn stmt(&self, s: &Stmt, f: &mut Frame) -> Exec<()> {
         self.statements.fetch_add(1, Ordering::Relaxed);
         match &s.kind {
@@ -946,8 +985,18 @@ impl Machine {
                 condition,
                 body,
                 until,
-            } => self.for_loop(range.as_ref(), condition.as_ref(), body, until.as_ref(), f),
-            StmtKind::Vect { range, body } => self.for_loop(Some(range), None, body, None, f),
+            } => {
+                f.loops += 1;
+                let r = self.for_loop(range.as_ref(), condition.as_ref(), body, until.as_ref(), f);
+                f.loops -= 1;
+                r
+            }
+            StmtKind::Vect { range, body } => {
+                f.loops += 1;
+                let r = self.for_loop(Some(range), None, body, None, f);
+                f.loops -= 1;
+                r
+            }
             StmtKind::Each {
                 name,
                 of,
@@ -957,30 +1006,10 @@ impl Machine {
                 let Some(of) = of else {
                     return Err(not_yet(s.span, "EACH without OF"));
                 };
-                'again: loop {
-                    let items = match self.eval(of, f)? {
-                        Value::List(l) => l.items,
-                        v => return Err(error(of.span, format!("EACH goes over a list, not {v}"))),
-                    };
-                    let var = Variable {
-                        name: name.clone(),
-                        indices: Vec::new(),
-                    };
-                    for item in items.iter().cloned() {
-                        self.assign(&var, item, f, name.span)?;
-                        if let Some(c) = filter
-                            && !self.truth(c, f)?
-                        {
-                            continue;
-                        }
-                        match self.iteration(body, f)? {
-                            Step::Go => {}
-                            Step::Leave => return Ok(()),
-                            Step::Again => continue 'again,
-                        }
-                    }
-                    return Ok(());
-                }
+                f.loops += 1;
+                let r = self.each(name, of, filter.as_ref(), body, f);
+                f.loops -= 1;
+                r
             }
             StmtKind::Parallel(branches) => {
                 for b in branches {
@@ -1031,6 +1060,9 @@ impl Machine {
                 };
                 if n < 1 {
                     return Err(error(s.span, "a number of loops is at least 1"));
+                }
+                if n > f.loops as i64 {
+                    return Err(error(s.span, crate::typeck::too_far(*kind, n, f.loops)));
                 }
                 Err(match kind {
                     ExitKind::Exit => Flow::Exit(n),

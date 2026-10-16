@@ -342,6 +342,12 @@ Defaults taken, the print being silent:
 - PARBEGIN's branches and VECT's iterations run in order.
 - `EXIT n` leaves n loops, `NEXT n` goes on with the n-th loop's next
   iteration, `RELOOP n` restarts the n-th loop; EACH and VECT are loops.
+- **They count the loops around them in their own module** (decided
+  2026-10-15), as in Pascal or Ada: a procedure's EXIT does not leave
+  its caller's loops. More than there are is an error, found by the
+  checker when the count is written out and at run time when it is
+  computed. The reference first let these escape through calls, an
+  accident of how it was written that the VM would have had to copy.
 - PAUSE outside a coroutine waits for a line of input, as FORTRAN's did;
   STOP ends the program, RESTART runs it again, `CHAIN Q` ends it and runs
   the program Q. REPROC is an error: what it does is not established.

@@ -46,6 +46,22 @@ fn assert_body(statements: &str, expected: &[&str]) {
     assert_eq!(body(LOCALS, statements), expected, "\n{statements}");
 }
 
+/// EXIT, NEXT and RELOOP count the loops around them in their module: a
+/// count written out is checked, a computed one is left to the run.
+#[test]
+fn loops_counted_lexically() {
+    assert_body(
+        "exit",
+        &["1:1: error: EXIT 1 counts 1 loop(s), and no loop is around it in its module"],
+    );
+    assert_body(
+        "loop do next 2 endloop",
+        &["1:9: error: NEXT 2 counts 2 loop(s), and one loop is around it in its module"],
+    );
+    assert_body("loop do loop do reloop 2 endloop endloop", &[]);
+    assert_body("loop do exit n endloop", &[]);
+}
+
 #[test]
 fn logic_and_comparison() {
     assert_body(
