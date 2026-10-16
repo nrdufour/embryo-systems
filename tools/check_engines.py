@@ -16,7 +16,7 @@ ALLOWED = {
     "hbds-maps": set(),
     "hbds-values": {"hbds-core"},
     "hbds-acode": {"hbds-core", "hbds-values"},
-    "hbds-vm": {"hbds-core", "hbds-values", "hbds-lists", "hbds-acode"},
+    "hbds-vm": {"hbds-core", "hbds-values", "hbds-lists", "hbds-acode", "hbds-gtad", "hbds-functors", "hbds-rules", "hbds-simulation"},
     "hbds-lists": {"hbds-core", "hbds-values"},
     "hbds-gtad": {"hbds-core", "hbds-maps"},
     "hbds-functors": {"hbds-core", "hbds-gtad"},

@@ -11,3 +11,7 @@ hbds-core = { path = "../hbds-core" }
 hbds-values = { path = "../hbds-values" }
 hbds-lists = { path = "../hbds-lists" }
 hbds-acode = { path = "../hbds-acode" }
+hbds-gtad = { path = "../hbds-gtad" }
+hbds-functors = { path = "../hbds-functors" }
+hbds-rules = { path = "../hbds-rules" }
+hbds-simulation = { path = "../hbds-simulation" }

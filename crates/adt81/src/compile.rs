@@ -5,23 +5,27 @@
 //! `crates/adt81/src/interp.rs` is the specification, and the gate
 //! (`tests/vm.rs`) holds the two together.
 //!
-//! What the VM cannot run yet is [`NotYet`]: the store, the engines,
-//! coroutines and processes (step 4's slices b and c).
+//! What the VM cannot run yet is [`NotYet`]: the expert systems,
+//! coroutines and processes (step 4's slices b2 and c).
 
 use std::collections::HashMap;
 
 use hbds_acode::{
-    Instr, Kind, Leave, ListOp, Mode as AMode, Module as AModule, Param, Place, Slot, SlotType,
-    Span as ASpan, Support, Unit,
+    Instr, Kind, Language, Leave, ListOp, Mode as AMode, Module as AModule, Param, Place, Slot,
+    SlotType, Span as ASpan, StateOp as AState, Unit,
 };
 use hbds_values::{Base, Computed, Fz, Op, Value};
 
 use super::ast::*;
 use super::builtins::{self, Takes};
-use super::interp::{constant, input, literal, math, string};
+use super::interp::{LANGUAGE, constant, input, literal, math, specification, string};
+use super::lower;
 use super::typeck::too_far;
 use super::types::{Ty, Typed};
+use super::uses::{self, Part};
 use super::value;
+use hbds_core::fold;
+use hbds_values::Scalar;
 
 /// What this slice of the compiler leaves to the next, and where.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,10 +50,15 @@ fn at(s: Span) -> ASpan {
     }
 }
 
-/// ADT'81's support module: its math functions, and READ's reading.
+/// ADT'81 to the VM: its support module, its math functions and READ's
+/// reading, and its compiler for the code the store keeps.
 pub struct Adt81;
 
-impl Support for Adt81 {
+impl Language for Adt81 {
+    fn name(&self) -> &str {
+        LANGUAGE
+    }
+
     fn native(&self, name: &str, x: &Fz) -> Computed<Fz> {
         math(name, x)
     }
@@ -57,19 +66,107 @@ impl Support for Adt81 {
     fn read(&self, line: &str) -> Result<Value, String> {
         input(line, &Ty::Unknown)
     }
+
+    fn compile(&self, part: &str, text: &str, what: &str, unit: &Unit) -> Result<AModule, String> {
+        let callees = callees_of(unit);
+        let compiled = match part {
+            // As the reference's trigger reads a COND: an expression, its
+            // fault unsaid.
+            "COND" => {
+                let parsed = lower::parse_fragment(&format!("x := {text}"));
+                match parsed.ok().as_ref().map(|p| p.items.as_slice()) {
+                    Some(
+                        [
+                            Item::Stmt(Stmt {
+                                kind: StmtKind::Assign { value, .. },
+                                ..
+                            }),
+                        ],
+                    ) => Compiler::new(&callees).expression(part, value),
+                    _ => return Err(format!("the COND of {what} does not parse")),
+                }
+            }
+            "ACTION" => match lower::parse_fragment(text) {
+                Ok(f) => Compiler::new(&callees).fragment(part, &f),
+                Err(e) => return Err(format!("the ACTION of {what} does not parse: {e}")),
+            },
+            part => match uses::parse(part, text) {
+                Ok(Part::Expr(e)) => Compiler::new(&callees).expression(part, &e),
+                Ok(Part::Stmts(f)) => Compiler::new(&callees).fragment(part, &f),
+                Err(e) => return Err(format!("the {part} of {what} does not parse: {e}")),
+            },
+        };
+        compiled.map_err(|e| format!("the {part} of {what}: {}: not yet on the VM", e.what))
+    }
+
+    fn check(&self, part: &str, text: &str) -> Result<(), String> {
+        uses::parse(part, text).map(|_| ())
+    }
+}
+
+/// What a call needs to know of a module: where it is in the unit, its
+/// kind, its parameters' modes.
+#[derive(Clone)]
+struct Callee {
+    index: usize,
+    kind: Kind,
+    modes: Vec<Mode>,
+}
+
+/// The modules a unit's code may call, by name.
+fn callees_of(unit: &Unit) -> HashMap<String, Callee> {
+    let mut out = HashMap::new();
+    for (i, m) in unit.modules.iter().enumerate() {
+        if m.computes.is_some() {
+            continue;
+        }
+        let modes = (m.params.iter())
+            .map(|p| match p.mode {
+                AMode::In => Mode::In,
+                AMode::Out => Mode::Out,
+                AMode::InOut => Mode::InOut,
+            })
+            .collect();
+        out.entry(m.name.clone()).or_insert(Callee {
+            index: i,
+            kind: m.kind,
+            modes,
+        });
+    }
+    out
+}
+
+fn kind_of(m: &Module) -> Kind {
+    match m.kind {
+        ModuleKind::Program => Kind::Program,
+        ModuleKind::Subroutine => Kind::Subroutine,
+        ModuleKind::Function { .. } => Kind::Function,
+        ModuleKind::Functor { .. } => Kind::Functor,
+        ModuleKind::Coroutine => Kind::Coroutine,
+    }
 }
 
 /// The program compiled; its first PROGRAM runs first.
 pub fn compile(program: &Program) -> Compiled<Unit> {
-    let mut index = HashMap::new();
+    let mut callees = HashMap::new();
     for (i, m) in program.modules.iter().enumerate() {
         match &m.name {
             ModuleName::Name(n) => {
-                index.entry(n.key.clone()).or_insert(i);
+                let modes = (m.parameters.iter())
+                    .map(|p| {
+                        (m.specifications.iter())
+                            .find(|s| s.names.contains(p))
+                            .map_or(Mode::In, |s| s.mode)
+                    })
+                    .collect();
+                callees.entry(n.key.clone()).or_insert(Callee {
+                    index: i,
+                    kind: kind_of(m),
+                    modes,
+                });
             }
-            ModuleName::Attribute { class, .. } | ModuleName::Body(class) => {
-                return not_yet(class.span, "computed attributes and process bodies");
-            }
+            ModuleName::Attribute { .. } => {}
+            ModuleName::Body(class) => return not_yet(class.span, "process bodies"),
         }
     }
     let Some(first) = (program.modules.iter()).position(|m| m.kind == ModuleKind::Program) else {
@@ -77,7 +174,7 @@ pub fn compile(program: &Program) -> Compiled<Unit> {
     };
     let mut modules = Vec::new();
     for m in &program.modules {
-        modules.push(Compiler::new(program, &index, m).module()?);
+        modules.push(Compiler::new(&callees).module(m)?);
     }
     // The first program first: the VM runs module 0.
     modules.swap(0, first);
@@ -97,9 +194,7 @@ pub fn compile(program: &Program) -> Compiled<Unit> {
 }
 
 struct Compiler<'p> {
-    program: &'p Program,
-    index: &'p HashMap<String, usize>,
-    module: &'p Module,
+    callees: &'p HashMap<String, Callee>,
     slots: Vec<Slot>,
     names: HashMap<String, usize>,
     code: Vec<Instr>,
@@ -137,11 +232,9 @@ fn slot_type(ty: &Ty) -> SlotType {
 }
 
 impl<'p> Compiler<'p> {
-    fn new(program: &'p Program, index: &'p HashMap<String, usize>, module: &'p Module) -> Self {
+    fn new(callees: &'p HashMap<String, Callee>) -> Self {
         Compiler {
-            program,
-            index,
-            module,
+            callees,
             slots: Vec::new(),
             names: HashMap::new(),
             code: Vec::new(),
@@ -201,24 +294,102 @@ impl<'p> Compiler<'p> {
         self.names.get(&n.key).copied()
     }
 
-    fn module_named(&self, n: &Name) -> Option<(usize, &'p Module)> {
-        let i = *self.index.get(&n.key)?;
-        Some((i, &self.program.modules[i]))
+    fn module_named(&self, n: &Name) -> Option<Callee> {
+        self.callees.get(&n.key).cloned()
+    }
+
+    /// Code the store keeps that gives a value: COND and the parts that
+    /// are expressions; a function of no parameter, THIS its object.
+    fn expression(mut self, part: &str, e: &Expr) -> Compiled<AModule> {
+        self.expr(e)?;
+        self.emit(Instr::Result, e.span);
+        Ok(self.finish(part, part, Kind::Function, e.span, None, None, None))
+    }
+
+    /// Code the store keeps that is statements: an ACTION, a rule's YES,
+    /// in the reference's `run_fragment`: a declaration declares when
+    /// reached, a parameter is an error there, RETURN ends it.
+    fn fragment(mut self, part: &str, f: &Fragment) -> Compiled<AModule> {
+        for item in &f.items {
+            match item {
+                Item::Local(d) => {
+                    let ty = Typed::of(&d.ty);
+                    for n in &d.names {
+                        let s = self.declare(n, &ty.ty, false);
+                        if matches!(d.ty, DataType::List(_)) {
+                            let empty = Value::List(value::List::new(Vec::new()));
+                            self.emit(Instr::Const(empty), n.span);
+                            self.emit(Instr::Init(s), n.span);
+                        }
+                    }
+                }
+                Item::Parameter(p) => self.fail(p.span, "an ACTION has no parameters"),
+                Item::Stmt(s) => self.stmt(s)?,
+            }
+        }
+        let end = self.here();
+        self.end_returns(end);
+        self.emit(Instr::Return, Span::default());
+        Ok(self.finish(
+            part,
+            part,
+            Kind::Subroutine,
+            Span::default(),
+            None,
+            None,
+            None,
+        ))
+    }
+
+    fn end_returns(&mut self, end: usize) {
+        for i in 0..end {
+            if self.code[i] == Instr::Jump(PENDING) {
+                self.code[i] = Instr::Jump(end);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish(
+        self,
+        name: &str,
+        spelling: &str,
+        kind: Kind,
+        span: Span,
+        prefix: Option<usize>,
+        result: Option<usize>,
+        computes: Option<(String, String)>,
+    ) -> AModule {
+        AModule {
+            name: name.to_string(),
+            spelling: spelling.to_string(),
+            kind,
+            span: at(span),
+            params: Vec::new(),
+            slots: self.slots,
+            prefix,
+            result,
+            computes,
+            code: self.code,
+            spans: self.spans,
+        }
     }
 
     // Modules: the prologue as `call` in the reference builds the frame.
 
-    fn module(mut self) -> Compiled<AModule> {
-        let m = self.module;
-        let kind = match m.kind {
-            ModuleKind::Program => Kind::Program,
-            ModuleKind::Subroutine => Kind::Subroutine,
-            ModuleKind::Function { .. } => Kind::Function,
-            ModuleKind::Functor { .. } => Kind::Functor,
-            ModuleKind::Coroutine => return not_yet(m.span, "coroutines"),
-        };
-        let ModuleName::Name(name) = &m.name else {
-            unreachable!("only named modules reach here")
+    fn module(mut self, m: &Module) -> Compiled<AModule> {
+        let kind = kind_of(m);
+        if kind == Kind::Coroutine {
+            return not_yet(m.span, "coroutines");
+        }
+        let (name, spelling, computes) = match &m.name {
+            ModuleName::Name(n) => (n.key.clone(), n.spelling.clone(), None),
+            ModuleName::Attribute { class, attribute } => (
+                format!("{}.{}", fold(&class.text), fold(&attribute.text)),
+                format!("\"{}\" . \"{}\"", class.text, attribute.text),
+                Some((fold(&class.text), fold(&attribute.text))),
+            ),
+            ModuleName::Body(_) => unreachable!("refused before"),
         };
         let mut params = Vec::new();
         for (i, p) in m.parameters.iter().enumerate() {
@@ -234,8 +405,8 @@ impl<'p> Compiler<'p> {
             self.emit(Instr::Bind(i, s), p.span);
         }
         let mut result = None;
-        if let ModuleKind::Functor { returns, .. } = &m.kind {
-            result = Some(self.declare(name, &Typed::of(returns).ty, false));
+        if let (ModuleKind::Functor { returns, .. }, ModuleName::Name(n)) = (&m.kind, &m.name) {
+            result = Some(self.declare(n, &Typed::of(returns).ty, false));
         }
         for d in &m.locals {
             self.local(d)?;
@@ -255,11 +426,7 @@ impl<'p> Compiler<'p> {
         }
         self.stmts(&m.body)?;
         let end = self.here();
-        for i in 0..end {
-            if self.code[i] == Instr::Jump(PENDING) {
-                self.code[i] = Instr::Jump(end);
-            }
-        }
+        self.end_returns(end);
         match kind {
             Kind::Function => {
                 self.emit(Instr::NoResult, m.span);
@@ -268,18 +435,9 @@ impl<'p> Compiler<'p> {
                 self.emit(Instr::Return, m.span);
             }
         }
-        Ok(AModule {
-            name: name.key.clone(),
-            spelling: name.spelling.clone(),
-            kind,
-            span: at(m.span),
-            params,
-            slots: self.slots,
-            prefix,
-            result,
-            code: self.code,
-            spans: self.spans,
-        })
+        let mut module = self.finish(&name, &spelling, kind, m.span, prefix, result, computes);
+        module.params = params;
+        Ok(module)
     }
 
     fn local(&mut self, d: &Declaration) -> Compiled<()> {
@@ -412,7 +570,7 @@ impl<'p> Compiler<'p> {
                 body,
             } => {
                 let Some(of) = of else {
-                    self.fail(s.span, "not yet: EACH without OF");
+                    self.fail(s.span, "EACH without OF: not yet");
                     return Ok(());
                 };
                 self.each(name, of, filter.as_ref(), body)
@@ -618,8 +776,8 @@ impl<'p> Compiler<'p> {
             }
             StmtKind::Chain(q) => {
                 match self.module_named(q) {
-                    Some((i, m)) if m.kind == ModuleKind::Program => {
-                        self.emit(Instr::Chain(i), q.span);
+                    Some(m) if m.kind == Kind::Program => {
+                        self.emit(Instr::Chain(m.index), q.span);
                     }
                     _ => self.fail(
                         q.span,
@@ -633,10 +791,10 @@ impl<'p> Compiler<'p> {
                     None if builtins::is_subroutine(&c.name.key) => {
                         return not_yet(c.name.span, "the expert-system engines");
                     }
-                    Some((i, m)) if m.kind == ModuleKind::Subroutine => {
-                        let n = self.args(m, c)?;
+                    Some(m) if m.kind == Kind::Subroutine => {
+                        let n = self.args(&m, c)?;
                         if let Some(n) = n {
-                            self.emit(Instr::Call(i, n), c.name.span);
+                            self.emit(Instr::Call(m.index, n), c.name.span);
                         }
                     }
                     _ => {
@@ -670,7 +828,105 @@ impl<'p> Compiler<'p> {
                 self.emit(Instr::Print(es.len()), s.span);
                 Ok(())
             }
-            _ => not_yet(s.span, "this statement"),
+            StmtKind::Create(o) => {
+                self.emit(Instr::Begin, s.span);
+                self.create(o, false, s.span)?;
+                self.emit(Instr::Commit, s.span);
+                Ok(())
+            }
+            StmtKind::Design(o) => self.create(o, true, s.span),
+            StmtKind::StateChange(op, o) => self.state_change(*op, o, s.span),
+            StmtKind::Let { target, value } => {
+                self.emit(Instr::Begin, s.span);
+                self.let_(target, value, s.span)?;
+                self.emit(Instr::Commit, s.span);
+                Ok(())
+            }
+            StmtKind::Assert(Assertion::Link {
+                from,
+                negated,
+                relation,
+                probability,
+                to,
+            }) => {
+                self.object(from, s.span)?;
+                self.object(to, s.span)?;
+                let p = probability.as_ref().map(|p| match p {
+                    Real::Integer(i) => *i as f64,
+                    Real::Float(x) => *x,
+                });
+                self.emit(Instr::Begin, s.span);
+                self.emit(Instr::Assert(relation.text.clone(), p, *negated), s.span);
+                self.emit(Instr::Commit, s.span);
+                Ok(())
+            }
+            StmtKind::Assert(Assertion::Name(_)) => {
+                self.fail(s.span, "ASSERT of a name: not yet");
+                Ok(())
+            }
+            StmtKind::Specify {
+                items,
+                spec,
+                unit,
+                computed,
+            } => {
+                let spec = specification(spec);
+                for item in items {
+                    match item {
+                        Specified::Class(c) => self.class(c, s.span)?,
+                        Specified::Attribute(a) => self.class_attribute(a, s.span)?,
+                        Specified::Link(l) => {
+                            self.class(&l.from, s.span)?;
+                            self.class(&l.to, s.span)?;
+                            self.emit(Instr::LinkOf(l.relation.text.clone()), s.span);
+                        }
+                    }
+                    let unit = unit.as_ref().map(|u| u.spelling.clone());
+                    self.emit(Instr::Specify(spec, unit, *computed), s.span);
+                }
+                Ok(())
+            }
+            StmtKind::Include { classes, into }
+            | StmtKind::Exclude {
+                classes,
+                from: into,
+            } => {
+                let include = matches!(s.kind, StmtKind::Include { .. });
+                for c in classes {
+                    self.class(c, s.span)?;
+                }
+                for h in into {
+                    self.class(h, s.span)?;
+                }
+                self.emit(Instr::Include(classes.len(), into.len(), include), s.span);
+                Ok(())
+            }
+            StmtKind::Associate(pairs) | StmtKind::Dissociate(pairs) => {
+                let assoc = matches!(s.kind, StmtKind::Associate(_));
+                for (a, d) in pairs {
+                    self.adt(a, s.span)?;
+                    self.designate(d, s.span, false)?;
+                    self.emit(Instr::Assoc(assoc), s.span);
+                }
+                Ok(())
+            }
+            StmtKind::Compose { class, with } => {
+                self.text(class, s.span)?;
+                for w in with {
+                    self.class(w, s.span)?;
+                }
+                self.emit(Instr::Compose(with.len()), s.span);
+                Ok(())
+            }
+            StmtKind::Build { classes, model } => {
+                self.class(model, s.span)?;
+                for c in classes {
+                    self.text(c, s.span)?;
+                }
+                self.emit(Instr::Build(classes.len()), s.span);
+                Ok(())
+            }
+            _ => not_yet(s.span, "processes and coroutines"),
         }
     }
 
@@ -813,21 +1069,18 @@ impl<'p> Compiler<'p> {
     /// A call's arguments, as the reference's `args`: their number
     /// first, then each in order, a value for IN, the caller's variable
     /// for OUT and INOUT. None if it fails before the call.
-    fn args(&mut self, m: &Module, c: &Call) -> Compiled<Option<usize>> {
-        if m.parameters.len() != c.args.len() {
+    fn args(&mut self, m: &Callee, c: &Call) -> Compiled<Option<usize>> {
+        if m.modes.len() != c.args.len() {
             let message = format!(
                 "`{}` takes {} argument(s), not {}",
                 c.name.spelling,
-                m.parameters.len(),
+                m.modes.len(),
                 c.args.len()
             );
             self.fail(c.name.span, message);
             return Ok(None);
         }
-        for (p, a) in m.parameters.iter().zip(&c.args) {
-            let mode = (m.specifications.iter())
-                .find(|s| s.names.contains(p))
-                .map_or(Mode::In, |s| s.mode);
+        for (mode, a) in m.modes.iter().zip(&c.args) {
             match (mode, &a.kind) {
                 (Mode::In, _) => self.expr(a)?,
                 (_, ExprKind::Variable(v)) if v.indices.is_empty() => match self.slot(&v.name) {
@@ -882,10 +1135,11 @@ impl<'p> Compiler<'p> {
             ExprKind::Boolean(b) => {
                 self.emit(Instr::Const(Value::boolean(*b)), e.span);
             }
-            ExprKind::This => self.fail(
-                e.span,
-                "THIS is the object a computed attribute, a COND, a rule or a process runs for",
-            ),
+            ExprKind::This => {
+                let message =
+                    "THIS is the object a computed attribute, a COND, a rule or a process runs for";
+                self.emit(Instr::This(message.into()), e.span);
+            }
             ExprKind::Variable(v) => {
                 if v.indices.is_empty() {
                     self.load(&v.name)?;
@@ -921,24 +1175,31 @@ impl<'p> Compiler<'p> {
                 self.emit(i, e.span);
             }
             ExprKind::Functor(adt, calls) => self.functors(adt, calls, e.span)?,
-            ExprKind::Attribute(..) | ExprKind::Link(..) => {
-                return not_yet(e.span, "the store");
+            ExprKind::Attribute(object, attribute) => {
+                self.object(object, e.span)?;
+                self.text(attribute, e.span)?;
+                self.emit(Instr::AttrValue, e.span);
+            }
+            ExprKind::Link(from, relation, to) => {
+                self.object(from, e.span)?;
+                self.object(to, e.span)?;
+                self.emit(Instr::Linked(relation.text.clone()), e.span);
             }
         }
         Ok(())
     }
 
     fn function(&mut self, c: &Call, span: Span) -> Compiled<()> {
-        if let Some((i, m)) = self.module_named(&c.name) {
-            if !matches!(m.kind, ModuleKind::Function { .. }) {
+        if let Some(m) = self.module_named(&c.name) {
+            if m.kind != Kind::Function {
                 self.fail(
                     c.name.span,
                     format!("`{}` is not a function", c.name.spelling),
                 );
                 return Ok(());
             }
-            if let Some(n) = self.args(m, c)? {
-                self.emit(Instr::Call(i, n), c.name.span);
+            if let Some(n) = self.args(&m, c)? {
+                self.emit(Instr::Call(m.index, n), c.name.span);
             }
             return Ok(());
         }
@@ -961,34 +1222,37 @@ impl<'p> Compiler<'p> {
         Ok(())
     }
 
-    /// `L ' F ' G(x)`: on the VM for now, a list a variable holds, the
-    /// first functor changing it if it moves the cursor or takes an
-    /// element out.
+    /// `L ' F ' G(x)`: the prefix as the reference's `prefix`, a list or
+    /// an a.d.t. a variable holds or an expression gives, else the
+    /// designation; the first functor may change the list a variable
+    /// holds.
     fn functors(&mut self, adt: &Adt, calls: &[Call], span: Span) -> Compiled<()> {
-        let held = match (&adt.designation, &adt.part) {
-            (Designation::Named(AdtName::Name(n)), AdtPart::None) => match self.slot(n) {
-                Some(s) if self.slots[s].ty == SlotType::List => {
-                    self.load(n)?;
-                    Some(s)
-                }
-                _ => return not_yet(span, "functors on a.d.t."),
-            },
-            _ => return not_yet(span, "functors on a.d.t."),
-        };
-        let mut held = held;
+        let mut held = None;
+        match (&adt.designation, &adt.part) {
+            (Designation::Named(AdtName::Name(n)), AdtPart::None) => {
+                self.load(n)?;
+                held = self.slot(n);
+                self.keep_or(adt, span)?;
+            }
+            (Designation::Named(AdtName::Expr(e)), AdtPart::None) => {
+                self.expr(e)?;
+                self.keep_or(adt, span)?;
+            }
+            _ => self.adt(adt, span)?,
+        }
         for c in calls {
             let held_now = held.take();
-            if let Some((i, m)) = self.module_named(&c.name) {
-                if !matches!(m.kind, ModuleKind::Functor { .. }) {
+            if let Some(m) = self.module_named(&c.name) {
+                if m.kind != Kind::Functor {
                     self.fail(
                         c.name.span,
                         format!("`{}` is not a functor", c.name.spelling),
                     );
                     return Ok(());
                 }
-                if let Some(n) = self.args(m, c)? {
+                if let Some(n) = self.args(&m, c)? {
                     // The prefix, under the arguments, goes first.
-                    self.emit(Instr::Call(i, n + 1), c.name.span);
+                    self.emit(Instr::Call(m.index, n + 1), c.name.span);
                 }
                 continue;
             }
@@ -1000,12 +1264,214 @@ impl<'p> Compiler<'p> {
             for a in &c.args {
                 self.expr(a)?;
             }
-            if functor.takes != Takes::Lists {
-                return not_yet(c.name.span, "functors on a.d.t.");
-            }
             let (key, spelling) = (c.name.key.clone(), c.name.spelling.clone());
-            let i = Instr::Functor(key, spelling, c.args.len(), held_now);
-            self.emit(i, c.name.span);
+            let n = c.args.len();
+            if functor.takes == Takes::Lists {
+                self.emit(Instr::Functor(key, spelling, n, held_now), c.name.span);
+            } else if hbds_rules::functor(&key).is_some() {
+                return not_yet(c.name.span, "the expert systems' functors");
+            } else {
+                self.emit(Instr::AdtFunctor(key, spelling, n), c.name.span);
+            }
+        }
+        Ok(())
+    }
+
+    /// A list or an a.d.t. on the stack is the prefix; anything else
+    /// gives way to the designation, evaluated again.
+    fn keep_or(&mut self, adt: &Adt, span: Span) -> Compiled<()> {
+        let keep = self.emit(Instr::KeepOr(PENDING), span);
+        let over = self.emit(Instr::Jump(0), span);
+        let designation = self.here();
+        if let Instr::KeepOr(t) = &mut self.code[keep] {
+            *t = designation;
+        }
+        self.adt(adt, span)?;
+        let after = self.here();
+        self.patch(over, after);
+        Ok(())
+    }
+
+    // The store's designations, as the reference's functions of the same
+    // names: each leaves its result on the stack.
+
+    /// A name as a designation gives it: a string, or an a.d.t.
+    fn named(&mut self, n: &AdtName, span: Span) -> Compiled<()> {
+        match n {
+            AdtName::String(s) => {
+                let v = Value::exact(Scalar::String(s.text.as_str().into()));
+                self.emit(Instr::Const(v), s.span);
+            }
+            AdtName::Name(name) => self.load(name)?,
+            AdtName::Expr(e) => self.expr(e)?,
+        }
+        self.emit(Instr::Named, span);
+        Ok(())
+    }
+
+    fn text(&mut self, n: &AdtName, span: Span) -> Compiled<()> {
+        self.named(n, span)?;
+        self.emit(Instr::Text, span);
+        Ok(())
+    }
+
+    fn class(&mut self, n: &AdtName, span: Span) -> Compiled<()> {
+        self.named(n, span)?;
+        self.emit(Instr::ToClass, span);
+        Ok(())
+    }
+
+    fn designate(&mut self, d: &Designation, span: Span, any: bool) -> Compiled<()> {
+        match d {
+            Designation::This(at) => {
+                let message = "THIS is the object a computed attribute is computed for";
+                self.emit(Instr::This(message.into()), *at);
+            }
+            Designation::Named(n) => {
+                self.named(n, span)?;
+                self.emit(Instr::Designate(any), span);
+            }
+            Designation::Classed { name, class } => {
+                self.text(name, span)?;
+                self.text(class, span)?;
+                self.emit(Instr::ObjectNamed(any), span);
+            }
+        }
+        Ok(())
+    }
+
+    fn object(&mut self, d: &Designation, span: Span) -> Compiled<()> {
+        self.designate(d, span, false)?;
+        self.emit(Instr::IsObject, span);
+        Ok(())
+    }
+
+    fn adt(&mut self, a: &Adt, span: Span) -> Compiled<()> {
+        self.designate(&a.designation, span, false)?;
+        match &a.part {
+            AdtPart::None => {}
+            AdtPart::Attribute(n) => {
+                self.text(n, span)?;
+                self.emit(Instr::AttrOf, span);
+            }
+            AdtPart::Link(relation, to) => {
+                self.designate(to, span, false)?;
+                self.emit(Instr::LinkOf(relation.text.clone()), span);
+            }
+        }
+        Ok(())
+    }
+
+    fn class_attribute(&mut self, a: &ClassAttribute, span: Span) -> Compiled<()> {
+        self.class(&a.class, span)?;
+        self.text(&a.attribute, span)?;
+        self.emit(Instr::ClassAttr, span);
+        Ok(())
+    }
+
+    /// CREATE and DESIGN: classes (embryos for DESIGN), objects,
+    /// attributes, links.
+    fn create(&mut self, o: &Operands, embryo: bool, span: Span) -> Compiled<()> {
+        match o {
+            Operands::Designations(ds) => {
+                for d in ds {
+                    match d {
+                        Designation::Named(n) => {
+                            self.text(n, span)?;
+                            self.emit(Instr::CreateClass(embryo), span);
+                        }
+                        Designation::Classed { name, class } => {
+                            self.class(class, span)?;
+                            self.text(name, span)?;
+                            self.emit(Instr::CreateObject, span);
+                        }
+                        Designation::This(at) => {
+                            self.fail(*at, "THIS exists already");
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            Operands::Attributes(attributes) => {
+                for a in attributes {
+                    self.class(&a.class, span)?;
+                    self.text(&a.attribute, span)?;
+                    self.emit(Instr::CreateAttribute, span);
+                }
+            }
+            Operands::Links(links) => {
+                for l in links {
+                    self.class(&l.link.from, span)?;
+                    self.class(&l.link.to, span)?;
+                    let named = match &l.reverse {
+                        Reverse::Named(n) => {
+                            self.text(n, span)?;
+                            true
+                        }
+                        _ => false,
+                    };
+                    let reflexive = l.reverse == Reverse::Reflexive;
+                    let relation = l.link.relation.text.clone();
+                    self.emit(Instr::CreateLink(relation, named, reflexive), span);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn state_change(&mut self, op: StateOp, o: &Operands, span: Span) -> Compiled<()> {
+        let mut n = 0;
+        match o {
+            Operands::Designations(ds) => {
+                for d in ds {
+                    self.designate(d, span, true)?;
+                    n += 1;
+                }
+            }
+            Operands::Attributes(attributes) => {
+                for a in attributes {
+                    self.class(&a.class, span)?;
+                    self.text(&a.attribute, span)?;
+                    self.emit(Instr::FindAttribute, span);
+                    n += 1;
+                }
+            }
+            Operands::Links(links) => {
+                for l in links {
+                    self.class(&l.link.from, span)?;
+                    self.class(&l.link.to, span)?;
+                    self.emit(Instr::FindLink(l.link.relation.text.clone()), span);
+                    n += 1;
+                }
+            }
+        }
+        let op = match op {
+            StateOp::Hibern => AState::Hibern,
+            StateOp::Awake => AState::Awake,
+            StateOp::Destroy => AState::Destroy,
+            StateOp::Resur => AState::Resur,
+            StateOp::Purge => AState::Purge,
+        };
+        self.emit(Instr::StateChange(op, n), span);
+        Ok(())
+    }
+
+    fn let_(&mut self, target: &LetTarget, value: &Expr, span: Span) -> Compiled<()> {
+        self.expr(value)?;
+        match target {
+            LetTarget::Attribute { object, attribute } => {
+                self.object(object, span)?;
+                self.text(attribute, span)?;
+                self.emit(Instr::SetAttribute, span);
+            }
+            LetTarget::Variable(n) => {
+                self.load(n)?;
+                self.emit(Instr::SetHeld(n.spelling.clone(), at(span)), n.span);
+            }
+            LetTarget::Property { adt, name } => {
+                self.adt(adt, span)?;
+                self.emit(Instr::SetProperty(name.key.clone(), at(span)), value.span);
+            }
         }
         Ok(())
     }

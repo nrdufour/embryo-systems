@@ -986,7 +986,44 @@ impl Writer<'_> {
         }
     }
 
+    /// A statement on the store the program built: values set and read,
+    /// links asserted and tested, functors, objects created, states.
+    fn store_stmt(&mut self) {
+        // o0 to o2 exist from the start; o3 only once a CREATE made it.
+        let o = format!("\"o{}\" [ \"c0\" ]", self.rng.below(4));
+        let a = self.rng.pick(&["a0", "a1"]);
+        let line = match self.rng.below(9) {
+            0 | 1 => format!("let {o} . \"{a}\" := {}", self.expr(T::Int, 2)),
+            2 => format!("print {o} . \"{a}\""),
+            3 => {
+                let not = if self.rng.one_in(3) { "not " } else { "" };
+                format!("assert {o} {not}\"r\" \"p0\" [ \"c1\" ]")
+            }
+            4 => format!("print {o} \"r\" \"p0\" [ \"c1\" ]"),
+            5 => {
+                let f = self.rng.pick(&[
+                    "\"c0\" ' obj ' card",
+                    "\"c0\" ' obj",
+                    "\"c0\" ' obj ' oattn(\"a0\") ' sigma",
+                    "\"p0\" [ \"c1\" ] ' opscrc(\"s\", \"c0\") ' ofin ' card",
+                    "\"c0\" ' att",
+                ]);
+                format!("print {f}")
+            }
+            6 => format!("create {o}"),
+            7 => format!(
+                "{} {o}",
+                self.rng.pick(&["destroy", "resur", "hibern", "awake"])
+            ),
+            _ => format!("{} {o}", self.rng.pick(&["purge", "destroy"])),
+        };
+        self.line(&line);
+    }
+
     fn stmt(&mut self, depth: usize) {
+        if self.rng.one_in(4) {
+            return self.store_stmt();
+        }
         let compound = depth > 0 && self.depth < 4;
         match self.rng.below(if compound { 20 } else { 11 }) {
             0..=3 => {
@@ -1240,6 +1277,27 @@ pub fn runnable(seed: u64) -> (String, String) {
         // The last declaration takes no `;` before BEGIN? It does: each
         // declaration ends with one.
         text += "begin\n";
+        if k == 0 {
+            // The store's schema, its CONDs and ACTIONs now and then: a
+            // class's ACTION runs as its objects are created, two that
+            // set each other's attribute nest until refused.
+            text += "        create \"c0\", \"c1\" ;\n";
+            text += "        create \"c0\" . \"a0\", \"c0\" . \"a1\", \"c1\" . \"a0\" ;\n";
+            text += "        create \"c0\" \"r\" \"c1\" reverse \"s\" ;\n";
+            if rng.one_in(3) {
+                text += "        let \"c0\" . \"a0\" ' cond := \"this . \"\"a0\"\" < 50\" ;\n";
+            }
+            if rng.one_in(3) {
+                text += "        let \"c0\" . \"a0\" ' action := \"let this . \"\"a1\"\" := this . \"\"a0\"\" + 1\" ;\n";
+            }
+            if rng.one_in(6) {
+                text += "        let \"c0\" . \"a1\" ' action := \"let this . \"\"a0\"\" := this . \"\"a1\"\" + 1\" ;\n";
+            }
+            if rng.one_in(3) {
+                text += "        let \"c0\" ' action := \"print \"\"made\"\", this\" ;\n";
+            }
+            text += "        create \"o0\" [ \"c0\" ], \"o1\" [ \"c0\" ], \"o2\" [ \"c0\" ], \"p0\" [ \"c1\" ] ;\n";
+        }
         let mut w = Writer {
             rng: &mut rng,
             vars,

@@ -37,7 +37,7 @@ use hbds_simulation::{Agent, Sequencing, State as Lifecycle, When as Due};
 pub const LANGUAGE: &str = "ADT'81";
 
 /// A SPECIFY's specification, as the store keeps it.
-fn specification(s: &Specification) -> hbds_core::spec::Spec {
+pub fn specification(s: &Specification) -> hbds_core::spec::Spec {
     use hbds_core::spec::{Base, Fuzziness as Z, Scalar as S, Spec};
     let fuzz = |f: &Fuzziness| match *f {
         Fuzziness::Fuzzy => Z {

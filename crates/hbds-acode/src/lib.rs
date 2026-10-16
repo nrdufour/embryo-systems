@@ -12,6 +12,7 @@
 
 use std::fmt::{self, Write as _};
 
+use hbds_core::spec::Spec;
 use hbds_core::terms::{self, Reader, Term};
 use hbds_values::{Base, Computed, Fz, Op, Rank, Unary, Value};
 
@@ -19,12 +20,21 @@ use hbds_values::{Base, Computed, Fz, Op, Rank, Unary, Value};
 pub const VERSION: u32 = 1;
 
 /// What a unit needs from the language it was compiled from: its own
-/// functions (decision 4's support module) and how it reads input.
-pub trait Support {
+/// functions (decision 4's support module), how it reads input, and its
+/// compiler for the code the store keeps, which runs when it is needed.
+pub trait Language {
+    /// As the store records it beside the code: `ADT'81`.
+    fn name(&self) -> &str;
     /// A function of the language on one value, by its folded name.
     fn native(&self, name: &str, x: &Fz) -> Computed<Fz>;
     /// A line of input, read as a value (not as text).
     fn read(&self, line: &str) -> Result<Value, String>;
+    /// Code the store keeps, a COND, an ACTION or another part, compiled
+    /// against `unit`'s modules; `what` names its carrier in messages.
+    fn compile(&self, part: &str, text: &str, what: &str, unit: &Unit) -> Result<Module, String>;
+    /// Whether a property's code is good to keep: refused when written,
+    /// as a COND that does not parse (page 80).
+    fn check(&self, part: &str, text: &str) -> Result<(), String>;
 }
 
 /// A place in the source, 1-based; line 0 is nowhere.
@@ -63,6 +73,9 @@ pub struct Module {
     /// A functor's prefix and result slots. A functor takes its prefix
     /// as its first argument, which `Prefix` stores if it names one.
     pub prefix: Option<usize>,
+    /// The class and attribute (folded) a function computes, pages 127
+    /// and 128.
+    pub computes: Option<(String, String)>,
     pub result: Option<usize>,
     pub code: Vec<Instr>,
     /// Where each instruction comes from.
@@ -115,6 +128,16 @@ pub enum ListOp {
     Union,
     Inter,
     Compl,
+}
+
+/// HIBERN, AWAKE, DESTROY, RESUR, PURGE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateOp {
+    Hibern,
+    Awake,
+    Destroy,
+    Resur,
+    Purge,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,6 +259,79 @@ pub enum Instr {
     /// Ends this program and runs module `m`.
     Chain(usize),
     Fail(String),
+
+    // The store. Names are strings; a.d.t. are `Value::Adt`.
+    /// Pops what a name in a designation gives: a string naming a class
+    /// or an object, or an a.d.t.; FACT, RULE and PROCESS installed the
+    /// first time a string names them.
+    Named,
+    /// Pops what Named gave; fails unless a string.
+    Text,
+    /// Pops what Named gave; pushes the active class it names or is.
+    ToClass,
+    /// Pops what Named gave; pushes the a.d.t. it names or is, any state
+    /// if true.
+    Designate(bool),
+    /// Pops a class's name, then an object's: pushes the object, any
+    /// state if true.
+    ObjectNamed(bool),
+    /// Fails unless the a.d.t. on top is an object.
+    IsObject,
+    /// Pops an attribute's name and an a.d.t.: pushes its attribute.
+    AttrOf,
+    /// Pops two a.d.t.: pushes the link between them.
+    LinkOf(String),
+    /// Pops an attribute's name and a class: pushes the class attribute.
+    ClassAttr,
+    /// As ClassAttr, whatever its state: HIBERN and the others.
+    FindAttribute,
+    /// Pops two classes: the class link between them, whatever its state.
+    FindLink(String),
+    /// Pushes THIS, or fails with the message.
+    This(String),
+    /// A statement's transaction begins.
+    Begin,
+    /// It ends, kept.
+    Commit,
+    /// Pops a name: a class, an embryo if true.
+    CreateClass(bool),
+    /// Pops a name and a class: an object, its CONDs and ACTIONs run.
+    CreateObject,
+    CreateAttribute,
+    /// Pops a reverse's name if named, then two classes.
+    CreateLink(String, bool, bool),
+    /// Pops n a.d.t.
+    StateChange(StateOp, usize),
+    /// Pops an attribute's name, an object and a value: LET.
+    SetAttribute,
+    /// Pops a variable's object attribute and a value: LET through it;
+    /// the store's refusal at the span given.
+    SetHeld(String, Span),
+    /// Pops an a.d.t. and a property's code; the store's refusal at the
+    /// span given.
+    SetProperty(String, Span),
+    /// Pops two objects; the probability; RETRACT if true.
+    Assert(String, Option<f64>, bool),
+    /// Pops an a.d.t.: its specification, unit, COMPUTED.
+    Specify(Spec, Option<String>, bool),
+    /// Pops m hyperclasses and n classes: INCLUDE if true, EXCLUDE else.
+    Include(usize, usize, bool),
+    /// Pops two a.d.t.: ASSOC if true, DISSOC else.
+    Assoc(bool),
+    /// Pops n embryos and a name: COMPOSE.
+    Compose(usize),
+    /// Pops n names and a prototype: BUILD.
+    Build(usize),
+    /// Pops an attribute's name and an object: pushes its value.
+    AttrValue,
+    /// Pops two objects: pushes whether they are linked so.
+    Linked(String),
+    /// Keeps a list or an a.d.t. on top; anything else is popped and
+    /// the designation at `t` gives the prefix instead.
+    KeepOr(usize),
+    /// Pops n strings and a prefix, an a.d.t. or a list of them: pushes
+    /// the functor's result, a list.
+    AdtFunctor(String, String, usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -313,6 +409,14 @@ const RANKS: &[(&str, Rank)] = &[
     ("vector", Rank::Vector),
     ("matrix", Rank::Matrix),
     ("tensor", Rank::Tensor),
+];
+
+const STATE_OPS: &[(&str, StateOp)] = &[
+    ("hibern", StateOp::Hibern),
+    ("awake", StateOp::Awake),
+    ("destroy", StateOp::Destroy),
+    ("resur", StateOp::Resur),
+    ("purge", StateOp::Purge),
 ];
 
 const MODES: &[(&str, Mode)] = &[("in", Mode::In), ("out", Mode::Out), ("inout", Mode::InOut)];
@@ -430,6 +534,52 @@ fn instr(i: &Instr) -> Vec<Term> {
         Instr::Restart => vec![word("restart")],
         Instr::Chain(m) => vec![word("chain"), n(m)],
         Instr::Fail(m) => vec![word("fail"), text(m)],
+        Instr::Named => vec![word("named")],
+        Instr::Text => vec![word("text")],
+        Instr::ToClass => vec![word("to.class")],
+        Instr::Designate(any) => vec![word("designate"), word(any)],
+        Instr::ObjectNamed(any) => vec![word("object.named"), word(any)],
+        Instr::IsObject => vec![word("is.object")],
+        Instr::AttrOf => vec![word("attr.of")],
+        Instr::LinkOf(r) => vec![word("link.of"), text(r)],
+        Instr::ClassAttr => vec![word("class.attr")],
+        Instr::FindAttribute => vec![word("find.attribute")],
+        Instr::FindLink(r) => vec![word("find.link"), text(r)],
+        Instr::This(m) => vec![word("this"), text(m)],
+        Instr::Begin => vec![word("begin")],
+        Instr::Commit => vec![word("commit")],
+        Instr::CreateClass(embryo) => vec![word("create.class"), word(embryo)],
+        Instr::CreateObject => vec![word("create.object")],
+        Instr::CreateAttribute => vec![word("create.attribute")],
+        Instr::CreateLink(r, named, reflexive) => {
+            vec![word("create.link"), text(r), word(named), word(reflexive)]
+        }
+        Instr::StateChange(op, k) => vec![word("state"), word(name_of(STATE_OPS, *op)), n(k)],
+        Instr::SetAttribute => vec![word("set.attribute")],
+        Instr::SetHeld(v, at) => vec![word("set.held"), text(v), word(span_text(*at))],
+        Instr::SetProperty(k, at) => vec![word("set.property"), text(k), word(span_text(*at))],
+        Instr::Assert(r, p, negated) => vec![
+            word("assert"),
+            text(r),
+            terms::optional(p.map(terms::float)),
+            word(negated),
+        ],
+        Instr::Specify(spec, unit, computed) => vec![
+            word("specify"),
+            text(&spec.to_string()),
+            terms::optional(unit.as_deref().map(text)),
+            word(computed),
+        ],
+        Instr::Include(k, m, include) => vec![word("include"), n(k), n(m), word(include)],
+        Instr::Assoc(assoc) => vec![word("assoc"), word(assoc)],
+        Instr::Compose(k) => vec![word("compose"), n(k)],
+        Instr::Build(k) => vec![word("build"), n(k)],
+        Instr::AttrValue => vec![word("attr.value")],
+        Instr::Linked(r) => vec![word("linked"), text(r)],
+        Instr::KeepOr(t) => vec![word("keep.or"), n(t)],
+        Instr::AdtFunctor(f, spelling, k) => {
+            vec![word("adt.functor"), text(f), text(spelling), n(k)]
+        }
     }
 }
 
@@ -494,6 +644,44 @@ fn read_instr(r: &mut Reader) -> Result<Instr, String> {
         "restart" => Instr::Restart,
         "chain" => Instr::Chain(n(r)?),
         "fail" => Instr::Fail(r.text()?),
+        "named" => Instr::Named,
+        "text" => Instr::Text,
+        "to.class" => Instr::ToClass,
+        "designate" => Instr::Designate(r.parse()?),
+        "object.named" => Instr::ObjectNamed(r.parse()?),
+        "is.object" => Instr::IsObject,
+        "attr.of" => Instr::AttrOf,
+        "link.of" => Instr::LinkOf(r.text()?),
+        "class.attr" => Instr::ClassAttr,
+        "find.attribute" => Instr::FindAttribute,
+        "find.link" => Instr::FindLink(r.text()?),
+        "this" => Instr::This(r.text()?),
+        "begin" => Instr::Begin,
+        "commit" => Instr::Commit,
+        "create.class" => Instr::CreateClass(r.parse()?),
+        "create.object" => Instr::CreateObject,
+        "create.attribute" => Instr::CreateAttribute,
+        "create.link" => Instr::CreateLink(r.text()?, r.parse()?, r.parse()?),
+        "state" => Instr::StateChange(named(STATE_OPS, r.word()?, "a state change")?, n(r)?),
+        "set.attribute" => Instr::SetAttribute,
+        "set.held" => Instr::SetHeld(r.text()?, read_span(r.word()?)?),
+        "set.property" => Instr::SetProperty(r.text()?, read_span(r.word()?)?),
+        "assert" => Instr::Assert(r.text()?, r.optional(|r| r.parse())?, r.parse()?),
+        "specify" => {
+            let spec = r.text()?;
+            let spec = spec
+                .parse()
+                .map_err(|_| format!("{spec:?} is not a specification"))?;
+            Instr::Specify(spec, r.optional(|r| r.text())?, r.parse()?)
+        }
+        "include" => Instr::Include(n(r)?, n(r)?, r.parse()?),
+        "assoc" => Instr::Assoc(r.parse()?),
+        "compose" => Instr::Compose(n(r)?),
+        "build" => Instr::Build(n(r)?),
+        "attr.value" => Instr::AttrValue,
+        "linked" => Instr::Linked(r.text()?),
+        "keep.or" => Instr::KeepOr(n(r)?),
+        "adt.functor" => Instr::AdtFunctor(r.text()?, r.text()?, n(r)?),
         w => return Err(format!("{w:?} is not an instruction")),
     })
 }
@@ -582,6 +770,9 @@ impl Unit {
             if let Some(r) = m.result {
                 writeln!(out, "result {r}").unwrap();
             }
+            if let Some((c, a)) = &m.computes {
+                writeln!(out, "{}", line(&[word("computes"), text(c), text(a)])).unwrap();
+            }
             for (pc, (i, s)) in m.code.iter().zip(&m.spans).enumerate() {
                 writeln!(out, "{pc:>4} {:<8} {}", span_text(*s), line(&instr(i))).unwrap();
             }
@@ -630,6 +821,7 @@ impl Unit {
                     slots: Vec::new(),
                     prefix: None,
                     result: None,
+                    computes: None,
                     code: Vec::new(),
                     spans: Vec::new(),
                 });
@@ -657,6 +849,11 @@ impl Unit {
                     let mode = named(MODES, r.word().map_err(at)?, "a mode").map_err(at)?;
                     r.end().map_err(at)?;
                     m.params.push(Param { slot, mode });
+                }
+                "computes" => {
+                    r.word().map_err(at)?;
+                    m.computes = Some((r.text().map_err(at)?, r.text().map_err(at)?));
+                    r.end().map_err(at)?;
                 }
                 "prefix" | "result" => {
                     r.word().map_err(at)?;
@@ -721,6 +918,7 @@ mod tests {
                     ],
                     prefix: None,
                     result: None,
+                    computes: None,
                     code: vec![
                         Instr::Stmt,
                         Instr::Const(Value::exact(Scalar::String("say \"hi\"".into()))),
@@ -733,6 +931,14 @@ mod tests {
                         Instr::Functor("SUBLIST".into(), "sublist".into(), 2, Some(0)),
                         Instr::Functor("CARD".into(), "Card".into(), 0, None),
                         Instr::Fail("division by zero".into()),
+                        Instr::Specify(
+                            "LONG FLOAT APPR".parse().unwrap(),
+                            Some("kelvin".into()),
+                            true,
+                        ),
+                        Instr::Assert("crosses".into(), Some(0.9), false),
+                        Instr::SetHeld("t".into(), at(7, 2)),
+                        Instr::StateChange(StateOp::Resur, 2),
                     ],
                     spans: vec![
                         at(3, 9),
@@ -743,6 +949,10 @@ mod tests {
                         at(5, 2),
                         at(5, 2),
                         at(6, 3),
+                        at(7, 1),
+                        at(7, 1),
+                        at(7, 1),
+                        at(8, 1),
                     ],
                 },
                 Module {
@@ -768,6 +978,7 @@ mod tests {
                     ],
                     prefix: Some(0),
                     result: Some(1),
+                    computes: None,
                     code: vec![Instr::Return],
                     spans: vec![at(10, 1)],
                 },

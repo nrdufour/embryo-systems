@@ -12,7 +12,7 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE
        embryo-systems fmt [--program | --fragment] FILE
        embryo-systems check FILE
-       embryo-systems run [--store DIR | --vm] FILE
+       embryo-systems run [--store DIR] [--vm] FILE
        embryo-systems acode FILE
        embryo-systems store DIR
 
@@ -22,7 +22,8 @@ fmt the source in canonical form; both read a program unless told
 in a program, and fails on errors. run checks a program, then runs it:
 READ reads standard input, PRINT writes standard output; its classes and
 objects last the run, or go in the store in DIR, created if need be;
---vm runs it compiled to A-code, on the VM, without a store yet. acode
+--vm runs it compiled to A-code, on the VM, but the expert systems and
+processes, not yet there. acode
 prints a program compiled to A-code. store prints what the store in DIR
 holds.";
 
@@ -102,7 +103,7 @@ fn main() -> ExitCode {
         _ => (args.clone(), None),
     };
     let (args, vm) = match args.as_slice() {
-        ["run", "--vm", path] if store_dir.is_none() => (vec!["run", *path], true),
+        ["run", "--vm", path] => (vec!["run", *path], true),
         _ => (args.clone(), false),
     };
     let (command, fragment, path) = match args.as_slice() {
@@ -172,7 +173,14 @@ fn main() -> ExitCode {
                         return false;
                     }
                 };
-                return match hbds_vm::run(&unit, &mut Terminal, &Adt81, None) {
+                let mut store = match open_store(store_dir) {
+                    Ok(store) => store,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return false;
+                    }
+                };
+                return match hbds_vm::run(&unit, &mut store, &mut Terminal, &Adt81, None) {
                     Ok(_) => true,
                     Err(e) => {
                         eprintln!("{path}:{e}");
