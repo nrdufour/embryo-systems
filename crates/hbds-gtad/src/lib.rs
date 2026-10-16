@@ -1449,6 +1449,152 @@ impl Store {
 
     /// Everything the store holds, in a stable order: what `embryo-systems
     /// store DIR` prints.
+    /// The shortest sequence of changes that rebuilds this store, ids
+    /// kept: what compaction writes (docs/architecture.md, decision 5).
+    pub fn changes(&self) -> Vec<Change> {
+        let mut out = Vec::new();
+        for (&id, c) in self.classes.iter() {
+            out.push(Change::Class {
+                id,
+                name: c.name.clone(),
+                kind: c.kind.clone(),
+            });
+        }
+        for (&id, c) in self.classes.iter() {
+            for &hyper in &c.hyper {
+                out.push(Change::Include { class: id, hyper });
+            }
+        }
+        for (&id, a) in self.attributes.iter() {
+            out.push(Change::Attribute {
+                id,
+                class: a.class,
+                name: a.name.clone(),
+            });
+        }
+        for (&id, l) in self.class_links.iter() {
+            // Once a pair, from the direction that names its relation (the
+            // first, if both do).
+            let back = self.class_links.get(&l.reverse);
+            let named_back = back.is_some_and(|b| b.relation.is_some());
+            let first = match &l.relation {
+                None => false,
+                Some(_) => id <= l.reverse || !named_back,
+            };
+            if !first {
+                continue;
+            }
+            out.push(Change::ClassLink {
+                id,
+                reverse: l.reverse,
+                from: l.from,
+                relation: l.relation.clone().expect("named"),
+                to: l.to,
+                reverse_relation: back.and_then(|b| b.relation.clone()),
+            });
+        }
+        for (&id, o) in self.objects.iter() {
+            out.push(Change::Object {
+                id,
+                class: o.class,
+                name: o.name.clone(),
+            });
+        }
+        for (&id, o) in self.objects.iter() {
+            for (&attribute, value) in &o.values {
+                out.push(Change::Set {
+                    object: id,
+                    attribute,
+                    value: value.clone(),
+                });
+            }
+        }
+        for (&id, l) in self.object_links.iter() {
+            if id <= l.reverse {
+                out.push(Change::ObjectLink {
+                    id,
+                    reverse: l.reverse,
+                    class_link: l.class_link,
+                    from: l.from,
+                    to: l.to,
+                    probability: l.probability,
+                });
+            }
+        }
+        let carriers = (self
+            .classes
+            .iter()
+            .map(|(&id, c)| (AdtRef::Class(id), &c.props)))
+        .chain(
+            self.attributes
+                .iter()
+                .map(|(&id, a)| (AdtRef::ClassAttribute(id), &a.props)),
+        )
+        .chain(
+            self.class_links
+                .iter()
+                .map(|(&id, l)| (AdtRef::ClassLink(id), &l.props)),
+        )
+        .chain(
+            self.objects
+                .iter()
+                .map(|(&id, o)| (AdtRef::Object(id), &o.props)),
+        );
+        for (target, p) in carriers {
+            if p.spec.is_some() || p.unit.is_some() || p.computed {
+                out.push(Change::Specify {
+                    target,
+                    spec: p.spec,
+                    unit: p.unit.clone(),
+                    computed: p.computed,
+                });
+            }
+            for (name, code) in &p.properties {
+                out.push(Change::Property {
+                    target,
+                    name: name.clone(),
+                    language: code.language.clone(),
+                    text: code.text.clone(),
+                });
+            }
+        }
+        for &(a, b) in &self.associations {
+            out.push(Change::Assoc { a, b });
+        }
+        let states = (self
+            .classes
+            .iter()
+            .map(|(&id, c)| (AdtRef::Class(id), c.state)))
+        .chain(
+            self.attributes
+                .iter()
+                .map(|(&id, a)| (AdtRef::ClassAttribute(id), a.state)),
+        )
+        .chain(
+            self.class_links
+                .iter()
+                .filter(|(id, l)| **id <= l.reverse)
+                .map(|(&id, l)| (AdtRef::ClassLink(id), l.state)),
+        )
+        .chain(
+            self.objects
+                .iter()
+                .map(|(&id, o)| (AdtRef::Object(id), o.state)),
+        )
+        .chain(
+            self.object_links
+                .iter()
+                .filter(|(id, l)| **id <= l.reverse)
+                .map(|(&id, l)| (AdtRef::ObjectLink(id), l.state)),
+        );
+        for (target, state) in states {
+            if state != State::Active {
+                out.push(Change::State { target, state });
+            }
+        }
+        out
+    }
+
     pub fn dump(&self) -> String {
         let mut out = String::new();
         let state = |s: State| match s {
@@ -1706,6 +1852,17 @@ mod tests {
             }
             if let Err(e) = s.verify() {
                 panic!("step {step}: {e}");
+            }
+            if step % 100 == 0 && s.transaction.is_none() {
+                let mut rebuilt = Store::memory();
+                for c in s.changes() {
+                    rebuilt.replay(c);
+                }
+                rebuilt
+                    .verify()
+                    .unwrap_or_else(|e| panic!("step {step}, rebuilt: {e}"));
+                assert_eq!(rebuilt.dump(), s.dump(), "step {step}: rebuilt");
+                assert_eq!(rebuilt.changes(), s.changes(), "step {step}: rebuilt");
             }
         }
         assert!(

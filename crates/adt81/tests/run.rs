@@ -43,9 +43,22 @@ fn run(source: &str, input: &str) -> String {
     }));
     let store = Arc::new(Mutex::new(Store::memory()));
     let result = interp::run(program, capture.clone(), store.clone());
-    if let Err(e) = store.lock().unwrap().verify() {
+    let store = store.lock().unwrap();
+    if let Err(e) = store.verify() {
         panic!("{e}");
     }
+    // What compaction writes rebuilds the same store.
+    let mut rebuilt = Store::memory();
+    for c in store.changes() {
+        rebuilt.replay(c);
+    }
+    rebuilt.verify().unwrap_or_else(|e| panic!("rebuilt: {e}"));
+    assert_eq!(rebuilt.dump(), store.dump(), "rebuilt from its changes");
+    assert_eq!(
+        rebuilt.changes(),
+        store.changes(),
+        "rebuilt from its changes"
+    );
     let mut output = capture.lock().unwrap().output.clone();
     if let Err(e) = result {
         output += &format!("{e}\n");

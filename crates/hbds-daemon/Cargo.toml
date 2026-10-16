@@ -12,4 +12,5 @@ license.workspace = true
 hbds-acode = { path = "../hbds-acode" }
 hbds-gtad = { path = "../hbds-gtad" }
 hbds-http = { path = "../hbds-http" }
+hbds-journal = { path = "../hbds-journal" }
 hbds-vm = { path = "../hbds-vm" }

@@ -18,8 +18,9 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems acode FILE
        embryo-systems exec [--store DIR | --connect SOCKET] FILE
        embryo-systems build FILE -o OUT
-       embryo-systems daemon --socket SOCKET [--store DIR] [--slice N]
+       embryo-systems daemon --socket SOCKET [--store DIR] [--slice N] [--compact-at N]
        embryo-systems store DIR
+       embryo-systems compact DIR
 
 FILE - reads standard input, but for run. parse prints the syntax tree,
 fmt the source in canonical form; both read a program unless told
@@ -33,7 +34,10 @@ A-code, an .acode file's contents; exec runs one, as run does. build
 writes OUT, an executable that runs the program, OUT [--store DIR |
 --connect SOCKET]. daemon serves the store in DIR, or one for its life,
 on SOCKET: --connect runs a program there, its clients taking turns of N
-instructions (10000). store prints what the store in DIR holds.";
+instructions (10000); its journal syncs what comes together, and is
+compacted once past N lines (10000) and twice what compaction leaves.
+store prints what the store in DIR holds; compact rewrites its journal
+as the shortest that rebuilds it.";
 
 /// READ on standard input, PRINT on standard output.
 struct Terminal;
@@ -158,29 +162,52 @@ fn daemon(args: &[&str]) -> ExitCode {
         eprintln!("{USAGE}");
         ExitCode::FAILURE
     };
-    let (mut socket, mut dir, mut slice) = (None, None, 10_000);
+    let number = |n: &str| n.parse::<u64>().ok().filter(|&n| n > 0);
+    let (mut socket, mut dir) = (None, None);
+    let mut pace = hbds_daemon::Pace {
+        slice: 10_000,
+        compact_at: 10_000,
+    };
+    let mut delay = 0;
     for pair in args.chunks(2) {
         match pair {
             ["--socket", s] => socket = Some(*s),
             ["--store", d] => dir = Some(*d),
-            ["--slice", n] => match n.parse::<u64>() {
-                Ok(n) if n > 0 => slice = n,
-                _ => return usage(),
-            },
+            ["--slice", n] if number(n).is_some() => pace.slice = number(n).expect("checked"),
+            ["--compact-at", n] if number(n).is_some() => {
+                pace.compact_at = number(n).expect("checked")
+            }
+            // Slows each sync of the journal: for tests.
+            ["--sync-delay", ms] if ms.parse::<u64>().is_ok() => {
+                delay = ms.parse().expect("checked")
+            }
             _ => return usage(),
         }
     }
     let Some(socket) = socket else {
         return usage();
     };
-    let store = match open_store(dir) {
-        Ok(store) => store,
+    let opened = match dir {
+        None => Ok((Store::memory(), None, Vec::new())),
+        Some(dir) => {
+            let delay = std::time::Duration::from_millis(delay);
+            journal::open_grouped(std::path::Path::new(dir), delay)
+                .map(|(store, durable, warnings)| (store, Some(durable), warnings))
+        }
+    };
+    let (store, durable) = match opened {
+        Ok((store, durable, warnings)) => {
+            for w in warnings {
+                eprintln!("{}: {w}", dir.unwrap_or_default());
+            }
+            (store, durable)
+        }
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("{}", e.0);
             return ExitCode::FAILURE;
         }
     };
-    match hbds_daemon::serve(store, std::path::Path::new(socket), &ADT81, slice) {
+    match hbds_daemon::serve(store, durable, std::path::Path::new(socket), &ADT81, pace) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e}");
@@ -211,6 +238,18 @@ fn main() -> ExitCode {
             eprintln!("{e}");
             return ExitCode::FAILURE;
         }
+    }
+    if let ["compact", dir] = args.as_slice() {
+        return match journal::compact(std::path::Path::new(dir)) {
+            Ok((before, after)) => {
+                println!("{dir}: {before} lines, now {after}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{}", e.0);
+                ExitCode::FAILURE
+            }
+        };
     }
     if let ["daemon", rest @ ..] = args.as_slice() {
         return daemon(rest);

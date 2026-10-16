@@ -19,6 +19,11 @@ struct Daemon {
 
 impl Daemon {
     fn start(name: &str) -> Daemon {
+        Daemon::with(name, &[])
+    }
+
+    /// A daemon with more arguments: a store, the journal's pace.
+    fn with(name: &str, args: &[&str]) -> Daemon {
         let socket = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.sock"));
         let _ = fs::remove_file(&socket);
         let child = Command::new(BIN)
@@ -29,6 +34,7 @@ impl Daemon {
                 "--socket",
                 socket.to_str().unwrap(),
             ])
+            .args(args)
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
@@ -218,4 +224,80 @@ fn the_store_is_the_daemons() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "7\n");
+}
+
+fn store_dir(name: &str) -> String {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_dir_all(&dir);
+    dir.to_str().unwrap().to_string()
+}
+
+#[test]
+fn a_client_hears_nothing_before_its_sync() {
+    let dir = store_dir("daemon-slow-store");
+    let daemon = Daemon::with("slow", &["--store", &dir, "--sync-delay", "400"]);
+    let keeps = write(
+        "daemon-slow",
+        "keeps.adt",
+        "program keeps ;\nbegin\n        create \"c\" ;\n        print \"kept\"\nend ;\n",
+    );
+    let start = Instant::now();
+    let out = daemon.client(&keeps).output().unwrap();
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "kept\n");
+    // The class's transaction syncs in no less than the delay; the
+    // output that follows it waited.
+    assert!(
+        start.elapsed() >= Duration::from_millis(400),
+        "{:?}",
+        start.elapsed()
+    );
+    let journal = daemon.get("/journal");
+    assert!(
+        journal.contains("\"submitted\":1,\"synced\":1"),
+        "{journal}"
+    );
+}
+
+#[test]
+fn the_journal_compacts_and_survives_a_kill() {
+    let dir = store_dir("daemon-compact-store");
+    let counts = write(
+        "daemon-compact",
+        "counts.adt",
+        "program counts ;\nlocal\n        i : integer ;\nbegin\n        create \"c\" ; create \"c\" . \"n\" ; create \"o\" [ \"c\" ] ;\n        loop for i : 1 to 300 do\n                let \"o\" [ \"c\" ] . \"n\" := i\n        endloop ;\n        print \"counted\"\nend ;\n",
+    );
+    let finds = write(
+        "daemon-compact",
+        "finds.adt",
+        "program finds ;\nbegin\n        print \"o\" [ \"c\" ] . \"n\"\nend ;\n",
+    );
+    {
+        let daemon = Daemon::with("compact", &["--store", &dir, "--compact-at", "50"]);
+        let out = daemon.client(&counts).output().unwrap();
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "counted\n");
+        // The journal catches up, then compacts what the run left.
+        let start = Instant::now();
+        let lines = |j: &str| {
+            let at = j.find("\"lines\":").expect("lines") + "\"lines\":".len();
+            let n: String = j[at..].chars().take_while(char::is_ascii_digit).collect();
+            n.parse::<u64>().unwrap()
+        };
+        loop {
+            let journal = daemon.get("/journal");
+            if !journal.contains("\"compactions\":0") && lines(&journal) < 100 {
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(20), "{journal}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Dropped: killed, SIGKILL, with no chance to tidy up.
+    }
+    let lines = fs::read_to_string(Path::new(&dir).join("journal"))
+        .unwrap()
+        .lines()
+        .count();
+    assert!(lines < 100, "{lines} lines in the journal");
+    let daemon = Daemon::with("compact", &["--store", &dir]);
+    let out = daemon.client(&finds).output().unwrap();
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "300\n");
 }

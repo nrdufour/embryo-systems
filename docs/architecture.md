@@ -240,6 +240,25 @@ passive, their bodies starting over); a binary snapshot format beside the
 journal; a sync per statement, or on a timer that may lose what was
 acknowledged.
 
+As built (2026-10-16, step 6b): the journal's version 2 closes each
+transaction with a `commit` line, so that a crash in the middle of one
+drops it whole; version 1, a line a transaction, is read and rewritten.
+`Store::changes()` is the shortest sequence rebuilding a store, ids kept,
+tested by replaying it after every corpus program and every hundred
+random changes. A daemon's store records to the journal's thread: a kept
+transaction is queued, and the thread writes and syncs what has queued
+up in one go; `Durable` says how far it has got, and each event to a
+client waits for the transactions made before it. The daemon compacts
+once the journal is past `--compact-at` lines (10 000) and twice what the
+last compaction wrote, looked at after each turn and, idle, every 100 ms
+(the journal may still be catching up); the executor hands the thread `changes()` in
+the queue's order, so that what follows lands in the new file;
+`embryo-systems compact DIR` does it for a store no daemon holds. A write
+that fails stops the journal: what follows is refused, and waiting
+clients hear why. Not built: a benchmark of the journal, whose syncs
+depend on the disk and on timing, which the work and time gates cannot
+hold steady; the journal's tests count syncs instead.
+
 ### 6. Time: one sequencing set per store, at a pace set live
 
 - **Standalone programs keep SIMULA's rules:** the main program is a
