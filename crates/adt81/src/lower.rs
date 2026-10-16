@@ -529,6 +529,7 @@ fn statement(tree: &Tree) -> Lowered<Option<Stmt>> {
             }
         }
         R::Assertion => assertion(tree)?,
+        R::Modality => modality(tree)?,
         R::Specify => specify(tree)?,
         R::Include | R::Exclude => {
             let mut lists = trees(tree).map(classes);
@@ -674,6 +675,28 @@ fn operands(list: &Tree) -> Lowered<Operands> {
                 .collect::<Lowered<_>>()?,
         ),
         rule => panic!("{} is not a list of operands", rule.name()),
+    })
+}
+
+fn modality(tree: &Tree) -> Lowered<StmtKind> {
+    let mut objects = trees_of(tree, R::Object).map(designation);
+    let relation = tree
+        .children
+        .iter()
+        .find(|c| matches!(c, Node::Token(t) if t.kind == Kind::String))
+        .expect("a relation");
+    let modal = if has(tree, "MUST") {
+        Modal::Must
+    } else if has(tree, "CANNOT") {
+        Modal::Cannot
+    } else {
+        Modal::May
+    };
+    Ok(StmtKind::Modality {
+        from: objects.next().unwrap()?,
+        modal,
+        relation: string(relation),
+        to: objects.next().unwrap()?,
     })
 }
 

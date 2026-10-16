@@ -129,6 +129,24 @@ pub struct ObjectLink {
     pub state: State,
 }
 
+/// What a pair of objects is held to, by a link of their classes (page
+/// 159): MUST keeps the link, CANNOT keeps it out. MAY, the default, is
+/// no entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modality {
+    Must,
+    Cannot,
+}
+
+impl Modality {
+    pub fn word(self) -> &'static str {
+        match self {
+            Modality::Must => "MUST",
+            Modality::Cannot => "CANNOT",
+        }
+    }
+}
+
 /// Every mutation of the store: what the journal records.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
@@ -198,6 +216,13 @@ pub enum Change {
         a: AdtRef,
         b: AdtRef,
     },
+    /// MUST, CANNOT, or MAY (none) for a pair, by a class link.
+    Modality {
+        class_link: Id,
+        from: Id,
+        to: Id,
+        modality: Option<Modality>,
+    },
     Dissoc {
         a: AdtRef,
         b: AdtRef,
@@ -251,6 +276,8 @@ pub struct Store {
     class_links: PMap<Id, ClassLink>,
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
+    /// MUST and CANNOT, by (class link, from, to), as written.
+    modalities: BTreeMap<(Id, Id, Id), Modality>,
     /// The modules kept, by hash, in the order they came.
     modules: Vec<(String, String)>,
     /// The kernel's fibers and sequencing set, last kept.
@@ -303,6 +330,7 @@ struct Snapshot {
     class_links: PMap<Id, ClassLink>,
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
+    modalities: BTreeMap<(Id, Id, Id), Modality>,
     modules: Vec<(String, String)>,
     fibers: Option<String>,
     sequencing: Option<String>,
@@ -569,6 +597,7 @@ impl Store {
             class_links: self.class_links.clone(),
             object_links: self.object_links.clone(),
             associations: self.associations.clone(),
+            modalities: self.modalities.clone(),
             modules: self.modules.clone(),
             fibers: self.fibers.clone(),
             sequencing: self.sequencing.clone(),
@@ -585,6 +614,7 @@ impl Store {
         self.class_links.restore(s.class_links);
         self.object_links.restore(s.object_links);
         self.associations = s.associations;
+        self.modalities = s.modalities;
         self.modules = s.modules;
         self.fibers = s.fibers;
         self.sequencing = s.sequencing;
@@ -809,7 +839,16 @@ impl Store {
                 }
             }
             Change::State { target, state } => self.set_state(target, state),
-            Change::Purge { target } => self.purge(target),
+            Change::Purge { target } => {
+                self.purge(target);
+                // What held gone objects or links goes with them.
+                let (objects, class_links) = (&self.objects, &self.class_links);
+                self.modalities.retain(|(l, a, b), _| {
+                    class_links.contains_key(l)
+                        && objects.contains_key(a)
+                        && objects.contains_key(b)
+                });
+            }
             Change::Include { class, hyper } => {
                 if let Some(c) = self.classes.get_mut(&class) {
                     c.hyper.insert(hyper);
@@ -835,6 +874,19 @@ impl Store {
                 }
             }
             Change::Dissoc { a, b } => self.associations.retain(|p| *p != (a, b)),
+            Change::Modality {
+                class_link,
+                from,
+                to,
+                modality,
+            } => match modality {
+                Some(m) => {
+                    self.modalities.insert((class_link, from, to), m);
+                }
+                None => {
+                    self.modalities.remove(&(class_link, from, to));
+                }
+            },
             Change::Property {
                 target,
                 name,
@@ -1387,6 +1439,12 @@ impl Store {
         }
         let (a, b) = (self.objects[&from].class, self.objects[&to].class);
         let class_link = self.class_link(a, relation, b)?;
+        if let Some((key, Modality::Cannot)) = self.held(class_link, from, to) {
+            return error(format!(
+                "{}: the link is not asserted",
+                self.pair(key, Modality::Cannot)
+            ));
+        }
         let id = self.fresh();
         let reverse = self.fresh();
         self.commit(Change::ObjectLink {
@@ -1401,10 +1459,79 @@ impl Store {
     }
 
     pub fn retract_link(&mut self, from: Id, relation: &str, to: Id) -> Stored<()> {
-        match self.object_link(from, relation, to) {
-            Some(id) => self.commit(Change::Unlink { id }),
-            None => Ok(()),
+        let Some(id) = self.object_link(from, relation, to) else {
+            return Ok(());
+        };
+        let class_link = self.object_links[&id].class_link;
+        if let Some((key, Modality::Must)) = self.held(class_link, from, to) {
+            return error(format!(
+                "{}: the link is not retracted",
+                self.pair(key, Modality::Must)
+            ));
         }
+        self.commit(Change::Unlink { id })
+    }
+
+    /// MUST, CANNOT, or MAY (`None`): what holds `from` and `to` by the
+    /// link of their classes named `relation` from then on (page 159).
+    pub fn hold_to(
+        &mut self,
+        from: Id,
+        relation: &str,
+        to: Id,
+        modality: Option<Modality>,
+    ) -> Stored<()> {
+        let (a, b) = (self.objects[&from].class, self.objects[&to].class);
+        let class_link = self.class_link(a, relation, b)?;
+        // Written either way, it is one pair: the other way is cleared.
+        let reverse = self.class_links[&class_link].reverse;
+        if self.modalities.contains_key(&(reverse, to, from))
+            && (reverse, to, from) != (class_link, from, to)
+        {
+            self.commit(Change::Modality {
+                class_link: reverse,
+                from: to,
+                to: from,
+                modality: None,
+            })?;
+        }
+        if self.modalities.get(&(class_link, from, to)).copied() == modality {
+            return Ok(());
+        }
+        self.commit(Change::Modality {
+            class_link,
+            from,
+            to,
+            modality,
+        })
+    }
+
+    /// What holds a pair by a class link, written either way.
+    pub fn modality(&self, class_link: Id, from: Id, to: Id) -> Option<Modality> {
+        self.held(class_link, from, to).map(|(_, m)| m)
+    }
+
+    /// What holds a pair, and the pair as it was written.
+    fn held(&self, class_link: Id, from: Id, to: Id) -> Option<((Id, Id, Id), Modality)> {
+        let reverse = self.class_links.get(&class_link).map(|l| l.reverse);
+        let mut keys = [Some((class_link, from, to)), reverse.map(|r| (r, to, from))].into_iter();
+        keys.find_map(|k| k.and_then(|k| self.modalities.get(&k).map(|m| (k, *m))))
+    }
+
+    /// A pair held, as it was written: a[c] MUST "follow" b[c].
+    fn pair(&self, (l, a, b): (Id, Id, Id), m: Modality) -> String {
+        let relation = self.class_links[&l].relation.clone().unwrap_or_default();
+        format!(
+            "{} {} \"{relation}\" {}",
+            self.describe(AdtRef::Object(a)),
+            m.word(),
+            self.describe(AdtRef::Object(b))
+        )
+    }
+
+    /// The MUST and CANNOT standing, by (class link, from, to).
+    pub fn modalities(&self) -> &BTreeMap<(Id, Id, Id), Modality> {
+        &self.modalities
     }
 
     /// Sets a value; setting the one it has changes nothing.
@@ -1439,6 +1566,16 @@ impl Store {
 
     /// HIBERN, AWAKE, DESTROY, RESUR: each from the state it expects.
     pub fn change_state(&mut self, target: AdtRef, from: State, to: State) -> Stored<()> {
+        if let (AdtRef::Object(o), State::Destroyed) = (target, to)
+            && let Some((&key, _)) = (self.modalities.iter())
+                .find(|((_, a, b), m)| **m == Modality::Must && (*a == o || *b == o))
+        {
+            return error(format!(
+                "{}: {} is not destroyed",
+                self.pair(key, Modality::Must),
+                self.describe(target)
+            ));
+        }
         match self.state(target) {
             Some(s) if s == from => self.commit(Change::State { target, state: to }),
             Some(s) => error(format!(
@@ -1715,6 +1852,14 @@ impl Store {
         for &(a, b) in &self.associations {
             out.push(Change::Assoc { a, b });
         }
+        for (&(class_link, from, to), &m) in &self.modalities {
+            out.push(Change::Modality {
+                class_link,
+                from,
+                to,
+                modality: Some(m),
+            });
+        }
         for (hash, text) in &self.modules {
             out.push(Change::Module {
                 hash: hash.clone(),
@@ -1848,6 +1993,9 @@ impl Store {
         }
         for (a, b) in &self.associations {
             out += &format!("assoc {} WITH {}\n", self.describe(*a), self.describe(*b));
+        }
+        for (&key, &m) in &self.modalities {
+            out += &format!("{}\n", self.pair(key, m));
         }
         out
     }

@@ -1,0 +1,2 @@
+before
+9:9: runtime error: w[arc] CANNOT "intersect" m[arc]: the link is not asserted

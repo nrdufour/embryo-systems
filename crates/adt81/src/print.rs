@@ -876,6 +876,17 @@ impl Printer {
                 format!("LET {target} := {}", self.expr_text(value, 0))
             }
             StmtKind::Assert(Assertion::Name(n)) => format!("ASSERT {}", n.spelling),
+            StmtKind::Modality {
+                from,
+                modal,
+                relation,
+                to,
+            } => words(&[
+                &self.designation(from),
+                modal.word(),
+                &quoted(&relation.text),
+                &self.designation(to),
+            ]),
             StmtKind::Assert(Assertion::Link {
                 from,
                 negated,

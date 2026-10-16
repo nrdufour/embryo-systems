@@ -1,0 +1,8 @@
+b follows a TRUE
+a followed by b TRUE
+lifted, retracted FALSE
+intersect TRUE
+cannot FALSE
+may again TRUE
+must then cannot FALSE
+c destroyed

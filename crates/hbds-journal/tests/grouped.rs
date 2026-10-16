@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use hbds_core::AdtRef;
 use hbds_core::value::Value;
-use hbds_gtad::{ClassKind, State, Store};
+use hbds_gtad::{ClassKind, Modality, State, Store};
 use hbds_journal as journal;
 
 fn directory(name: &str) -> PathBuf {
@@ -147,5 +147,39 @@ fn versions_older_read_newer_refused() {
     fs::write(dir.join("journal"), "journal 3\n").unwrap();
     let e = journal::open(&dir).err().expect("a newer journal").0;
     assert_eq!(e, "the journal's version 3 is newer than this reader's, 2");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn modalities_are_journalled_and_refused_with_their_transaction() {
+    let dir = directory("modalities");
+    let (mut store, _) = journal::open(&dir).unwrap();
+    let v = store.create_class("vehicle", ClassKind::Class).unwrap();
+    store
+        .create_class_link(v, "follow", v, Some("followed by"), false)
+        .unwrap();
+    let a = store.create_object(v, "a").unwrap();
+    let b = store.create_object(v, "b").unwrap();
+    let c = store.create_object(v, "c").unwrap();
+    store.hold_to(b, "follow", a, Some(Modality::Must)).unwrap();
+    store
+        .hold_to(c, "follow", a, Some(Modality::Cannot))
+        .unwrap();
+    // A refused transaction takes its modality back.
+    store.begin();
+    store.hold_to(a, "follow", c, Some(Modality::Must)).unwrap();
+    store.end(false).unwrap();
+    let dump = store.dump();
+    assert!(
+        dump.ends_with(
+            "b[vehicle] MUST \"follow\" a[vehicle]\nc[vehicle] CANNOT \"follow\" a[vehicle]\n"
+        ),
+        "{dump}"
+    );
+    assert!(store.assert_link(a, "followed by", c, None).is_err());
+    drop(store);
+    assert_eq!(reopened(&dir), dump);
+    journal::compact(&dir).unwrap();
+    assert_eq!(reopened(&dir), dump);
     let _ = fs::remove_dir_all(&dir);
 }

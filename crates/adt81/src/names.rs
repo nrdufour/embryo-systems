@@ -579,7 +579,8 @@ impl Resolver<'_> {
                 self.expr(value);
             }
             StmtKind::Assert(Assertion::Name(n)) => self.variable(n),
-            StmtKind::Assert(Assertion::Link { from, to, .. }) => {
+            StmtKind::Assert(Assertion::Link { from, to, .. })
+            | StmtKind::Modality { from, to, .. } => {
                 self.designation(from);
                 self.designation(to);
             }

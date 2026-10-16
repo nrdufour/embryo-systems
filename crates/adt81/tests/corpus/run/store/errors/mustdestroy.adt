@@ -1,0 +1,10 @@
+-- An object a link MUST hold is not destroyed (page 159). --
+
+program e ;
+begin
+        create "vehicle" ; create "vehicle" "follow" "vehicle" ;
+        create "a" [ "vehicle" ], "b" [ "vehicle" ] ;
+        "b" [ "vehicle" ] must "follow" "a" [ "vehicle" ] ;
+        print "before" ;
+        destroy "a" [ "vehicle" ]
+end ;

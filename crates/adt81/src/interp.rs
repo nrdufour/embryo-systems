@@ -1222,6 +1222,45 @@ impl Machine {
                 })
             }
             StmtKind::Assert(Assertion::Name(_)) => Err(not_yet(s.span, "ASSERT of a name")),
+            StmtKind::Modality {
+                from,
+                modal,
+                relation,
+                to,
+            } => {
+                let a = self.object(from, f, s.span)?;
+                let b = self.object(to, f, s.span)?;
+                let stamp = self.ses.lock().unwrap().stamp;
+                self.atomic(s.span, |m| {
+                    let mut store = m.store.lock().unwrap();
+                    let r = &relation.text;
+                    match modal {
+                        Modal::May => stored(store.hold_to(a, r, b, None), s.span),
+                        // CANNOT: the link goes, and stays out.
+                        Modal::Cannot => {
+                            stored(
+                                store.hold_to(a, r, b, Some(hbds_gtad::Modality::Cannot)),
+                                s.span,
+                            )?;
+                            stored(store.retract_link(a, r, b), s.span)
+                        }
+                        // MUST: the link is, and stays; one asserted here
+                        // runs its CONDs and ACTIONs as ASSERT does.
+                        Modal::Must => {
+                            stored(
+                                store.hold_to(a, r, b, Some(hbds_gtad::Modality::Must)),
+                                s.span,
+                            )?;
+                            if store.object_link(a, r, b).is_some() {
+                                return Ok(());
+                            }
+                            let l = stored(store.assert_link(a, r, b, stamp), s.span)?;
+                            drop(store);
+                            m.trigger(Invoked::Linked(l), f, s.span)
+                        }
+                    }
+                })
+            }
             StmtKind::Specify {
                 items,
                 spec,

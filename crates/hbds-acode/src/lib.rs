@@ -16,6 +16,24 @@ use hbds_core::spec::Spec;
 use hbds_core::terms::{self, Reader, Term};
 use hbds_values::{Base, Computed, Fz, Op, Rank, Unary, Value};
 
+/// MAY, MUST or CANNOT, as an instruction holds two objects to a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modal {
+    May,
+    Must,
+    Cannot,
+}
+
+impl Modal {
+    pub fn word(self) -> &'static str {
+        match self {
+            Modal::May => "may",
+            Modal::Must => "must",
+            Modal::Cannot => "cannot",
+        }
+    }
+}
+
 /// The version this crate writes and reads.
 pub const VERSION: u32 = 1;
 
@@ -328,6 +346,8 @@ pub enum Instr {
     SetProperty(String, Span),
     /// Pops two objects; the probability; RETRACT if true.
     Assert(String, Option<f64>, bool),
+    /// Pops two objects: what holds them to the link (page 159).
+    Modality(String, Modal),
     /// Pops an a.d.t.: its specification, unit, COMPUTED.
     Specify(Spec, Option<String>, bool),
     /// Pops m hyperclasses and n classes: INCLUDE if true, EXCLUDE else.
@@ -620,6 +640,7 @@ fn instr(i: &Instr) -> Vec<Term> {
         Instr::SetAttribute => vec![word("set.attribute")],
         Instr::SetHeld(v, at) => vec![word("set.held"), text(v), word(span_text(*at))],
         Instr::SetProperty(k, at) => vec![word("set.property"), text(k), word(span_text(*at))],
+        Instr::Modality(r, m) => vec![word("modality"), text(r), word(m.word())],
         Instr::Assert(r, p, negated) => vec![
             word("assert"),
             text(r),
@@ -747,6 +768,15 @@ fn read_instr(r: &mut Reader) -> Result<Instr, String> {
         "set.held" => Instr::SetHeld(r.text()?, read_span(r.word()?)?),
         "set.property" => Instr::SetProperty(r.text()?, read_span(r.word()?)?),
         "assert" => Instr::Assert(r.text()?, r.optional(|r| r.parse())?, r.parse()?),
+        "modality" => Instr::Modality(
+            r.text()?,
+            match r.word()? {
+                "may" => Modal::May,
+                "must" => Modal::Must,
+                "cannot" => Modal::Cannot,
+                w => return Err(format!("no modality {w}")),
+            },
+        ),
         "specify" => {
             let spec = r.text()?;
             let spec = spec

@@ -31,7 +31,7 @@ use std::time::Duration;
 use hbds_core::terms::{
     Reader, Term, adt_ref, float, list, optional, read_terms, text, value, word, write_term,
 };
-use hbds_gtad::{Change, ClassKind, Error, Recorder, State, Store, state_name};
+use hbds_gtad::{Change, ClassKind, Error, Modality, Recorder, State, Store, state_name};
 
 /// The journal's format, decision 10: older ones read, newer refused.
 pub const VERSION: u32 = 2;
@@ -561,6 +561,21 @@ fn encode(change: &Change) -> String {
         Change::Exclude { class, hyper } => vec![word("exclude"), word(class), word(hyper)],
         Change::Assoc { a, b } => vec![word("assoc"), adt_ref(*a), adt_ref(*b)],
         Change::Dissoc { a, b } => vec![word("dissoc"), adt_ref(*a), adt_ref(*b)],
+        Change::Modality {
+            class_link,
+            from,
+            to,
+            modality,
+        } => vec![
+            word("modality"),
+            word(class_link),
+            word(from),
+            word(to),
+            word(modality.map_or("may", |m| match m {
+                Modality::Must => "must",
+                Modality::Cannot => "cannot",
+            })),
+        ],
         Change::Property {
             target,
             name,
@@ -680,6 +695,17 @@ fn decode(line: &str) -> Result<Change, String> {
         "dissoc" => Change::Dissoc {
             a: r.adt_ref()?,
             b: r.adt_ref()?,
+        },
+        "modality" => Change::Modality {
+            class_link: r.parse()?,
+            from: r.parse()?,
+            to: r.parse()?,
+            modality: match r.word()? {
+                "may" => None,
+                "must" => Some(Modality::Must),
+                "cannot" => Some(Modality::Cannot),
+                w => return Err(format!("no modality {w}")),
+            },
         },
         "property" => Change::Property {
             target: r.adt_ref()?,

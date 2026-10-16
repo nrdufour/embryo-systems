@@ -659,6 +659,12 @@ impl Gen {
                 },
                 value: self.expr(e),
             },
+            22 if self.0.one_in(4) => StmtKind::Modality {
+                from: self.object(1),
+                modal: [Modal::May, Modal::Must, Modal::Cannot][self.0.below(3)],
+                relation: self.str(),
+                to: self.object(1),
+            },
             22 => StmtKind::Assert(if self.0.one_in(3) {
                 Assertion::Name(self.name())
             } else {

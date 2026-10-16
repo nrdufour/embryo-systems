@@ -107,6 +107,7 @@ rules! {
     AdtAssignment = "adt_assignment",
     Property = "property",
     Assertion = "assertion",
+    Modality = "modality",
     Specify = "specify",
     Specification = "specification",
     Include = "include",
@@ -891,6 +892,11 @@ impl<'a> Parser<'a> {
         let Some(t) = self.peek(0) else {
             return Ok(node(R::EmptyStatement, vec![]));
         };
+        if self.starts_object()
+            && let Some(m) = self.attempt(Self::modality)
+        {
+            return Ok(node(R::AdtStatement, vec![m]));
+        }
         if t.kind == Kind::Ident {
             return self.assignment();
         }
@@ -1185,13 +1191,27 @@ impl<'a> Parser<'a> {
         Ok(node(R::ObjectAttribute, c))
     }
 
-    fn assertion(&mut self) -> Parse<Node<'a>> {
-        let mut c = vec![self.kw("ASSERT")?];
-        let starts_object = self.is_kind(0, Kind::Ident)
+    fn starts_object(&self) -> bool {
+        self.is_kind(0, Kind::Ident)
             || self.is_kind(0, Kind::String)
             || self.is_sym(0, "(")
-            || self.is_kw(0, "THIS");
-        let link = starts_object
+            || self.is_kw(0, "THIS")
+    }
+
+    fn modality(&mut self) -> Parse<Node<'a>> {
+        let c = vec![
+            self.object()?,
+            self.kw_of(&["MAY", "MUST", "CANNOT"])?,
+            self.string()?,
+            self.object()?,
+        ];
+        Ok(node(R::Modality, c))
+    }
+
+    fn assertion(&mut self) -> Parse<Node<'a>> {
+        let mut c = vec![self.kw("ASSERT")?];
+        let link = self
+            .starts_object()
             .then(|| {
                 self.attempt(|p| {
                     let mut c = vec![p.object()?];

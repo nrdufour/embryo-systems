@@ -201,7 +201,12 @@ impl Walk {
                 negated: false,
                 relation,
                 ..
-            }) => add(&mut self.uses.relations, &relation.text),
+            })
+            | StmtKind::Modality {
+                modal: Modal::Must,
+                relation,
+                ..
+            } => add(&mut self.uses.relations, &relation.text),
             _ => {}
         }
     }

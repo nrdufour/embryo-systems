@@ -551,6 +551,13 @@ pub enum StmtKind {
         value: Expr,
     },
     Assert(Assertion),
+    /// MAY, MUST or CANNOT: what holds two objects to a link (page 159).
+    Modality {
+        from: Designation,
+        modal: Modal,
+        relation: Str,
+        to: Designation,
+    },
     Specify {
         items: Vec<Specified>,
         spec: Specification,
@@ -667,6 +674,23 @@ pub enum LetTarget {
         adt: Adt,
         name: Name,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modal {
+    May,
+    Must,
+    Cannot,
+}
+
+impl Modal {
+    pub fn word(self) -> &'static str {
+        match self {
+            Modal::May => "MAY",
+            Modal::Must => "MUST",
+            Modal::Cannot => "CANNOT",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
