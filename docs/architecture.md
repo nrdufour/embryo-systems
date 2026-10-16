@@ -386,6 +386,21 @@ sequencing set per session. `tests/daemon.rs` runs the whole corpus as
 sessions, two at once, and a client that leaves; `tests/vm.rs` runs it
 in turns of five instructions too.
 
+As built (2026-10-16, step 6d): `GET /events` is the feed, a WebSocket
+the daemon only writes to, each frame once what came before it is on
+disk: the store's changes as the journal writes them (a module by its
+hash, the kernel's saved state left out), sessions starting and ending,
+the time as each kernel turn leaves it, the pace when it changes, and
+what a process prints with no client to print to. `GET /sessions` lists
+the sessions; `POST /sessions/ID/kill` ends one, its client told so, its
+processes kept (decision 3's administrator). `nix/module.nix`, the
+flake's `nixosModules.default`, runs the daemon as a service: its own
+user, the store in `/var/lib/embryo-systems`, the socket in
+`/run/embryo-systems` and the group's alone (`UMask=0007`), the pace and
+the rest as options, sandboxed; `just module` evaluates a system with it
+enabled and checks its unit. nginx, oauth2-proxy and Kanidm before it
+are the host's to configure, as above. Step 6 is done.
+
 ### 9. Standalone builds carry what they need
 
 - **Two products:** an `.acode` file, portable compiled modules (for

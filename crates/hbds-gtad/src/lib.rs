@@ -255,6 +255,8 @@ pub struct Store {
     sequencing: Option<String>,
     ix: Indexes,
     recorder: Option<Box<dyn Recorder>>,
+    /// The changes kept since last taken, when someone watches.
+    kept: Option<Vec<Change>>,
     transaction: Option<Transaction>,
     counted: Counted,
 }
@@ -531,8 +533,13 @@ impl Store {
         add(&self.counted.changes, 1);
         if let Some(t) = &mut self.transaction {
             t.changes.push(change.clone());
-        } else if let Some(recorder) = &mut self.recorder {
-            recorder.record(&change).map_err(Error)?;
+        } else {
+            if let Some(recorder) = &mut self.recorder {
+                recorder.record(&change).map_err(Error)?;
+            }
+            if let Some(kept) = &mut self.kept {
+                kept.push(change.clone());
+            }
         }
         self.apply(change);
         Ok(())
@@ -604,7 +611,22 @@ impl Store {
             self.restore(t.snapshot);
             return Err(Error(e));
         }
+        if let Some(kept) = &mut self.kept {
+            kept.extend(t.changes);
+        }
         Ok(())
+    }
+
+    /// From now on, the changes kept are gathered for [`take_kept`](
+    /// Store::take_kept): the daemon's feed.
+    pub fn observe(&mut self) {
+        self.kept.get_or_insert_with(Vec::new);
+    }
+
+    /// The changes kept since last taken, in order: a transaction kept,
+    /// or a change made outside one.
+    pub fn take_kept(&mut self) -> Vec<Change> {
+        self.kept.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     /// The open transaction's changes so far, in order; none outside one.

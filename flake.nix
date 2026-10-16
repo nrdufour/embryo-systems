@@ -56,5 +56,26 @@
       });
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt);
+
+      nixosModules.default = import ./nix/module.nix self;
+
+      # `just module`: the service a NixOS system with the module enabled
+      # gets, evaluated, not built.
+      lib.serviceUnit =
+        (nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+          modules = [
+            self.nixosModules.default
+            {
+              services.embryo-systems = {
+                enable = true;
+                pace = "real";
+                factor = 2.0;
+              };
+              boot.isContainer = true;
+              system.stateVersion = "26.05";
+            }
+          ];
+        }).config.systemd.units."embryo-systems.service".text;
     };
 }

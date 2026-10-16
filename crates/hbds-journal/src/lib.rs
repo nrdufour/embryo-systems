@@ -477,6 +477,11 @@ fn state_word(s: State) -> Term {
     word(state_name(s))
 }
 
+/// A change as the journal writes it.
+pub fn line(change: &Change) -> String {
+    encode(change)
+}
+
 fn encode(change: &Change) -> String {
     let terms = match change {
         Change::Class { id, name, kind } => {

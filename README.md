@@ -32,6 +32,7 @@ cargo run -q -- store /tmp/hydro                                   # what the st
 | `embryo-systems acode FILE` | the program compiled to A-code, as text: an `.acode` file |
 | `embryo-systems exec [--store DIR] FILE` | runs an `.acode` file on the VM |
 | `embryo-systems daemon --socket SOCKET [--store DIR] [--pace paused\|fast\|real]` | serves a store on a Unix socket; `run`, `exec` and built programs take `--connect SOCKET` to run there, clients taking turns; one time for the store, its processes outliving their clients, at a pace `POST /pace` changes |
+| `GET /events`, `GET /sessions`, `POST /sessions/ID/kill` | on a daemon's socket: the feed of what happens (changes, sessions, time, processes' output), the sessions, killing one |
 | `embryo-systems build FILE -o OUT` | writes OUT, an executable carrying the program: `OUT [--store DIR]` runs it, anywhere on this platform |
 | `embryo-systems check FILE` | undeclared and misused names, type errors |
 | `embryo-systems compact DIR` | rewrites a store's journal as the shortest that rebuilds it |
@@ -134,6 +135,15 @@ The system's own steps (A-code and a VM, standalone builds, a daemon with a web 
 | NINJAS, protection against object-oriented viruses | project 20, page 150 |
 | ADTmin, precompilers to C, Ada, Pascal and Fortran | page 161 |
 
+On NixOS, the flake's `nixosModules.default` runs the daemon as a service:
+
+```nix
+services.embryo-systems = {
+  enable = true;
+  pace = "real";
+};
+```
+
 ## Develop
 
 The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs, on Forgejo where the project lives and on its GitHub mirror alike:
@@ -144,6 +154,7 @@ The flake's dev shell, loaded by direnv, carries every tool, and `just` lists th
 - `just engines`: each crate depends only on what it may
 - `just docs`: every path and link in the documentation exists
 - the confusable-characters check
+- `just module`: a NixOS system with `nixosModules.default` enabled gets the daemon's service
 
 ## License
 

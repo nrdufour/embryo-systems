@@ -163,12 +163,12 @@ fn sessions_take_turns_and_leave() {
     // The loop never ends: the short program runs in the turns between.
     let out = daemon.client(&short).output().unwrap();
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "short\n");
-    assert_eq!(daemon.get("/sessions"), "1\n");
+    assert_eq!(daemon.get("/sessions").lines().count(), 1);
     // Its client gone, the session goes.
     long.kill().unwrap();
     long.wait().unwrap();
     let start = Instant::now();
-    while daemon.get("/sessions") != "0\n" {
+    while !daemon.get("/sessions").is_empty() {
         assert!(
             start.elapsed() < Duration::from_secs(10),
             "the session outlives its client"
@@ -551,4 +551,179 @@ fn an_activation_outlives_a_crash() {
     let daemon = Daemon::with("activation", &["--store", &dir, "--pace", "paused"]);
     let time = daemon.get("/time");
     assert!(time.contains("\"agent\":\"w1[w]\""), "{time}");
+}
+
+/// A subscriber to the feed: its frames, as they come.
+struct Feed {
+    reader: std::io::BufReader<UnixStream>,
+}
+
+impl Feed {
+    fn open(daemon: &Daemon) -> Feed {
+        let stream = UnixStream::connect(&daemon.socket).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        hbds_http::upgrade_request("/events")
+            .write(&mut writer)
+            .unwrap();
+        let mut reader = std::io::BufReader::new(stream);
+        let r = hbds_http::Response::read(&mut reader).unwrap();
+        assert_eq!(r.status, 101);
+        Feed { reader }
+    }
+
+    /// The next frame.
+    fn next(&mut self) -> String {
+        match hbds_http::read_message(&mut self.reader).expect("a frame in time") {
+            hbds_http::Message::Text(t) => t,
+            m => panic!("{m:?}"),
+        }
+    }
+
+    /// Frames until one contains `wanted`, which it gives.
+    fn until(&mut self, wanted: &str) -> String {
+        loop {
+            let f = self.next();
+            if f.contains(wanted) {
+                return f;
+            }
+        }
+    }
+}
+
+#[test]
+fn the_feed_tells_what_happens() {
+    let dir = store_dir("daemon-feed-store");
+    let daemon = Daemon::with(
+        "feed",
+        &["--store", &dir, "--pace", "paused", "--sync-delay", "300"],
+    );
+    let mut feed = Feed::open(&daemon);
+    let begun = Instant::now();
+    let keeps = write(
+        "daemon-feed",
+        "keeps.adt",
+        "program keeps ;\nbegin\n        create \"c\" ;\n        print \"kept\"\nend ;\n",
+    );
+    let client = spawn(daemon.client(&keeps));
+    // The unit kept, the session started, its change, its end.
+    feed.until("{\"module\":");
+    assert!(feed.until("started").contains("\"session\":"));
+    assert_eq!(
+        feed.until("change"),
+        "{\"change\":\"class 1 \\\"c\\\" class\"}"
+    );
+    // Not before it is on disk: one slowed sync at least (the unit's and
+    // the class's may share one).
+    assert!(
+        begun.elapsed() >= Duration::from_millis(300),
+        "{:?}",
+        begun.elapsed()
+    );
+    assert!(
+        feed.until("ended")
+            .starts_with("{\"ended\":null,\"session\":")
+    );
+    assert_eq!(within(client, 20), "kept\n");
+    // A process whose client left prints to the feed; time and pace go by.
+    let start = write("daemon-feed", "start.adt", &simulation(1, &["w1"]));
+    assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+    let printer = write(
+        "daemon-feed",
+        "printer.adt",
+        "program printer ;\nbegin\n        create \"p\" ; include \"p\" into \"process\" ;\n        create \"p1\" [ \"p\" ] ; activate \"p1\" [ \"p\" ]\nend ;\n\ncoroutine \"p\" ;\nbegin\n        print \"tick\", time ;\n        hold for 1 ;\n        print \"tock\", time\nend ;\n",
+    );
+    assert_eq!(within(spawn(daemon.client(&printer)), 20), "");
+    daemon.post("/pace", "{\"pace\": \"fast\", \"horizon\": 3}");
+    assert_eq!(
+        feed.until("pace"),
+        "{\"pace\":{\"horizon\":3,\"pace\":\"fast\"}}"
+    );
+    assert!(feed.until("tick").contains("\"output\":\"tick 0.0\\n\""));
+    assert!(feed.until("tock").contains("\"output\":\"tock 1.0\\n\""));
+    // The time as each kernel turn leaves it, up to the horizon.
+    feed.until("{\"time\":3}");
+}
+
+#[test]
+fn an_administrator_kills_a_session() {
+    let daemon = Daemon::with("kill", &["--pace", "paused"]);
+    // Held, in the set: killed, it leaves the set too.
+    let holds = write(
+        "daemon-kill",
+        "holds.adt",
+        "program holds ;\nbegin\n        hold for 5 ;\n        print \"never\"\nend ;\n",
+    );
+    let held = spawn(daemon.client(&holds));
+    let t = Instant::now();
+    while !daemon.get("/time").contains("client") {
+        assert!(
+            t.elapsed() < Duration::from_secs(20),
+            "{}",
+            daemon.get("/time")
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let id = daemon.get("/sessions").trim().to_string();
+    assert_eq!(daemon.post(&format!("/sessions/{id}/kill"), ""), "killed\n");
+    let t = Instant::now();
+    let mut held = held;
+    let status = loop {
+        if let Some(status) = held.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(20),
+            "the killed client runs on"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(!status.success());
+    assert!(
+        !daemon.get("/time").contains("client"),
+        "{}",
+        daemon.get("/time")
+    );
+    let forever = write(
+        "daemon-kill",
+        "forever.adt",
+        "program forever ;\nlocal\n        n : integer init 0 ;\nbegin\n        print \"started\" ;\n        loop while true do\n                n := n + 1\n        endloop\nend ;\n",
+    );
+    let mut client = daemon
+        .client(&forever)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut first = String::new();
+    BufReader::new(client.stdout.take().unwrap())
+        .read_line(&mut first)
+        .unwrap();
+    let id = daemon.get("/sessions").trim().to_string();
+    assert_eq!(daemon.post(&format!("/sessions/{id}/kill"), ""), "killed\n");
+    let status = client.wait().unwrap();
+    let mut err = String::new();
+    client
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
+    assert!(
+        !status.success() && err.contains("killed by an administrator"),
+        "{err}"
+    );
+    assert_eq!(
+        daemon.post(&format!("/sessions/{id}/kill"), ""),
+        "no such session\n"
+    );
+    assert!(daemon.get("/sessions").is_empty());
+    let short = write(
+        "daemon-kill",
+        "short.adt",
+        "program short ;\nbegin\n        print \"short\"\nend ;\n",
+    );
+    assert_eq!(within(spawn(daemon.client(&short)), 20), "short\n");
 }

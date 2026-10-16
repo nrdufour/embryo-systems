@@ -36,3 +36,6 @@ hbds-gtad = { path = "crates/hbds-gtad" }
 hbds-journal = { path = "crates/hbds-journal" }
 hbds-acode = { path = "crates/hbds-acode" }
 hbds-vm = { path = "crates/hbds-vm" }
+
+[dev-dependencies]
+hbds-http = { path = "crates/hbds-http" }

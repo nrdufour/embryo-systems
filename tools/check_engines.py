@@ -26,7 +26,7 @@ ALLOWED = {
     "hbds-rules": {"hbds-core", "hbds-gtad"},
     "hbds-simulation": {"hbds-core", "hbds-gtad"},
     "adt81": {"hbds-core", "hbds-values", "hbds-acode", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules", "hbds-simulation"},
-    "embryo-systems": {"adt81", "hbds-gtad", "hbds-journal", "hbds-acode", "hbds-vm", "hbds-daemon"},
+    "embryo-systems": {"adt81", "hbds-gtad", "hbds-journal", "hbds-acode", "hbds-vm", "hbds-daemon", "hbds-http"},
     "embryo-systems-bench": {"adt81", "hbds-gtad", "hbds-vm"},
 }
 
