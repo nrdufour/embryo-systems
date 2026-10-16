@@ -1,0 +1,39 @@
+acode 1
+
+module program "calls" "CALLS" 4:1
+slot "n" integer
+   0 8:9      stmt
+   1 8:21     const (i 3)
+   2 8:24     ref 0
+   3 8:14     call 1 2
+   4 9:9      stmt
+   5 9:20     load 0
+   6 9:15     call 2 1
+   7 9:9      print 1
+   8 4:1      return
+
+module subroutine "double" "DOUBLE" 12:1
+slot "a" integer
+slot "b" integer
+param 0 in
+param 1 out
+   0 12:20    bind 0 0
+   1 12:23    bind 1 1
+   2 16:9     stmt
+   3 16:14    load 0
+   4 16:18    const (i 2)
+   5 16:14    op mul
+   6 16:9     check.store 1
+   7 16:14    store 1
+   8 12:1     return
+
+module function "half" "HALF" 19:1
+slot "x" integer
+param 0 in
+   0 19:16    bind 0 0
+   1 22:9     stmt
+   2 22:16    load 0
+   3 22:20    const (f 2.0)
+   4 22:16    op div
+   5 22:9     result
+   6 19:1     no.result

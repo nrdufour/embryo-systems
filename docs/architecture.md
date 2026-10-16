@@ -92,6 +92,22 @@ Not chosen: a tree IR (a paused body would live in Rust's call stack,
 threads would stay); register bytecode now (a harder compiler, speed not
 the constraint).
 
+As built (2026-10-15, step 4a): `crates/hbds-acode` is the format, its
+text form under an `acode 1` header (`embryo-systems acode FILE`), and
+`Support`, what a unit asks of its language: its math functions and how
+it reads input. Each instruction fails at one place at most, so that the
+line table alone gives a runtime error its position. `crates/hbds-vm` runs
+one fiber, frames and operand stack as data, OUT and INOUT as references
+to the caller's slots. `crates/adt81/src/compile.rs` compiles what needs
+no store; the rest is refused as not yet (`run --vm FILE`). The gate,
+`tests/vm.rs`: the 20 corpus programs the compiler takes, and 2000 random
+programs of `sample::runnable`, of which about 1300 check, run by both
+under a statement budget, output, end and statements counted equal;
+four planted bugs fail it. On the benchmarks the VM is no faster yet
+(`language` 1.59 s against 1.57 s for a million iterations here): the
+time is in hbds-values' arithmetic, which both share, not in walking
+the tree. Fast paths for exact numbers are the lever, later.
+
 ### 3. Fibers, and a sequential world with threads around it
 
 Everything that runs as its own flow of control is a **fiber**: the main

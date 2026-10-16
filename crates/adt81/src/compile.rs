@@ -670,7 +670,7 @@ impl<'p> Compiler<'p> {
                 self.emit(Instr::Print(es.len()), s.span);
                 Ok(())
             }
-            _ => not_yet(s.span, "this statement on the VM"),
+            _ => not_yet(s.span, "this statement"),
         }
     }
 
@@ -922,7 +922,7 @@ impl<'p> Compiler<'p> {
             }
             ExprKind::Functor(adt, calls) => self.functors(adt, calls, e.span)?,
             ExprKind::Attribute(..) | ExprKind::Link(..) => {
-                return not_yet(e.span, "the store on the VM");
+                return not_yet(e.span, "the store");
             }
         }
         Ok(())
@@ -971,9 +971,9 @@ impl<'p> Compiler<'p> {
                     self.load(n)?;
                     Some(s)
                 }
-                _ => return not_yet(span, "functors on a.d.t. on the VM"),
+                _ => return not_yet(span, "functors on a.d.t."),
             },
-            _ => return not_yet(span, "functors on a.d.t. on the VM"),
+            _ => return not_yet(span, "functors on a.d.t."),
         };
         let mut held = held;
         for c in calls {
@@ -1001,7 +1001,7 @@ impl<'p> Compiler<'p> {
                 self.expr(a)?;
             }
             if functor.takes != Takes::Lists {
-                return not_yet(c.name.span, "functors on a.d.t. on the VM");
+                return not_yet(c.name.span, "functors on a.d.t.");
             }
             let (key, spelling) = (c.name.key.clone(), c.name.spelling.clone());
             let i = Instr::Functor(key, spelling, c.args.len(), held_now);

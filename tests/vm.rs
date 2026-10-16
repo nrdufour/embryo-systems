@@ -97,6 +97,7 @@ fn the_corpus() {
     for dir in ["errors", "store", "store/errors"] {
         paths.extend(programs(&root.join(dir)));
     }
+    paths.extend(programs(&root.join("../acode")));
     let (mut run, mut skipped, mut differ) = (0, Vec::new(), Vec::new());
     for path in &paths {
         let source = fs::read_to_string(path).unwrap();

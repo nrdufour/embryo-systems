@@ -1147,13 +1147,15 @@ impl Writer<'_> {
                 }
                 self.line("endcase");
             }
-            _ => {
+            19 => {
                 self.line("parbegin\n");
                 self.nested(depth);
                 self.line("par\n");
                 self.nested(depth);
                 self.line("endpar");
             }
+            // EXIT and the others with no loop around: a PRINT instead.
+            _ => self.line("print 7"),
         }
     }
 

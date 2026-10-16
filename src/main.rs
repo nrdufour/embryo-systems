@@ -2,6 +2,7 @@ use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
+use adt81::compile::{Adt81, compile};
 use adt81::diagnostic::Severity;
 use adt81::{interp, lexer, lower, parser};
 use hbds_gtad::Store;
@@ -11,7 +12,8 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE
        embryo-systems fmt [--program | --fragment] FILE
        embryo-systems check FILE
-       embryo-systems run [--store DIR] FILE
+       embryo-systems run [--store DIR | --vm] FILE
+       embryo-systems acode FILE
        embryo-systems store DIR
 
 FILE - reads standard input, but for run. parse prints the syntax tree,
@@ -19,24 +21,44 @@ fmt the source in canonical form; both read a program unless told
 --fragment. check reports undeclared and misused names, and type errors,
 in a program, and fails on errors. run checks a program, then runs it:
 READ reads standard input, PRINT writes standard output; its classes and
-objects last the run, or go in the store in DIR, created if need be.
-store prints what the store in DIR holds.";
+objects last the run, or go in the store in DIR, created if need be;
+--vm runs it compiled to A-code, on the VM, without a store yet. acode
+prints a program compiled to A-code. store prints what the store in DIR
+holds.";
 
 /// READ on standard input, PRINT on standard output.
 struct Terminal;
 
+fn read_line() -> Option<String> {
+    let mut line = String::new();
+    match std::io::stdin().lock().read_line(&mut line) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(line.trim_end_matches(['\n', '\r']).to_string()),
+    }
+}
+
+fn write(text: &str) {
+    print!("{text}");
+    let _ = std::io::stdout().flush();
+}
+
 impl interp::Io for Terminal {
     fn read_line(&mut self) -> Option<String> {
-        let mut line = String::new();
-        match std::io::stdin().lock().read_line(&mut line) {
-            Ok(0) | Err(_) => None,
-            Ok(_) => Some(line.trim_end_matches(['\n', '\r']).to_string()),
-        }
+        read_line()
     }
 
     fn write(&mut self, text: &str) {
-        print!("{text}");
-        let _ = std::io::stdout().flush();
+        write(text)
+    }
+}
+
+impl hbds_vm::Io for Terminal {
+    fn read_line(&mut self) -> Option<String> {
+        read_line()
+    }
+
+    fn write(&mut self, text: &str) {
+        write(text)
     }
 }
 
@@ -79,8 +101,12 @@ fn main() -> ExitCode {
         }
         _ => (args.clone(), None),
     };
+    let (args, vm) = match args.as_slice() {
+        ["run", "--vm", path] if store_dir.is_none() => (vec!["run", *path], true),
+        _ => (args.clone(), false),
+    };
     let (command, fragment, path) = match args.as_slice() {
-        [command @ ("lex" | "check"), path] => (*command, false, *path),
+        [command @ ("lex" | "check" | "acode"), path] => (*command, false, *path),
         ["run", path] if *path != "-" => ("run", false, *path),
         [command @ ("parse" | "fmt"), "--program", path] | [command @ ("parse" | "fmt"), path] => {
             (*command, false, *path)
@@ -134,6 +160,26 @@ fn main() -> ExitCode {
             if diagnostics.iter().any(|d| d.severity == Severity::Error) {
                 return false;
             }
+            if vm {
+                let unit = match compile(&program) {
+                    Ok(unit) => unit,
+                    Err(e) => {
+                        let at = e.span;
+                        eprintln!(
+                            "{path}:{}:{}: not yet on the VM: {}",
+                            at.line, at.column, e.what
+                        );
+                        return false;
+                    }
+                };
+                return match hbds_vm::run(&unit, &mut Terminal, &Adt81, None) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        eprintln!("{path}:{e}");
+                        false
+                    }
+                };
+            }
             let store = match open_store(store_dir) {
                 Ok(store) => Arc::new(Mutex::new(store)),
                 Err(e) => {
@@ -145,6 +191,30 @@ fn main() -> ExitCode {
                 Ok(()) => true,
                 Err(e) => {
                     eprintln!("{path}:{e}");
+                    false
+                }
+            }
+        })
+    } else if command == "acode" {
+        lower::parse_program(&source).map(|program| {
+            let diagnostics = adt81::check(&program);
+            for d in &diagnostics {
+                eprintln!("{path}:{d}");
+            }
+            if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+                return false;
+            }
+            match compile(&program) {
+                Ok(unit) => {
+                    print!("{}", unit.text());
+                    true
+                }
+                Err(e) => {
+                    let at = e.span;
+                    eprintln!(
+                        "{path}:{}:{}: not yet on the VM: {}",
+                        at.line, at.column, e.what
+                    );
                     false
                 }
             }

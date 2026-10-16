@@ -1,0 +1,23 @@
+-- A call with an OUT argument, and a function's RESULT: the compiler's --
+-- output written by hand before the compiler ran, in calls.acode. --
+
+program calls ;
+local
+        n : integer ;
+begin
+        call double(3, n) ;
+        print half(n)
+end ;
+
+subroutine double (a, b) ;
+        a : integer in ;
+        b : integer out ;
+begin
+        b := a * 2
+end ;
+
+function half (x) returns float ;
+        x : integer in ;
+begin
+        result x / 2.0
+end ;

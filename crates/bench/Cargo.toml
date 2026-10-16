@@ -9,3 +9,4 @@ license.workspace = true
 [dependencies]
 adt81 = { path = "../adt81" }
 hbds-gtad = { path = "../hbds-gtad" }
+hbds-vm = { path = "../hbds-vm" }

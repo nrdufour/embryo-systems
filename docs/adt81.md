@@ -306,7 +306,8 @@ The rules:
 
 `embryo-systems run FILE` checks a program, refuses it if the checker
 finds errors, then runs its first PROGRAM: READ reads standard input, a
-line per variable (a literal, fuzzy ones included, or text as it is),
+line per variable (a constant: a literal, fuzzy ones included, or an
+expression of them and the math functions; or text as it is),
 PRINT writes its values on one line. A runtime error stops it, with its
 position. Classes, objects, attributes and links live in the HBDS store,
 where COND and ACTION run as they change, rules as CHAV and HYPOCHAV
@@ -386,6 +387,9 @@ expression written as a string), and fragments.
 | `crates/adt81/src/sample.rs`, `crates/adt81/examples/sample.rs` | random programs, for the tests and the gate |
 | `crates/adt81/src/names.rs`, `diagnostic.rs` | name resolution, and what the checker reports |
 | `crates/adt81/src/builtins.rs` | the names ADT'81 knows: the engines' functors and properties, and its own math functions |
+| `crates/adt81/src/compile.rs` | ADT'81 compiled to A-code, and its support module for the VM |
+| `crates/adt81/tests/corpus/acode/` | programs beside the A-code they compile to, written by hand first |
+| `tests/vm.rs` | the gate: the VM against the reference, on the corpus and on random programs |
 | `crates/adt81/tests/corpus/checked/*.adt` | programs that must check clean |
 | `crates/adt81/tests/names.rs` | name resolution, rule by rule |
 | `crates/adt81/src/types.rs`, `typeck.rs` | the types and their widening, and the kinds and types layer |

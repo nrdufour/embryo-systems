@@ -34,6 +34,7 @@ version = "0.1.0"
 dependencies = [
  "adt81",
  "hbds-gtad",
+ "hbds-vm",
 ]
 
 [[package]]

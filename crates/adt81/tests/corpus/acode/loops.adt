@@ -1,0 +1,15 @@
+-- A counted loop, NEXT and EXIT: the compiler's output written by hand --
+-- before the compiler ran, in loops.acode. --
+
+program loops ;
+local
+        i, t : integer ;
+begin
+        t := 0 ;
+        loop for i : 1 to 5 do
+                if i = 2 then next endif ;
+                if i = 4 then exit endif ;
+                t := t + i
+        endloop ;
+        print t
+end ;
