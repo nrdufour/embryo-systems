@@ -12,7 +12,7 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE
        embryo-systems fmt [--program | --fragment] FILE
        embryo-systems check FILE
-       embryo-systems run [--store DIR] [--vm] FILE
+       embryo-systems run [--store DIR] [--reference] FILE
        embryo-systems acode FILE
        embryo-systems store DIR
 
@@ -21,11 +21,10 @@ fmt the source in canonical form; both read a program unless told
 --fragment. check reports undeclared and misused names, and type errors,
 in a program, and fails on errors. run checks a program, then runs it:
 READ reads standard input, PRINT writes standard output; its classes and
-objects last the run, or go in the store in DIR, created if need be;
---vm runs it compiled to A-code, on the VM, but the expert systems and
-processes, not yet there. acode
-prints a program compiled to A-code. store prints what the store in DIR
-holds.";
+objects last the run, or go in the store in DIR, created if need be. It
+runs compiled to A-code, on the VM; --reference runs it on the
+interpreter, the VM's specification. acode prints a program compiled to
+A-code. store prints what the store in DIR holds.";
 
 /// READ on standard input, PRINT on standard output.
 struct Terminal;
@@ -103,8 +102,8 @@ fn main() -> ExitCode {
         _ => (args.clone(), None),
     };
     let (args, vm) = match args.as_slice() {
-        ["run", "--vm", path] => (vec!["run", *path], true),
-        _ => (args.clone(), false),
+        ["run", "--reference", path] => (vec!["run", *path], false),
+        _ => (args.clone(), true),
     };
     let (command, fragment, path) = match args.as_slice() {
         [command @ ("lex" | "check" | "acode"), path] => (*command, false, *path),
