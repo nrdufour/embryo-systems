@@ -482,3 +482,73 @@ fn a_new_body_serves_new_activations() {
     );
     assert_eq!(within(spawn(daemon.client(&reads)), 20), "1 2\n");
 }
+
+/// A process class "w" whose body counts in a local variable, keeps the
+/// count in THIS's "n", works a while (so that a kill falls in the middle
+/// of a step) and holds for 1: `n` is its clock, whenever it is held, if
+/// no step ever runs twice nor is lost.
+const COUNTER: &str = "program start ;\nbegin\n        create \"w\" ; include \"w\" into \"process\" ; create \"w\" . \"n\" ;\n        create \"w1\" [ \"w\" ] ;\n        activate \"w1\" [ \"w\" ] ;\n        print \"started\"\nend ;\n\ncoroutine \"w\" ;\nlocal\n        i, j, k : integer init 0 ;\nbegin\n        loop while true do\n                i := i + 1 ;\n                let this . \"n\" := i ;\n                loop for j : 1 to 2000 do k := k + j endloop ;\n                hold for 1\n        endloop\nend ;\n";
+
+const READS: &str = "program reads ;\nbegin\n        print \"w1\" [ \"w\" ] . \"n\", \"w1\" [ \"w\" ] . \"clock\"\nend ;\n";
+
+/// `n` and the clock, as READS prints them.
+fn count(daemon: &Daemon, reads: &str) -> (f64, f64) {
+    let out = within(spawn(daemon.client(reads)), 20);
+    let mut words = out.split_whitespace().map(|w| w.parse::<f64>().unwrap());
+    (words.next().unwrap(), words.next().unwrap())
+}
+
+#[test]
+fn processes_resume_where_they_were() {
+    let dir = store_dir("daemon-exact-store");
+    let start = write("daemon-exact", "start.adt", COUNTER);
+    let reads = write("daemon-exact", "reads.adt", READS);
+    {
+        // As fast as it goes: the kill falls in the middle of a step.
+        let daemon = Daemon::with("exact", &["--store", &dir, "--pace", "fast"]);
+        assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+        let t = Instant::now();
+        while daemon.now() < 20.0 {
+            assert!(t.elapsed() < Duration::from_secs(20), "time stands still");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // Killed in the middle of whatever it does.
+    }
+    let daemon = Daemon::with("exact", &["--store", &dir, "--pace", "paused"]);
+    let (n, clock) = count(&daemon, &reads);
+    assert!(n >= 15.0, "{n} counted");
+    assert_eq!(n, clock, "a step run twice, or lost");
+    // It counts on from where it was, its local variable kept.
+    daemon.post(
+        "/pace",
+        &format!("{{\"pace\": \"fast\", \"horizon\": {}}}", clock + 5.0),
+    );
+    let t = Instant::now();
+    while daemon.now() < clock + 5.0 {
+        assert!(t.elapsed() < Duration::from_secs(20), "time stands still");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The event due at the horizon runs too: held again, one later.
+    let t = Instant::now();
+    loop {
+        let (m, later) = count(&daemon, &reads);
+        if (m, later) == (n + 6.0, clock + 6.0) {
+            break;
+        }
+        assert!(later <= clock + 6.0, "past the horizon: {m} at {later}");
+        assert!(t.elapsed() < Duration::from_secs(20), "{m} at {later}");
+    }
+}
+
+#[test]
+fn an_activation_outlives_a_crash() {
+    let dir = store_dir("daemon-activation-store");
+    let start = write("daemon-activation", "start.adt", COUNTER);
+    {
+        let daemon = Daemon::with("activation", &["--store", &dir, "--pace", "paused"]);
+        assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+    }
+    let daemon = Daemon::with("activation", &["--store", &dir, "--pace", "paused"]);
+    let time = daemon.get("/time");
+    assert!(time.contains("\"agent\":\"w1[w]\""), "{time}");
+}

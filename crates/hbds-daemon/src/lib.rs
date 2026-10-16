@@ -144,7 +144,7 @@ struct Events {
 
 impl Events {
     fn send(&self, what: What) {
-        let after = self.durable.as_ref().map_or(0, |d| d.stats().submitted);
+        let after = self.durable.as_ref().map_or(0, Durable::stamp);
         let _ = self.to.send(Event { what, after });
     }
 }
@@ -507,6 +507,18 @@ fn executor(
             loaded.insert(hash.clone());
         }
     }
+    // The time and the processes as the last pause left them (decision 5).
+    if let Some(text) = store.sequencing() {
+        match Sequencing::restore(text) {
+            Ok(s) => sim = s,
+            Err(e) => eprintln!("the store's sequencing set does not read: {e}"),
+        }
+    }
+    if let Some(text) = store.fibers()
+        && let Err(e) = kernel.restore_fibers(text)
+    {
+        eprintln!("the store's processes do not read: {e}");
+    }
     let mut clock = pace.clock;
     let mut real_from = (Instant::now(), 0.0);
     loop {
@@ -557,7 +569,7 @@ fn executor(
                     Ok((session, unit)) => {
                         // Kept by the store, once, and loaded into the
                         // kernel: its bodies serve the processes it starts.
-                        match store.keep_module(&acode) {
+                        match store.keep_module(&unit.text()) {
                             Ok(hash) => {
                                 if loaded.insert(hash) {
                                     kernel.load(unit);

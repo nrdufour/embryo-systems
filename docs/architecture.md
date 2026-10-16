@@ -259,6 +259,24 @@ clients hear why. Not built: a benchmark of the journal, whose syncs
 depend on the disk and on timing, which the work and time gates cannot
 hold steady; the journal's tests count syncs instead.
 
+As built (2026-10-16, step 6c2): processes are exactly persistent, with a
+checkpoint at each pause (decided 2026-10-16). When the kernel dispatches
+a process, the journal holds what is recorded, the process's writes and
+any client's that commit meanwhile, in the order the store applied
+them; at the process's next pause (HOLD, PASSIVATE, TERMINATE, its end,
+an error) it writes all of it in one commit with the kernel's fibers
+(`Change::Fibers`: frames, stacks, cells, a module named by its unit's
+hash and its place there) and the sequencing set (`Change::Sequencing`).
+A crash in the middle of a step loses the step whole, which then runs
+again from the last pause: nothing runs twice. A client hears nothing
+before the write that holds its own; compaction waits while a step is
+held. A client's change to the set is kept as it makes it. A restarted
+daemon loads its store's units, then the set and the fibers, the
+clients' agents dropped: every process resumes where it paused.
+`tests/daemon.rs` kills a daemon in the middle of a counting process's
+steps and finds, after the restart, its count equal to its clock, and
+counting on.
+
 ### 6. Time: one sequencing set per store, at a pace set live
 
 - **Standalone programs keep SIMULA's rules:** the main program is a

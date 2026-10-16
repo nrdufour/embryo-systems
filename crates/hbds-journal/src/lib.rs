@@ -255,6 +255,8 @@ pub struct Stats {
 #[derive(Default)]
 struct Progress {
     stats: Stats,
+    /// What the kernel holds back: kept transactions' changes, in order.
+    held: Option<Vec<Change>>,
     /// Why the journal stopped, if it did: nothing after is kept.
     failed: Option<String>,
     /// A compaction asked for and not yet done.
@@ -284,6 +286,13 @@ impl Durable {
         self.shared.progress.lock().unwrap().stats
     }
 
+    /// What a client waits for before it hears of what it did: the
+    /// transactions submitted, and the one held back, if one is.
+    pub fn stamp(&self) -> u64 {
+        let p = self.shared.progress.lock().unwrap();
+        p.stats.submitted + p.held.is_some() as u64
+    }
+
     /// Waits until `submitted` transactions are on disk; the journal's
     /// failure if it stopped first.
     pub fn wait(&self, submitted: u64) -> Result<(), String> {
@@ -306,7 +315,9 @@ impl Durable {
         {
             let mut p = self.shared.progress.lock().unwrap();
             let s = p.stats;
-            if p.compacting || s.lines < at || s.lines < 2 * s.compacted {
+            // Not while the kernel holds a step back: compaction would
+            // keep half of it.
+            if p.compacting || p.held.is_some() || s.lines < at || s.lines < 2 * s.compacted {
                 return;
             }
             p.compacting = true;
@@ -334,7 +345,35 @@ impl Recorder for Grouped {
         if let Some(e) = &p.failed {
             return Err(e.clone());
         }
+        if let Some(held) = &mut p.held {
+            held.extend_from_slice(changes);
+            return Ok(());
+        }
         let (text, lines) = transaction(changes);
+        p.stats.submitted += 1;
+        self.jobs
+            .send(Job::Write(text, lines))
+            .map_err(|_| "the journal's thread is gone".to_string())
+    }
+
+    fn hold(&mut self) {
+        let mut p = self.shared.progress.lock().unwrap();
+        p.held.get_or_insert_with(Vec::new);
+    }
+
+    /// Under one lock, so that no stamp falls between the held write
+    /// and its submission.
+    fn release(&mut self, extra: &[Change]) -> Result<(), String> {
+        let mut p = self.shared.progress.lock().unwrap();
+        let mut changes = p.held.take().unwrap_or_default();
+        changes.extend_from_slice(extra);
+        if changes.is_empty() {
+            return Ok(());
+        }
+        if let Some(e) = &p.failed {
+            return Err(e.clone());
+        }
+        let (text, lines) = transaction(&changes);
         p.stats.submitted += 1;
         self.jobs
             .send(Job::Write(text, lines))
@@ -530,6 +569,8 @@ fn encode(change: &Change) -> String {
             text(t),
         ],
         Change::Module { hash, text: t } => vec![word("module"), text(hash), text(t)],
+        Change::Fibers { text: t } => vec![word("fibers"), text(t)],
+        Change::Sequencing { text: t } => vec![word("sequencing"), text(t)],
     };
     let mut out = String::new();
     for (i, t) in terms.iter().enumerate() {
@@ -645,6 +686,8 @@ fn decode(line: &str) -> Result<Change, String> {
             hash: r.text()?,
             text: r.text()?,
         },
+        "fibers" => Change::Fibers { text: r.text()? },
+        "sequencing" => Change::Sequencing { text: r.text()? },
         w => return Err(format!("{w:?} is not a change")),
     };
     r.end()?;
