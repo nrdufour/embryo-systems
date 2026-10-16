@@ -29,7 +29,9 @@ cargo run -q -- store /tmp/hydro                                   # what the st
 |---|---|
 | `embryo-systems run [--store DIR] FILE` | checks a program, compiles it to A-code and runs it on the VM. Its classes and objects last the run, or stay in the store in DIR for the next program. READ reads stdin, PRINT writes stdout. |
 | `embryo-systems run [--store DIR] --reference FILE` | the same on the interpreter, the VM's specification |
-| `embryo-systems acode FILE` | the program compiled to A-code, as text |
+| `embryo-systems acode FILE` | the program compiled to A-code, as text: an `.acode` file |
+| `embryo-systems exec [--store DIR] FILE` | runs an `.acode` file on the VM |
+| `embryo-systems build FILE -o OUT` | writes OUT, an executable carrying the program: `OUT [--store DIR]` runs it, anywhere on this platform |
 | `embryo-systems check FILE` | undeclared and misused names, type errors |
 | `embryo-systems store DIR` | prints a store's contents |
 | `embryo-systems fmt FILE` | the program in canonical form |

@@ -1,4 +1,5 @@
 acode 1
+language "ADT'81"
 
 module program "loops" "LOOPS" 4:1
 slot "i" integer

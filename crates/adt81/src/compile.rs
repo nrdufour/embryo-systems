@@ -162,6 +162,7 @@ pub fn compile(program: &Program) -> Unit {
         c.fail(span, "no PROGRAM to run in this file");
         let program = c.finish("#", "#", Kind::Program, span, None, None, None);
         return Unit {
+            language: LANGUAGE.into(),
             modules: vec![program],
         };
     };
@@ -187,7 +188,10 @@ pub fn compile(program: &Program) -> Unit {
             }
         }
     }
-    Unit { modules }
+    Unit {
+        language: LANGUAGE.into(),
+        modules,
+    }
 }
 
 struct Compiler<'p> {
