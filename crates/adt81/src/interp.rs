@@ -1988,7 +1988,7 @@ impl Machine {
     /// How an agent is named in an error.
     fn agent_name(&self, a: Agent) -> String {
         match a {
-            Agent::Main => "the main program".into(),
+            Agent::Main | Agent::Client(_) => "the main program".into(),
             Agent::Process(p) => self.describe(AdtRef::Object(p)),
         }
     }
@@ -2092,7 +2092,7 @@ impl Machine {
             let next = self.sim.lock().unwrap().advance();
             match next {
                 Some(Agent::Process(p)) => self.run_process(p, span)?,
-                Some(Agent::Main) | None => return Ok(()),
+                Some(Agent::Main | Agent::Client(_)) | None => return Ok(()),
             }
         }
     }

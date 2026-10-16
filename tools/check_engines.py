@@ -18,7 +18,7 @@ ALLOWED = {
     "hbds-acode": {"hbds-core", "hbds-values"},
     "hbds-vm": {"hbds-core", "hbds-values", "hbds-lists", "hbds-acode", "hbds-gtad", "hbds-functors", "hbds-rules", "hbds-simulation"},
     "hbds-lists": {"hbds-core", "hbds-values"},
-    "hbds-http": set(),
+    "hbds-http": {"hbds-core"},
     "hbds-daemon": {"hbds-acode", "hbds-gtad", "hbds-http", "hbds-journal", "hbds-vm"},
     "hbds-gtad": {"hbds-core", "hbds-maps"},
     "hbds-functors": {"hbds-core", "hbds-gtad"},

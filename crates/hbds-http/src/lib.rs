@@ -4,7 +4,8 @@
 //! authentication, which nginx and the socket's permissions give.
 
 pub mod json;
-pub mod sha1;
+
+use hbds_core::sha1;
 
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, Read, Write};

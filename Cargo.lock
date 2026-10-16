@@ -80,6 +80,9 @@ dependencies = [
 [[package]]
 name = "hbds-http"
 version = "0.1.0"
+dependencies = [
+ "hbds-core",
+]
 
 [[package]]
 name = "hbds-journal"

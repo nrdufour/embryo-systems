@@ -4,7 +4,7 @@ use hbds_simulation::*;
 
 fn d(a: Agent) -> String {
     match a {
-        Agent::Main => "the main program".into(),
+        Agent::Main | Agent::Client(_) => "the main program".into(),
         Agent::Process(id) => format!("p{id}"),
     }
 }

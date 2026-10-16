@@ -13,7 +13,7 @@
 
 pub mod client;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{self, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -24,7 +24,10 @@ use hbds_gtad::Store;
 use hbds_http::json::Json;
 use hbds_http::{Message, Request, Response};
 use hbds_journal::Durable;
-use hbds_vm::{Language, Session, Turn};
+use std::time::{Duration, Instant};
+
+use hbds_gtad::AdtRef;
+use hbds_vm::{Agent, Bound, Language, Sequencing, Session, Turn};
 
 /// The executor's stack: the VM's, for code the store calls back.
 const STACK: usize = 256 << 20;
@@ -45,6 +48,67 @@ enum Msg {
     Gone(u64),
     Dump(Sender<String>),
     Sessions(Sender<usize>),
+    /// The pace set, if given; what it is now, answered.
+    Pace(Option<Clock>, Sender<String>),
+    Time(Sender<String>),
+}
+
+/// How the store's time moves (docs/architecture.md, decision 6).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Clock {
+    Paused,
+    /// This many agents due, then paused.
+    Step(u64),
+    /// As fast as possible, up to a horizon.
+    Fast(f64),
+    /// Real time, times a factor.
+    Real(f64),
+}
+
+impl Clock {
+    /// From `{"pace": ..., "horizon": T, "factor": F, "steps": N}`.
+    pub fn from_json(j: &Json) -> Result<Clock, String> {
+        let number = |key: &str, default: f64| match j.get(key) {
+            None => Ok(default),
+            Some(Json::Number(n)) => Ok(*n),
+            Some(v) => Err(format!("{key} is a number, not {v}")),
+        };
+        match j.get("pace").and_then(Json::as_str) {
+            Some("paused") => Ok(Clock::Paused),
+            Some("step") => Ok(Clock::Step(number("steps", 1.0)?.max(1.0) as u64)),
+            Some("fast") => Ok(Clock::Fast(number("horizon", f64::INFINITY)?)),
+            Some("real") => match number("factor", 1.0)? {
+                f if f > 0.0 => Ok(Clock::Real(f)),
+                f => Err(format!("a factor of {f}: it is more than 0")),
+            },
+            _ => Err("a pace is paused, step, fast or real".into()),
+        }
+    }
+
+    fn json(&self) -> Json {
+        let one = |k: &str| Json::String(k.into());
+        let mut o = BTreeMap::new();
+        match *self {
+            Clock::Paused => {
+                o.insert("pace".into(), one("paused"));
+            }
+            Clock::Step(n) => {
+                o.insert("pace".into(), one("step"));
+                o.insert("steps".into(), Json::Number(n as f64));
+            }
+            Clock::Fast(h) => {
+                o.insert("pace".into(), one("fast"));
+                if h.is_finite() {
+                    o.insert("horizon".into(), Json::Number(h));
+                }
+            }
+            Clock::Real(f) => {
+                o.insert("pace".into(), one("real"));
+                o.insert("factor".into(), Json::Number(f));
+            }
+        }
+        Json::Object(o)
+    }
 }
 
 /// What the executor tells a session's connection, and how many of the
@@ -134,16 +198,47 @@ struct Client {
     wire: Wire,
     /// Waiting for a line it asked for.
     waiting: bool,
+    /// Holding: waiting for the kernel to reach its time.
+    held: bool,
+}
+
+/// What the kernel's processes print: to the client that activated the
+/// one running, while it is connected; to the daemon's output otherwise,
+/// until the UI has its feed (6d). They read nothing.
+struct Router {
+    clients: BTreeMap<u64, Events>,
+    owner: Option<u64>,
+}
+
+impl hbds_vm::Io for Router {
+    fn read_line(&mut self) -> Option<String> {
+        None
+    }
+
+    fn write(&mut self, text: &str) {
+        match self.owner.and_then(|id| self.clients.get(&id)) {
+            Some(events) => events.send(What::Output(text.to_string())),
+            None => print!("{text}"),
+        }
+    }
+
+    fn running(&mut self, owner: Option<Agent>) {
+        self.owner = match owner {
+            Some(Agent::Client(id)) => Some(id),
+            _ => None,
+        };
+    }
 }
 
 /// Serves `store` on `socket` until the process ends. `slice` is a turn's
 /// instructions.
-/// How the daemon runs: a turn's instructions, and the journal's lines
-/// past which it compacts.
+/// How the daemon runs: a turn's instructions, the journal's lines past
+/// which it compacts, and the pace its time starts at.
 #[derive(Clone, Copy)]
 pub struct Pace {
     pub slice: u64,
     pub compact_at: u64,
+    pub clock: Clock,
 }
 
 pub fn serve(
@@ -220,6 +315,31 @@ fn connection(
                 ("lines".to_string(), n(s.lines)),
             ]));
             Response::text(200, "OK", &format!("{j}\n")).write(&mut writer)
+        }
+        ("GET" | "POST", "/pace") => {
+            let clock = match request.method.as_str() {
+                "GET" => None,
+                _ => {
+                    let body = String::from_utf8_lossy(&request.body).to_string();
+                    match Json::parse(&body).and_then(|j| Clock::from_json(&j)) {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            return Response::text(400, "Bad Request", &format!("{e}\n"))
+                                .write(&mut writer);
+                        }
+                    }
+                }
+            };
+            let (reply, answer) = mpsc::channel();
+            let _ = tx.send(Msg::Pace(clock, reply));
+            let text = answer.recv().unwrap_or_default();
+            Response::text(200, "OK", &format!("{text}\n")).write(&mut writer)
+        }
+        ("GET", "/time") => {
+            let (reply, answer) = mpsc::channel();
+            let _ = tx.send(Msg::Time(reply));
+            let text = answer.recv().unwrap_or_default();
+            Response::text(200, "OK", &format!("{text}\n")).write(&mut writer)
         }
         ("GET", "/session") if hbds_http::is_upgrade(&request) => {
             hbds_http::upgrade(&request).write(&mut writer)?;
@@ -321,6 +441,53 @@ fn session(
 
 /// The executor: owns the store, runs each ready session for a slice in
 /// turn, round robin; waits for messages when none is ready.
+/// How far the kernel may take time now.
+fn bound(clock: Clock, real_from: (Instant, f64)) -> Bound {
+    match clock {
+        Clock::Paused => Bound {
+            until: f64::NEG_INFINITY,
+            events: None,
+        },
+        Clock::Step(n) => Bound {
+            until: f64::INFINITY,
+            events: Some(n),
+        },
+        Clock::Fast(horizon) => Bound {
+            until: horizon,
+            events: None,
+        },
+        Clock::Real(factor) => Bound {
+            until: real_from.1 + real_from.0.elapsed().as_secs_f64() * factor,
+            events: None,
+        },
+    }
+}
+
+/// The store's time as `GET /time` shows it.
+fn time_json(sim: &Sequencing, store: &Store) -> Json {
+    let name = |a: Agent| match a {
+        Agent::Process(p) => store.describe(AdtRef::Object(p)),
+        Agent::Client(id) => format!("client {id}"),
+        Agent::Main => "the main program".into(),
+    };
+    let due = (sim.due().into_iter())
+        .map(|(t, a)| {
+            Json::Object(BTreeMap::from([
+                ("at".to_string(), Json::Number(t)),
+                ("agent".to_string(), Json::String(name(a))),
+            ]))
+        })
+        .collect();
+    Json::Object(BTreeMap::from([
+        ("now".to_string(), Json::Number(sim.now())),
+        ("due".to_string(), Json::Array(due)),
+    ]))
+}
+
+/// The executor: owns the store and its time; runs each ready session
+/// for a slice in turn, round robin, and the kernel's processes between
+/// them as the pace lets time move; waits for messages when none is
+/// ready.
 fn executor(
     mut store: Store,
     durable: Option<Durable>,
@@ -330,22 +497,51 @@ fn executor(
 ) {
     let mut clients: BTreeMap<u64, Client> = BTreeMap::new();
     let mut after = 0;
+    let mut sim = Sequencing::kernel();
+    let mut kernel = Session::kernel();
+    let mut loaded = BTreeSet::new();
+    // The modules earlier clients brought: their bodies serve still.
+    for (hash, text) in store.modules() {
+        if let Ok(unit) = Unit::read(text) {
+            kernel.load(unit);
+            loaded.insert(hash.clone());
+        }
+    }
+    let mut clock = pace.clock;
+    let mut real_from = (Instant::now(), 0.0);
     loop {
-        let ready = clients.values().any(|c| !c.waiting);
+        let b = bound(clock, real_from);
+        let in_time = |clients: &BTreeMap<u64, Client>, sim: &Sequencing| {
+            (clients.iter()).any(|(&id, c)| !c.held && sim.is_engaged(Agent::Client(id)))
+        };
+        let kernel_ready = !in_time(&clients, &sim)
+            && (kernel.in_process()
+                || sim
+                    .next_due()
+                    .is_some_and(|t| t <= b.until && b.events != Some(0)));
+        let ready = kernel_ready || clients.values().any(|c| !c.waiting && !c.held);
         let first = match ready {
             true => rx.try_recv().ok(),
             // Idle, the journal may still be catching up: it is looked at
-            // now and then, to compact what the last turns left.
-            false => match rx.recv_timeout(IDLE) {
-                Ok(m) => Some(m),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(d) = &durable {
-                        d.maybe_compact(&store, pace.compact_at);
-                    }
-                    continue;
+            // now and then, to compact what the last turns left. At real
+            // time, the next agent due wakes the executor.
+            false => {
+                let mut wait = IDLE;
+                if let (Clock::Real(f), Some(t)) = (clock, sim.next_due()) {
+                    let secs = ((t - b.until) / f).max(0.0);
+                    wait = wait.min(Duration::from_secs_f64(secs));
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            },
+                match rx.recv_timeout(wait) {
+                    Ok(m) => Some(m),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if let Some(d) = &durable {
+                            d.maybe_compact(&store, pace.compact_at);
+                        }
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                }
+            }
         };
         for msg in first
             .into_iter()
@@ -357,8 +553,21 @@ fn executor(
                     acode,
                     events,
                     input,
-                } => match start(&acode, language) {
-                    Ok(session) => {
+                } => match start(&acode, language, id) {
+                    Ok((session, unit)) => {
+                        // Kept by the store, once, and loaded into the
+                        // kernel: its bodies serve the processes it starts.
+                        match store.keep_module(&acode) {
+                            Ok(hash) => {
+                                if loaded.insert(hash) {
+                                    kernel.load(unit);
+                                }
+                            }
+                            Err(e) => {
+                                events.send(What::End(Some(e.0)));
+                                continue;
+                            }
+                        }
                         let wire = Wire {
                             from: input,
                             lines: VecDeque::new(),
@@ -371,6 +580,7 @@ fn executor(
                                 session,
                                 wire,
                                 waiting: false,
+                                held: false,
                             },
                         );
                     }
@@ -382,7 +592,9 @@ fn executor(
                     }
                 }
                 Msg::Gone(id) => {
+                    // Its processes stay; its own agent goes.
                     clients.remove(&id);
+                    sim.forget(Agent::Client(id));
                 }
                 Msg::Dump(reply) => {
                     let _ = reply.send(store.dump());
@@ -390,31 +602,103 @@ fn executor(
                 Msg::Sessions(reply) => {
                     let _ = reply.send(clients.len());
                 }
+                Msg::Pace(set, reply) => {
+                    if let Some(c) = set {
+                        clock = c;
+                        real_from = (Instant::now(), sim.now());
+                    }
+                    let _ = reply.send(clock.json().to_string());
+                }
+                Msg::Time(reply) => {
+                    let _ = reply.send(time_json(&sim, &store).to_string());
+                }
             }
         }
         // The next ready client after the last one served.
         let next = (clients.range(after + 1..).chain(clients.range(..=after)))
-            .find(|(_, c)| !c.waiting)
+            .find(|(_, c)| !c.waiting && !c.held)
             .map(|(&id, _)| id);
-        let Some(id) = next else { continue };
-        after = id;
-        let c = clients.get_mut(&id).expect("a client");
-        match c
-            .session
-            .turn(&mut store, &mut c.wire, language, Some(pace.slice))
-        {
-            Turn::Yield => {}
-            Turn::Input => {
-                c.waiting = true;
-                c.wire.events.send(What::WantsInput);
-            }
-            Turn::Done(_) => {
-                c.wire.events.send(What::End(None));
+        if let Some(id) = next {
+            after = id;
+            let c = clients.get_mut(&id).expect("a client");
+            let turn = c.session.turn(
+                &mut store,
+                &mut sim,
+                &mut c.wire,
+                language,
+                Some(pace.slice),
+            );
+            let gone = match turn {
+                Turn::Yield | Turn::Idle | Turn::Due(_) => false,
+                Turn::Input => {
+                    c.waiting = true;
+                    c.wire.events.send(What::WantsInput);
+                    false
+                }
+                Turn::Held => {
+                    c.held = true;
+                    false
+                }
+                Turn::Done(_) => {
+                    c.wire.events.send(What::End(None));
+                    true
+                }
+                Turn::Failed(e) => {
+                    c.wire.events.send(What::End(Some(e.to_string())));
+                    true
+                }
+            };
+            if gone {
                 clients.remove(&id);
+                sim.forget(Agent::Client(id));
             }
-            Turn::Failed(e) => {
-                c.wire.events.send(What::End(Some(e.to_string())));
-                clients.remove(&id);
+        }
+        // The simulation, between the clients' turns: its active process
+        // runs until it holds, never switched for another.
+        let b = bound(clock, real_from);
+        let kernel_ready = !in_time(&clients, &sim)
+            && (kernel.in_process()
+                || sim
+                    .next_due()
+                    .is_some_and(|t| t <= b.until && b.events != Some(0)));
+        if kernel_ready {
+            let mut io = Router {
+                clients: (clients.iter())
+                    .map(|(&id, c)| (id, c.wire.events.clone()))
+                    .collect(),
+                owner: None,
+            };
+            let turn =
+                kernel.kernel_turn(&mut store, &mut sim, &mut io, language, Some(pace.slice), b);
+            if let (Clock::Step(_), Some(left)) = (clock, kernel.events_left()) {
+                clock = if left == 0 {
+                    Clock::Paused
+                } else {
+                    Clock::Step(left)
+                };
+            }
+            match turn {
+                // Due, the client runs on, in time: the kernel waits for it.
+                Turn::Due(id) => {
+                    if let Some(c) = clients.get_mut(&id) {
+                        c.held = false;
+                    }
+                }
+                // A process's error ends it, and its client's run, as a
+                // standalone run ends; with no client, the daemon's log
+                // says it.
+                Turn::Failed(e) => {
+                    let owner = kernel.failed().and_then(|p| sim.owner(Agent::Process(p)));
+                    match owner {
+                        Some(Agent::Client(id)) if clients.contains_key(&id) => {
+                            let c = clients.remove(&id).expect("a client");
+                            c.wire.events.send(What::End(Some(e.to_string())));
+                            sim.forget(Agent::Client(id));
+                        }
+                        _ => eprintln!("a process ends on an error: {e}"),
+                    }
+                }
+                _ => {}
             }
         }
         if let Some(d) = &durable {
@@ -423,8 +707,9 @@ fn executor(
     }
 }
 
-/// A session for the A-code in `text`, if this daemon can run it.
-fn start(text: &str, language: &dyn Language) -> Result<Session, String> {
+/// A client's session for the A-code in `text`, if this daemon can run
+/// it, and the unit.
+fn start(text: &str, language: &dyn Language, id: u64) -> Result<(Session, Unit), String> {
     let unit = Unit::read(text).map_err(|e| e.0)?;
     if unit.language != language.name() {
         return Err(format!(
@@ -432,5 +717,5 @@ fn start(text: &str, language: &dyn Language) -> Result<Session, String> {
             unit.language
         ));
     }
-    Ok(Session::new(unit, None))
+    Ok((Session::client(unit.clone(), id), unit))
 }

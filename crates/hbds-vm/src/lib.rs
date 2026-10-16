@@ -16,7 +16,9 @@ use hbds_acode::{
 };
 use hbds_core::{AdtRef, Id, fold, same};
 use hbds_gtad::{ClassKind, Code, State as AdtState, Store, Stored};
-use hbds_simulation::{Agent, Sequencing, When};
+use hbds_simulation::When;
+/// The sequencing set a turn is lent, and who runs in it.
+pub use hbds_simulation::{Agent, Sequencing};
 use hbds_values::{Fault, Fz, List, Op, Scalar, Value};
 
 /// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
@@ -37,6 +39,10 @@ pub trait Io: Send {
     fn ready(&mut self) -> bool {
         true
     }
+
+    /// The kernel runs a process for `owner`, the agent that activated
+    /// it: what it writes may go there.
+    fn running(&mut self, _owner: Option<Agent>) {}
 }
 
 /// `line:column: runtime error: message`, as the reference writes it.
@@ -71,12 +77,14 @@ pub fn run(
             .stack_size(STACK)
             .spawn_scoped(s, || {
                 let mut session = Session::new(unit.clone(), budget);
+                let mut sim = Sequencing::new();
                 loop {
-                    match session.turn(store, io, language, None) {
+                    match session.turn(store, &mut sim, io, language, None) {
                         Turn::Done(statements) => return Ok(statements),
                         Turn::Failed(e) => return Err(e),
-                        // No slice, and an Io that is always ready.
-                        Turn::Yield | Turn::Input => {}
+                        // No slice, an Io always ready, a standalone run's
+                        // HOLD running its processes in place.
+                        _ => {}
                     }
                 }
             })
@@ -96,13 +104,52 @@ pub enum Turn {
     Yield,
     /// It waits for a line its Io does not have yet.
     Input,
+    /// A client's main program holds: it waits until the kernel says it
+    /// is due.
+    Held,
+    /// The kernel has nothing due within its bound.
+    Idle,
+    /// The kernel reached a client's time: that client runs on.
+    Due(u64),
+}
+
+/// How a session stands to the store's time (docs/architecture.md,
+/// decision 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// A standalone run: the main program a process, its HOLD running the
+    /// processes due in place.
+    Standalone,
+    /// A daemon's client: an agent of the store's set when it holds; its
+    /// processes are the kernel's.
+    Client(u64),
+    /// The daemon's kernel: no main program; it runs the processes the
+    /// store's set says are due.
+    Kernel,
+}
+
+/// How far the kernel may take time in a turn: up to `until`, and at
+/// most `events` agents due, if counted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bound {
+    pub until: f64,
+    pub events: Option<u64>,
+}
+
+/// Why a dispatch ends a turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    Held,
+    Idle,
+    Due(u64),
 }
 
 /// A run that goes in turns (docs/architecture.md, decision 3): what the
 /// VM keeps between them. The store, the Io and the language are lent to
 /// each turn; a turn runs on a thread with the VM's large stack.
 pub struct Session {
-    unit: Unit,
+    /// The units loaded, and where each one's modules start.
+    units: Vec<(Unit, usize)>,
     o: Owned,
 }
 
@@ -123,7 +170,12 @@ struct Owned {
     /// Transactions begun and not yet ended.
     open: usize,
     ses: Ses,
-    sim: Sequencing,
+    mode: Mode,
+    /// The kernel's bound for this turn, and the process it runs.
+    bound: Bound,
+    running: Option<Id>,
+    /// The process the kernel's last turn ended on an error, if one did.
+    failed: Option<Id>,
     /// Every fiber; the current one's frames and stack are `frames` and
     /// `stack`.
     fibers: Vec<Fiber>,
@@ -148,28 +200,43 @@ struct Owned {
 
 impl Session {
     pub fn new(unit: Unit, budget: Option<u64>) -> Session {
-        let mut computed = HashMap::new();
-        let mut bodies = HashMap::new();
-        for (i, m) in unit.modules.iter().enumerate() {
-            if let Some(key) = &m.computes {
-                computed.entry(key.clone()).or_insert(i);
-            }
-            if let Some(class) = &m.body {
-                bodies.insert(class.clone(), i);
-            }
-        }
+        let mut session = Session::empty(budget, Mode::Standalone);
+        session.load(unit);
+        session
+    }
+
+    /// A daemon's client's session: `id` is its agent's.
+    pub fn client(unit: Unit, id: u64) -> Session {
+        let mut session = Session::empty(None, Mode::Client(id));
+        session.load(unit);
+        session
+    }
+
+    /// The daemon's kernel: units are loaded into it as clients bring
+    /// them.
+    pub fn kernel() -> Session {
+        Session::empty(None, Mode::Kernel)
+    }
+
+    fn empty(budget: Option<u64>, mode: Mode) -> Session {
         let o = Owned {
-            modules: unit.modules.iter().cloned().map(Rc::new).collect(),
+            modules: Vec::new(),
             compiled: HashMap::new(),
-            computed,
-            bodies,
+            computed: HashMap::new(),
+            bodies: HashMap::new(),
             budget,
             statements: 0,
             frames: Vec::new(),
             stack: Vec::new(),
             open: 0,
             ses: Ses::default(),
-            sim: Sequencing::new(),
+            mode,
+            bound: Bound {
+                until: f64::INFINITY,
+                events: None,
+            },
+            running: None,
+            failed: None,
             fibers: vec![Fiber::new(Role::Main, None)],
             current: 0,
             coroutines: HashMap::new(),
@@ -181,12 +248,36 @@ impl Session {
             nesting: 0,
             slice: None,
         };
-        Session { unit, o }
+        Session {
+            units: Vec::new(),
+            o,
+        }
     }
 
-    /// The A-code this session runs.
+    /// Adds a unit's modules, the instructions that name modules moved by
+    /// where they start: a new version of a process's body or of a
+    /// computed attribute's function serves from now on, while fibers
+    /// already running keep theirs (decision 10). Where they start.
+    pub fn load(&mut self, unit: Unit) -> usize {
+        let offset = self.o.modules.len();
+        for (i, m) in unit.modules.iter().enumerate() {
+            let mut m = m.clone();
+            relocate(&mut m, offset);
+            if let Some(key) = &m.computes {
+                self.o.computed.insert(key.clone(), offset + i);
+            }
+            if let Some(class) = &m.body {
+                self.o.bodies.insert(class.clone(), offset + i);
+            }
+            self.o.modules.push(Rc::new(m));
+        }
+        self.units.push((unit, offset));
+        offset
+    }
+
+    /// The A-code this session runs, the last loaded.
     pub fn unit(&self) -> &Unit {
-        &self.unit
+        &self.units.last().expect("a unit").0
     }
 
     /// Runs on until the run ends, or `slice` instructions are spent, or
@@ -194,22 +285,91 @@ impl Session {
     pub fn turn(
         &mut self,
         store: &mut Store,
+        sim: &mut Sequencing,
         io: &mut dyn Io,
         language: &dyn Language,
         slice: Option<u64>,
     ) -> Turn {
+        let (unit, offset) = self.units.last().expect("a unit");
         let mut vm = Vm {
-            unit: &self.unit,
+            unit,
+            offset: *offset,
             o: &mut self.o,
             store,
+            sim,
             io,
             language,
         };
         vm.o.slice = slice;
+        if let Mode::Client(id) = vm.o.mode {
+            vm.sim.run_as(Agent::Client(id));
+        }
         match vm.turn() {
             Ok(Some(turn)) => turn,
             Ok(None) => Turn::Done(vm.o.statements),
             Err(e) => Turn::Failed(e),
+        }
+    }
+
+    /// A turn of the kernel: the processes due, up to `bound`, each run
+    /// until it holds, passivates or ends; a client due ends the turn.
+    pub fn kernel_turn(
+        &mut self,
+        store: &mut Store,
+        sim: &mut Sequencing,
+        io: &mut dyn Io,
+        language: &dyn Language,
+        slice: Option<u64>,
+        bound: Bound,
+    ) -> Turn {
+        let Some((unit, offset)) = self.units.last() else {
+            return Turn::Idle;
+        };
+        let mut vm = Vm {
+            unit,
+            offset: *offset,
+            o: &mut self.o,
+            store,
+            sim,
+            io,
+            language,
+        };
+        vm.o.slice = slice;
+        vm.o.bound = bound;
+        match vm.kernel_turn() {
+            Ok(turn) => turn,
+            Err(e) => Turn::Failed(e),
+        }
+    }
+
+    /// Whether the kernel is in the middle of a process.
+    pub fn in_process(&self) -> bool {
+        self.o.running.is_some()
+    }
+
+    /// The process the kernel's last turn ended on an error, if one did.
+    pub fn failed(&self) -> Option<Id> {
+        self.o.failed
+    }
+
+    /// The agents due the kernel may still run, if they are counted.
+    pub fn events_left(&self) -> Option<u64> {
+        self.o.bound.events
+    }
+}
+
+/// A module's instructions that name modules, moved by `offset`.
+fn relocate(m: &mut Module, offset: usize) {
+    if offset == 0 {
+        return;
+    }
+    for i in &mut m.code {
+        if let Instr::Call(callee, _)
+        | Instr::Chain(callee)
+        | Instr::ResumeStarted(callee, ..)
+        | Instr::ResumeFirst(callee, _) = i
+        {
+            *callee += offset;
         }
     }
 }
@@ -226,9 +386,12 @@ impl Vm<'_> {
                 self.enter(program, Vec::new(), None, 0, false);
             }
             let exit = self.exec_from(0, 0);
-            if matches!(exit, Ok(Exit::Yield | Exit::Input)) {
+            if let Ok(Exit::Yield | Exit::Input | Exit::Stop(_)) = exit {
                 return Ok(Some(match exit {
                     Ok(Exit::Yield) => Turn::Yield,
+                    Ok(Exit::Stop(Stop::Held)) => Turn::Held,
+                    Ok(Exit::Stop(Stop::Idle)) => Turn::Idle,
+                    Ok(Exit::Stop(Stop::Due(id))) => Turn::Due(id),
                     _ => Turn::Input,
                 }));
             }
@@ -242,12 +405,15 @@ impl Vm<'_> {
                 Exit::Returned(_) | Exit::End(End::Done) => break,
                 Exit::End(End::Restart) => {}
                 Exit::End(End::Chain(m)) => self.o.program = m,
-                Exit::Yield | Exit::Input => unreachable!("returned above"),
+                Exit::Yield | Exit::Input | Exit::Stop(_) => unreachable!("returned above"),
             }
+        }
+        if self.o.mode != Mode::Standalone {
+            return Ok(None);
         }
         // The processes as the run leaves them: implicitly persistent (page
         // 112), the sequencing set gone with the run.
-        for (p, state, clock) in self.o.sim.processes() {
+        for (p, state, clock) in self.sim.processes() {
             if self.store.objects().contains_key(&p) {
                 hbds_simulation::record(self.store, p, state, clock).map_err(|e| RuntimeError {
                     span: Span { line: 1, column: 1 },
@@ -256,6 +422,53 @@ impl Vm<'_> {
             }
         }
         Ok(None)
+    }
+
+    fn kernel_turn(&mut self) -> Result<Turn, RuntimeError> {
+        self.o.failed = None;
+        if let Some(p) = self.o.running {
+            self.sim.run_as(Agent::Process(p));
+            let owner = self.sim.owner(Agent::Process(p));
+            self.io.running(owner);
+        } else {
+            match self.dispatch() {
+                Ok(Some(stop)) => return Ok(stop_turn(stop)),
+                Ok(None) => {}
+                Err(f) => {
+                    return Err(RuntimeError {
+                        span: f.at.unwrap_or_default(),
+                        message: f.message,
+                    });
+                }
+            }
+        }
+        let exit = self.exec_from(0, 0);
+        if exit.is_err() || matches!(exit, Ok(Exit::End(_))) {
+            // A process that fails, or STOPs, ends; the kernel goes on.
+            for _ in 0..std::mem::take(&mut self.o.open) {
+                let _ = self.store.end(false);
+            }
+            if let Some(p) = self.o.running.take() {
+                self.sim.run_as(Agent::Process(p));
+                let _ = self.sim.terminate();
+                self.o.failed = Some(p);
+            }
+        }
+        match exit? {
+            Exit::Yield => Ok(Turn::Yield),
+            Exit::Stop(stop) => Ok(stop_turn(stop)),
+            Exit::End(_) => Ok(Turn::Idle),
+            Exit::Input => Ok(Turn::Input),
+            Exit::Returned(_) => unreachable!("the kernel's fiber has no frames"),
+        }
+    }
+}
+
+fn stop_turn(stop: Stop) -> Turn {
+    match stop {
+        Stop::Held => Turn::Held,
+        Stop::Idle => Turn::Idle,
+        Stop::Due(id) => Turn::Due(id),
     }
 }
 
@@ -352,6 +565,7 @@ enum Exit {
     Yield,
     /// The Io has no line yet.
     Input,
+    Stop(Stop),
 }
 
 /// The rule code running, for the expert-system engines (docs/hbds.md,
@@ -383,12 +597,18 @@ enum Next {
     End(End),
     /// The instruction waits for input: it runs again next turn.
     Wait,
+    /// A dispatch ends the turn.
+    Stop(Stop),
 }
 
 struct Vm<'r> {
+    /// The last unit loaded, and where its modules start: what code the
+    /// store keeps is compiled against.
     unit: &'r Unit,
+    offset: usize,
     o: &'r mut Owned,
     store: &'r mut Store,
+    sim: &'r mut Sequencing,
     io: &'r mut dyn Io,
     language: &'r dyn Language,
 }
@@ -513,7 +733,7 @@ impl hbds_rules::Host for Engine<'_, '_> {
                 hbds_values::truth(&v.expect("an expression's value")).map_err(|f| Some(f.0))
             }
             Ok(Exit::End(_)) => Err(None),
-            Ok(Exit::Yield | Exit::Input) => {
+            Ok(Exit::Yield | Exit::Input | Exit::Stop(_)) => {
                 unreachable!("code the store calls back runs to completion")
             }
             Err(e) => Err(Some(e.message)),
@@ -547,7 +767,7 @@ impl hbds_rules::Host for Engine<'_, '_> {
         match exit {
             Ok(Exit::Returned(_)) => Ok(()),
             Ok(Exit::End(_)) => Err(told(None, part, what.as_deref())),
-            Ok(Exit::Yield | Exit::Input) => {
+            Ok(Exit::Yield | Exit::Input | Exit::Stop(_)) => {
                 unreachable!("code the store calls back runs to completion")
             }
             Err(e) => Err(told(Some(e.message), part, what.as_deref())),
@@ -664,23 +884,32 @@ impl<'r> Vm<'r> {
 
     /// A fiber whose outermost frame returned: a coroutine goes back to
     /// its resumer; a process's body ends as TERMINATE ends it.
-    fn fiber_ends(&mut self) -> Run<()> {
+    fn fiber_ends(&mut self) -> Run<Option<Stop>> {
         let f = self.o.current;
         self.o.fibers[f].state = FiberState::Ended;
         match self.o.fibers[f].role {
             Role::Coroutine => {
                 let back = self.o.fibers[f].resumer.expect("a coroutine's resumer");
                 self.switch(back);
-                Ok(())
+                Ok(None)
             }
             Role::Process(p) => {
                 self.o.processes.remove(&p);
+                self.o.running = None;
                 let at = self.o.held_at;
                 self.sim_op(|sim, _| sim.terminate())
                     .map_err(|f| f.at(at))?;
                 self.dispatch()
             }
             Role::Main => unreachable!("the main program ends the run"),
+        }
+    }
+
+    /// The agent the main fiber is: the main program, or a client's.
+    fn me(&self) -> Agent {
+        match self.o.mode {
+            Mode::Client(id) => Agent::Client(id),
+            _ => Agent::Main,
         }
     }
 
@@ -694,7 +923,7 @@ impl<'r> Vm<'r> {
             .into());
         }
         match self.role() {
-            Role::Main => Ok(Agent::Main),
+            Role::Main => Ok(self.me()),
             Role::Process(p) => Ok(Agent::Process(p)),
             Role::Coroutine => Err(
                 "a coroutine RESUME started is not a process: it does not HOLD, PASSIVATE nor TERMINATE"
@@ -704,11 +933,35 @@ impl<'r> Vm<'r> {
     }
 
     /// After HOLD or PASSIVATE, or a process's end: the sequencing set
-    /// says who runs next, the main program or a process.
-    fn dispatch(&mut self) -> Run<()> {
+    /// says who runs next, the main program or a process. A client's
+    /// main program waits for the kernel instead; the kernel stops at
+    /// its bound, or at a client due.
+    fn dispatch(&mut self) -> Run<Option<Stop>> {
         let at = self.o.held_at;
-        match self.o.sim.advance() {
+        let next = match self.o.mode {
+            Mode::Client(_) => return Ok(Some(Stop::Held)),
+            Mode::Standalone => self.sim.advance(),
+            Mode::Kernel => {
+                let bound = self.o.bound;
+                let due = self.sim.next_due().is_some_and(|t| t <= bound.until);
+                if !due || bound.events == Some(0) {
+                    self.o.running = None;
+                    self.switch(0);
+                    return Ok(Some(Stop::Idle));
+                }
+                if let Some(n) = &mut self.o.bound.events {
+                    *n -= 1;
+                }
+                self.sim.advance()
+            }
+        };
+        match next {
             Some(Agent::Process(p)) => {
+                self.o.running = Some(p);
+                if self.o.mode == Mode::Kernel {
+                    let owner = self.sim.owner(Agent::Process(p));
+                    self.io.running(owner);
+                }
                 let fiber = match self.o.processes.get(&p) {
                     Some(&f) => f,
                     None => {
@@ -718,14 +971,25 @@ impl<'r> Vm<'r> {
                         self.o.processes.insert(p, f);
                         self.switch(f);
                         self.enter(body, Vec::new(), Some(AdtRef::Object(p)), 0, false);
-                        return Ok(());
+                        return Ok(None);
                     }
                 };
                 self.switch(fiber);
             }
-            Some(Agent::Main) | None => self.switch(0),
+            Some(Agent::Client(id)) => {
+                self.o.running = None;
+                self.switch(0);
+                return Ok(Some(Stop::Due(id)));
+            }
+            Some(Agent::Main) | None => {
+                self.o.running = None;
+                self.switch(0);
+                if self.o.mode == Mode::Kernel {
+                    return Ok(Some(Stop::Idle));
+                }
+            }
         }
-        Ok(())
+        Ok(None)
     }
 
     /// The body of a process: its class's coroutine, or the nearest
@@ -749,10 +1013,10 @@ impl<'r> Vm<'r> {
     ) -> Run<()> {
         let store = &*self.store;
         let name = |a: Agent| match a {
-            Agent::Main => "the main program".to_string(),
+            Agent::Main | Agent::Client(_) => "the main program".to_string(),
             Agent::Process(p) => store.describe(AdtRef::Object(p)),
         };
-        op(&mut self.o.sim, &name).map_err(Failure::from)
+        op(self.sim, &name).map_err(Failure::from)
     }
 
     fn pop_time(&mut self) -> f64 {
@@ -765,7 +1029,7 @@ impl<'r> Vm<'r> {
     /// HOLD or PASSIVATE done: a process gives control back to the
     /// sequencing set; the main program lets it run the processes due
     /// until it is due again.
-    fn give_way(&mut self, span: Span) -> Run<()> {
+    fn give_way(&mut self, span: Span) -> Run<Option<Stop>> {
         if self.role() == Role::Main {
             self.o.held_at = span;
         }
@@ -904,6 +1168,7 @@ impl<'r> Vm<'r> {
                     self.o.frames.last_mut().expect("a frame").pc = pc;
                     return Ok(Exit::Input);
                 }
+                Next::Stop(stop) => return Ok(Exit::Stop(stop)),
                 Next::Return(value) => {
                     let callee = self.o.frames.pop().expect("a frame");
                     let kind = self.o.modules[callee.module].kind;
@@ -929,7 +1194,9 @@ impl<'r> Vm<'r> {
                         return Ok(Exit::Returned(result));
                     }
                     if self.o.frames.is_empty() {
-                        self.fiber_ends().map_err(placed)?;
+                        if let Some(stop) = self.fiber_ends().map_err(placed)? {
+                            return Ok(Exit::Stop(stop));
+                        }
                         continue;
                     }
                     if let Some(v) = result {
@@ -1065,7 +1332,8 @@ impl<'r> Vm<'r> {
         if let Some(&m) = self.o.compiled.get(&key) {
             return Ok(m);
         }
-        let module = self.language.compile(part, text, what, self.unit)?;
+        let mut module = self.language.compile(part, text, what, self.unit)?;
+        relocate(&mut module, self.offset);
         self.o.modules.push(Rc::new(module));
         let m = self.o.modules.len() - 1;
         self.o.compiled.insert(key, m);
@@ -1093,7 +1361,7 @@ impl<'r> Vm<'r> {
                 Ok(Ok(t))
             }
             Exit::End(end) => Ok(Err(end)),
-            Exit::Yield | Exit::Input => {
+            Exit::Yield | Exit::Input | Exit::Stop(_) => {
                 unreachable!("code the store calls back runs to completion")
             }
         }
@@ -1255,14 +1523,14 @@ impl<'r> Vm<'r> {
         let state = same(&self.store.attributes()[&a].name, hbds_simulation::STATE);
         let kept = self.store.get(o, a).cloned();
         let p = Agent::Process(o);
-        if !self.o.sim.knows(p) && kept.is_some() {
+        if !self.sim.knows(p) && kept.is_some() {
             return kept;
         }
         Some(if state {
-            let name = hbds_simulation::state_name(self.o.sim.state(p));
+            let name = hbds_simulation::state_name(self.sim.state(p));
             Value::exact(Scalar::String(name.into()))
         } else {
-            Value::exact(Scalar::Float(self.o.sim.clock(p)))
+            Value::exact(Scalar::Float(self.sim.clock(p)))
         })
     }
 
@@ -1604,7 +1872,7 @@ impl<'r> Vm<'r> {
                 }
                 self.push(result);
             }
-            Instr::Time => self.push(Value::exact(Scalar::Float(self.o.sim.now()))),
+            Instr::Time => self.push(Value::exact(Scalar::Float(self.sim.now()))),
             Instr::Pause => match self.role() {
                 Role::Main => {
                     if self.o.nesting == 0 && !self.io.ready() {
@@ -2105,11 +2373,15 @@ impl<'r> Vm<'r> {
             Instr::Hold => {
                 let dt = self.pop_time();
                 self.sim_op(|sim, _| sim.hold(dt))?;
-                self.give_way(span)?;
+                if let Some(stop) = self.give_way(span)? {
+                    return Ok(Next::Stop(stop));
+                }
             }
             Instr::Passivate => {
                 self.sim_op(|sim, _| sim.passivate())?;
-                self.give_way(span)?;
+                if let Some(stop) = self.give_way(span)? {
+                    return Ok(Next::Stop(stop));
+                }
             }
             Instr::Terminate => {
                 self.sim_op(|sim, _| sim.terminate())?;
@@ -2118,7 +2390,10 @@ impl<'r> Vm<'r> {
                         let f = self.o.current;
                         self.o.fibers[f].state = FiberState::Ended;
                         self.o.processes.remove(&p);
-                        self.dispatch()?;
+                        self.o.running = None;
+                        if let Some(stop) = self.dispatch()? {
+                            return Ok(Next::Stop(stop));
+                        }
                     }
                     _ => return Ok(Next::End(End::Done)),
                 }

@@ -5,7 +5,7 @@
 //! engine keeps the time and the states; running a process's body, a
 //! coroutine, is a language's. docs/hbds.md, "Simulation", gives the rules.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use hbds_core::value::{Scalar, Value};
 use hbds_core::{AdtRef, Id, same};
@@ -42,11 +42,20 @@ pub fn is_process(store: &Store, o: Id) -> bool {
     store.lineage(object.class).contains(&process)
 }
 
-/// Who runs: the main program, itself a process (SIMULA's), or a process.
+/// Who runs: the main program, itself a process (SIMULA's), or a process;
+/// in the daemon, a client's main program once it holds (decision 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Agent {
     Main,
     Process(Id),
+    Client(u64),
+}
+
+impl Agent {
+    /// A main program: standalone, or a client's.
+    pub fn is_main(self) -> bool {
+        matches!(self, Agent::Main | Agent::Client(_))
+    }
 }
 
 /// Figure 51's four states.
@@ -83,6 +92,12 @@ pub struct Sequencing {
     set: Vec<(f64, Agent)>,
     states: BTreeMap<Agent, (State, f64)>,
     current: Agent,
+    /// Who activated each process first: in the daemon, the client it
+    /// reports to.
+    owners: BTreeMap<Agent, Agent>,
+    /// The clients that have acted on time: each the active agent, as
+    /// SIMULA's main program is, until it holds or ends.
+    engaged: BTreeSet<Agent>,
 }
 
 impl Default for Sequencing {
@@ -102,11 +117,61 @@ impl Sequencing {
             set: Vec::new(),
             states: BTreeMap::from([(Agent::Main, (State::Active, 0.0))]),
             current: Agent::Main,
+            owners: BTreeMap::new(),
+            engaged: BTreeSet::new(),
+        }
+    }
+
+    /// The daemon's: one per store, no main program of its own, the
+    /// kernel driving it.
+    pub fn kernel() -> Sequencing {
+        Sequencing {
+            now: 0.0,
+            set: Vec::new(),
+            states: BTreeMap::new(),
+            current: Agent::Main,
+            owners: BTreeMap::new(),
+            engaged: BTreeSet::new(),
         }
     }
 
     pub fn now(&self) -> f64 {
         self.now
+    }
+
+    /// Who runs from now on: in the daemon, whichever turn is running.
+    pub fn run_as(&mut self, a: Agent) {
+        self.current = a;
+    }
+
+    /// Whether a client has acted on time: the kernel waits while it runs.
+    pub fn is_engaged(&self, a: Agent) -> bool {
+        self.engaged.contains(&a)
+    }
+
+    /// The running agent acts on time: a client becomes part of it.
+    fn engage(&mut self) {
+        if let Agent::Client(_) = self.current {
+            self.engaged.insert(self.current);
+        }
+    }
+
+    /// Who activated `p` first.
+    pub fn owner(&self, p: Agent) -> Option<Agent> {
+        self.owners.get(&p).copied()
+    }
+
+    /// When the next agent is due, if one is.
+    pub fn next_due(&self) -> Option<f64> {
+        self.set.first().map(|(t, _)| *t)
+    }
+
+    /// An agent gone for good, a client that left: out of the set and
+    /// forgotten.
+    pub fn forget(&mut self, a: Agent) {
+        self.remove(a);
+        self.states.remove(&a);
+        self.engaged.remove(&a);
     }
 
     pub fn current(&self) -> Agent {
@@ -133,7 +198,7 @@ impl Sequencing {
         (self.states.iter())
             .filter_map(|(a, (s, c))| match a {
                 Agent::Process(id) => Some((*id, *s, *c)),
-                Agent::Main => None,
+                Agent::Main | Agent::Client(_) => None,
             })
             .collect()
     }
@@ -181,6 +246,7 @@ impl Sequencing {
 
     /// ACTIVATE and REACTIVATE: a passive process into the set.
     pub fn reactivate(&mut self, p: Agent, when: When, d: Describe) -> Result<(), String> {
+        self.engage();
         self.expect(p, &[State::Passive], d)?;
         let (t, i) = match when {
             When::Now => (self.now, None),
@@ -204,11 +270,13 @@ impl Sequencing {
             None => self.insert(p, t),
         }
         self.set_state(p, State::Hold, t);
+        self.owners.entry(p).or_insert(self.current);
         Ok(())
     }
 
     /// CANCEL: out of the set, passive (page 125).
     pub fn cancel(&mut self, p: Agent, d: Describe) -> Result<(), String> {
+        self.engage();
         self.expect(p, &[State::Hold], d)?;
         self.remove(p);
         let clock = self.clock(p);
@@ -218,6 +286,7 @@ impl Sequencing {
 
     /// DELAY: due `dt` later, behind those already due then.
     pub fn delay(&mut self, p: Agent, dt: f64, d: Describe) -> Result<(), String> {
+        self.engage();
         self.expect(p, &[State::Hold], d)?;
         let t = Self::time(self.clock(p) + dt, "DELAY's")?;
         if t < self.now {
@@ -231,6 +300,7 @@ impl Sequencing {
 
     /// KILL: terminated, for good.
     pub fn kill(&mut self, p: Agent, d: Describe) -> Result<(), String> {
+        self.engage();
         self.expect(p, &[State::Hold, State::Passive], d)?;
         self.remove(p);
         let clock = self.clock(p);
@@ -240,6 +310,7 @@ impl Sequencing {
 
     /// HOLD: the running agent due `dt` from now.
     pub fn hold(&mut self, dt: f64) -> Result<(), String> {
+        self.engage();
         let dt = Self::time(dt, "HOLD's duration")?;
         if dt < 0.0 {
             return Err(format!("HOLD for {dt}: a duration is not negative"));
@@ -252,7 +323,7 @@ impl Sequencing {
 
     /// PASSIVATE: the running process out of time, until reactivated.
     pub fn passivate(&mut self) -> Result<(), String> {
-        if self.current == Agent::Main {
+        if self.current.is_main() {
             return Err("the main program is not passivated: nothing could reactivate it".into());
         }
         let a = self.current;
@@ -262,7 +333,7 @@ impl Sequencing {
 
     /// TERMINATE, or the end of its body: the running process, for good.
     pub fn terminate(&mut self) -> Result<(), String> {
-        if self.current == Agent::Main {
+        if self.current.is_main() {
             return Err("the main program is not terminated: it ends at its END".into());
         }
         let a = self.current;

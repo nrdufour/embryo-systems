@@ -1,4 +1,5 @@
-//! SHA-1 (RFC 3174), for the WebSocket handshake alone: not for security.
+//! SHA-1 (RFC 3174): the WebSocket handshake's, and the name of a module
+//! the store keeps (docs/architecture.md, decision 10). Not for security.
 
 pub fn digest(message: &[u8]) -> [u8; 20] {
     let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
@@ -45,6 +46,11 @@ pub fn digest(message: &[u8]) -> [u8; 20] {
         out[4 * i..4 * i + 4].copy_from_slice(&x.to_be_bytes());
     }
     out
+}
+
+/// The digest in hexadecimal.
+pub fn hex(message: &[u8]) -> String {
+    digest(message).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

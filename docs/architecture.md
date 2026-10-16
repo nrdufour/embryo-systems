@@ -276,6 +276,28 @@ hold steady; the journal's tests count syncs instead.
 Not chosen: a sequencing set per client (two times over the same
 objects); virtual time only; real time only.
 
+As built (2026-10-16, step 6c1): the daemon's store has one sequencing
+set, which a kernel drives: a VM session of its own that runs the
+processes due, each until it holds, passivates or ends, as one
+participant of the round robin between clients' turns. A client is
+outside time until it acts on it (ACTIVATE, REACTIVATE, CANCEL, KILL,
+DELAY or HOLD; decided 2026-10-16): from then on it is an agent, the
+active one as SIMULA's main program is, and the kernel waits while it
+runs; its HOLD puts it in the set until the kernel reaches its time. So
+a lone client sees what a standalone run shows (the whole corpus passes
+through the daemon), and a client that never touches time stays outside
+it. Its processes outlive it: what they print goes to their client while
+it is connected, else to the daemon's output; an error ends the process,
+and its client's run if it is there. The pace, `paused` (the default),
+`step`, `fast` up to a horizon or `real` times a factor, is set by
+`daemon --pace` and live by `POST /pace`; `GET /time` shows the time and
+who is due. Every unit a client brings is kept by the store, once, by
+the hash of its text (`Change::Module`), and loaded into the kernel, its
+instructions relocated: a new body serves new activations, a process
+already running keeps the one it started in (decision 10); a restarted
+daemon loads the units its store kept. Processes do not survive a
+restart yet: step 6c2.
+
 ### 7. Concurrency: the statement as a transaction, persistent maps
 
 - **A client's unit of work is the statement**, as today and as the

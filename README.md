@@ -31,7 +31,7 @@ cargo run -q -- store /tmp/hydro                                   # what the st
 | `embryo-systems run [--store DIR] --reference FILE` | the same on the interpreter, the VM's specification |
 | `embryo-systems acode FILE` | the program compiled to A-code, as text: an `.acode` file |
 | `embryo-systems exec [--store DIR] FILE` | runs an `.acode` file on the VM |
-| `embryo-systems daemon --socket SOCKET [--store DIR]` | serves a store on a Unix socket; `run`, `exec` and built programs take `--connect SOCKET` to run there, clients taking turns |
+| `embryo-systems daemon --socket SOCKET [--store DIR] [--pace paused\|fast\|real]` | serves a store on a Unix socket; `run`, `exec` and built programs take `--connect SOCKET` to run there, clients taking turns; one time for the store, its processes outliving their clients, at a pace `POST /pace` changes |
 | `embryo-systems build FILE -o OUT` | writes OUT, an executable carrying the program: `OUT [--store DIR]` runs it, anywhere on this platform |
 | `embryo-systems check FILE` | undeclared and misused names, type errors |
 | `embryo-systems compact DIR` | rewrites a store's journal as the shortest that rebuilds it |

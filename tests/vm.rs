@@ -79,11 +79,12 @@ fn vm_in_turns(unit: &hbds_acode::Unit, input: &str, budget: u64) -> Outcome {
             .stack_size(256 << 20)
             .spawn_scoped(s, || {
                 let mut session = hbds_vm::Session::new(unit.clone(), Some(budget));
+                let mut sim = hbds_vm::Sequencing::new();
                 loop {
-                    match session.turn(&mut store, &mut io, &Adt81, Some(5)) {
+                    match session.turn(&mut store, &mut sim, &mut io, &Adt81, Some(5)) {
                         hbds_vm::Turn::Done(n) => return Ok(n),
                         hbds_vm::Turn::Failed(e) => return Err(e.to_string()),
-                        hbds_vm::Turn::Yield | hbds_vm::Turn::Input => {}
+                        _ => {}
                     }
                 }
             })
