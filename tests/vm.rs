@@ -51,21 +51,23 @@ fn capture(input: &str) -> Capture {
 }
 
 /// What a run gives: its output, its error if it had one, and the
-/// statements it executed if it ended well.
-type Outcome = (String, Result<u64, String>);
+/// statements it executed if it ended well; then what the store holds.
+type Outcome = (String, Result<u64, String>, String);
 
-fn reference(program: &adt81::ast::Program, input: &str) -> Outcome {
+fn reference(program: &adt81::ast::Program, input: &str, budget: u64) -> Outcome {
     let io = Arc::new(Mutex::new(capture(input)));
     let store = Arc::new(Mutex::new(Store::memory()));
-    let r = interp::run_within(program.clone(), io.clone(), store, Some(BUDGET));
+    let r = interp::run_within(program.clone(), io.clone(), store.clone(), Some(budget));
     let output = std::mem::take(&mut io.lock().unwrap().output);
-    (output, r.map_err(|e| e.to_string()))
+    let dump = store.lock().unwrap().dump();
+    (output, r.map_err(|e| e.to_string()), dump)
 }
 
-fn vm(unit: &hbds_acode::Unit, input: &str) -> Outcome {
+fn vm(unit: &hbds_acode::Unit, input: &str, budget: u64) -> Outcome {
     let mut io = capture(input);
-    let r = hbds_vm::run(unit, &mut io, &Adt81, Some(BUDGET));
-    (io.output, r.map_err(|e| e.to_string()))
+    let mut store = Store::memory();
+    let r = hbds_vm::run(unit, &mut store, &mut io, &Adt81, Some(budget));
+    (io.output, r.map_err(|e| e.to_string()), store.dump())
 }
 
 fn programs(dir: &Path) -> Vec<PathBuf> {
@@ -87,7 +89,11 @@ fn both(source: &str, input: &str) -> Option<(Outcome, Outcome, String)> {
         .any(|d| d.severity == Severity::Error);
     assert!(!errors, "the program does not check");
     let unit = compile(&program).ok()?;
-    Some((reference(&program, input), vm(&unit, input), unit.text()))
+    Some((
+        reference(&program, input, BUDGET),
+        vm(&unit, input, BUDGET),
+        unit.text(),
+    ))
 }
 
 #[test]
@@ -119,6 +125,9 @@ fn the_corpus() {
         "vm gate: {run} programs run both ways, {} left to later slices",
         skipped.len()
     );
+    if std::env::var("VM_SKIPPED").is_ok() {
+        println!("left: {}", skipped.join(" "));
+    }
     assert!(differ.is_empty(), "\n{}", differ.join("\n"));
     assert!(run > 0);
 }
@@ -146,17 +155,8 @@ fn random_programs() {
         checked += 1;
         let unit = compile(&program)
             .unwrap_or_else(|e| panic!("seed {seed}: not yet on the VM: {e:?}\n{source}"));
-        let run = |budget| {
-            let io = Arc::new(Mutex::new(capture(&input)));
-            let store = Arc::new(Mutex::new(Store::memory()));
-            let r = interp::run_within(program.clone(), io.clone(), store, Some(budget));
-            let output = std::mem::take(&mut io.lock().unwrap().output);
-            (output, r.map_err(|e| e.to_string()))
-        };
-        let r = run(SMALL);
-        let mut io = capture(&input);
-        let v = hbds_vm::run(&unit, &mut io, &Adt81, Some(SMALL));
-        let v = (io.output, v.map_err(|e| e.to_string()));
+        let r = reference(&program, &input, SMALL);
+        let v = vm(&unit, &input, SMALL);
         match &r.1 {
             Err(e) if e.ends_with(interp::BUDGET_SPENT) => spent += 1,
             Err(e) => {

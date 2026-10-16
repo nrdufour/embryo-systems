@@ -114,6 +114,10 @@ version = "0.1.0"
 dependencies = [
  "hbds-acode",
  "hbds-core",
+ "hbds-functors",
+ "hbds-gtad",
  "hbds-lists",
+ "hbds-rules",
+ "hbds-simulation",
  "hbds-values",
 ]

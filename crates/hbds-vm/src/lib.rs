@@ -1,17 +1,28 @@
 //! The VM (docs/architecture.md, decisions 2 and 3): runs A-code. A run
 //! is one fiber, its frames and its operand stack, as data: no thread,
-//! no Rust recursion, so that a paused flow of control can be kept.
-//! What a value does is hbds-values'; lists are hbds-lists'.
+//! no Rust recursion, so that a paused flow of control can be kept. Code
+//! an engine calls back (a COND, an ACTION) runs nested, to completion.
+//! What a value does is hbds-values'; lists are hbds-lists'; the store
+//! is GTAD's.
 
+use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
 use hbds_acode::{
-    BUDGET_SPENT, Instr, Kind, ListOp, Module, Place, SlotType, Span, Support, Unit, too_far,
+    BUDGET_SPENT, Instr, Kind, Language, ListOp, Module, Place, SlotType, Span, StateOp, Unit,
+    too_far,
 };
+use hbds_core::{AdtRef, Id, fold, same};
+use hbds_gtad::{ClassKind, State as AdtState, Store, Stored};
+use hbds_simulation::{Agent, Sequencing};
 use hbds_values::{Fault, Fz, List, Op, Scalar, Value};
 
+/// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
+const DEPTH: usize = 64;
+
 /// Where the program reads its input and writes its output.
-pub trait Io {
+pub trait Io: Send {
     fn read_line(&mut self) -> Option<String>;
     fn write(&mut self, text: &str);
 }
@@ -30,32 +41,72 @@ impl fmt::Display for RuntimeError {
     }
 }
 
-/// Runs the unit's first module, a program, then those it CHAINs to:
-/// the statements it executed.
+/// The stack of the thread a run takes: code the store keeps runs
+/// nested, as deep as 64 CONDs and ACTIONs, as the reference's does.
+const STACK: usize = 256 << 20;
+
+/// Runs the unit's first module, a program, then those it CHAINs to, on
+/// `store`: the statements it executed.
 pub fn run(
     unit: &Unit,
+    store: &mut Store,
     io: &mut dyn Io,
-    support: &dyn Support,
+    language: &(dyn Language + Sync),
     budget: Option<u64>,
 ) -> Result<u64, RuntimeError> {
+    std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .stack_size(STACK)
+            .spawn_scoped(s, || run_here(unit, store, io, language, budget))
+            .expect("a thread for the run")
+            .join()
+            .expect("the run's thread")
+    })
+}
+
+fn run_here(
+    unit: &Unit,
+    store: &mut Store,
+    io: &mut dyn Io,
+    language: &dyn Language,
+    budget: Option<u64>,
+) -> Result<u64, RuntimeError> {
+    let mut computed = HashMap::new();
+    for (i, m) in unit.modules.iter().enumerate() {
+        if let Some(key) = &m.computes {
+            computed.entry(key.clone()).or_insert(i);
+        }
+    }
     let mut vm = Vm {
         unit,
+        modules: unit.modules.iter().cloned().map(Rc::new).collect(),
+        compiled: HashMap::new(),
+        computed,
+        store,
         io,
-        support,
+        language,
         budget,
         statements: 0,
         frames: Vec::new(),
         stack: Vec::new(),
+        open: 0,
+        sim: Sequencing::new(),
     };
     let mut current = 0;
     loop {
         vm.frames.clear();
         vm.stack.clear();
-        vm.enter(current, Vec::new());
-        match vm.exec()? {
-            End::Done => return Ok(vm.statements),
-            End::Restart => {}
-            End::Chain(m) => current = m,
+        vm.enter(current, Vec::new(), None, 0);
+        let exit = vm.exec(0);
+        // A statement's transaction a failure or a STOP left open is
+        // refused, as the reference's `atomic` refuses it.
+        for _ in 0..std::mem::take(&mut vm.open) {
+            let _ = vm.store.end(false);
+        }
+        match exit? {
+            Exit::Returned(_) | Exit::End(End::Done) => return Ok(vm.statements),
+            Exit::End(End::Restart) => {}
+            Exit::End(End::Chain(m)) => current = m,
         }
     }
 }
@@ -88,12 +139,29 @@ struct Frame {
     cells: Vec<Cell>,
     args: Vec<Item>,
     prefix: Option<Value>,
+    /// The object a callback or a computed attribute runs for.
+    this: Option<AdtRef>,
+    /// How many CONDs and ACTIONs this frame runs within.
+    depth: usize,
 }
 
 enum End {
     Done,
     Restart,
     Chain(usize),
+}
+
+/// How a run of frames ends: its outermost returned, or the program ends.
+enum Exit {
+    Returned(Option<Value>),
+    End(End),
+}
+
+/// A change that runs CONDs and ACTIONs.
+enum Invoked {
+    Created(Id),
+    Set(Id, Id),
+    Linked(Id),
 }
 
 /// What an instruction does to the flow.
@@ -106,12 +174,23 @@ enum Next {
 
 struct Vm<'r> {
     unit: &'r Unit,
+    /// The unit's modules, then those compiled from the store's code.
+    modules: Vec<Rc<Module>>,
+    /// Code the store keeps, compiled: by part and text.
+    compiled: HashMap<(String, String), usize>,
+    /// The functions that compute attributes, by class and attribute.
+    computed: HashMap<(String, String), usize>,
+    store: &'r mut Store,
     io: &'r mut dyn Io,
-    support: &'r dyn Support,
+    language: &'r dyn Language,
     budget: Option<u64>,
     statements: u64,
     frames: Vec<Frame>,
     stack: Vec<Item>,
+    /// Transactions begun and not yet ended.
+    open: usize,
+    /// The simulation: no process runs yet on the VM (step 4c).
+    sim: Sequencing,
 }
 
 /// Why an instruction fails, and where if not where it comes from.
@@ -123,6 +202,15 @@ struct Failure {
 impl From<String> for Failure {
     fn from(message: String) -> Failure {
         Failure { message, at: None }
+    }
+}
+
+impl From<RuntimeError> for Failure {
+    fn from(e: RuntimeError) -> Failure {
+        Failure {
+            message: e.message,
+            at: Some(e.span),
+        }
     }
 }
 
@@ -141,20 +229,31 @@ fn fault(f: Fault) -> Failure {
     f.0.into()
 }
 
-/// A value as PRINT writes it.
-fn show(v: &Value) -> String {
-    match v {
-        Value::List(l) => format!(
-            "[{}]",
-            l.items.iter().map(show).collect::<Vec<_>>().join(", ")
-        ),
-        v => v.to_string(),
+/// The string a name is, as Named left it.
+fn text_of(v: &Value) -> String {
+    match v.scalar() {
+        Some(Scalar::String(s)) => s.to_string(),
+        v => unreachable!("a name expected, not {v:?}"),
     }
 }
 
+/// A store's refusal.
+fn stored<T>(r: Stored<T>) -> Run<T> {
+    r.map_err(|e| e.0.into())
+}
+
+/// An error inside a COND or an ACTION, told once, from the outermost,
+/// at the place of the change that ran it.
+fn within(f: Failure, kind: &str, what: &str) -> Failure {
+    if f.message.starts_with("in the ") {
+        return f.message.into();
+    }
+    format!("in the {kind} of {what}: {}", f.message).into()
+}
+
 impl<'r> Vm<'r> {
-    fn enter(&mut self, module: usize, mut args: Vec<Item>) {
-        let m = &self.unit.modules[module];
+    fn enter(&mut self, module: usize, mut args: Vec<Item>, this: Option<AdtRef>, depth: usize) {
+        let m = self.modules[module].clone();
         let mut prefix = None;
         if m.kind == Kind::Functor && !args.is_empty() {
             prefix = match args.remove(0) {
@@ -168,11 +267,17 @@ impl<'r> Vm<'r> {
             cells: vec![Cell::Own(Var::default()); m.slots.len()],
             args,
             prefix,
+            this,
+            depth,
         });
     }
 
-    fn module(&self) -> &'r Module {
-        &self.unit.modules[self.frames.last().expect("a frame").module]
+    fn module(&self) -> Rc<Module> {
+        self.modules[self.frames.last().expect("a frame").module].clone()
+    }
+
+    fn frame(&self) -> &Frame {
+        self.frames.last().expect("a frame")
     }
 
     /// The frame and slot a slot of the current frame stands for.
@@ -202,13 +307,13 @@ impl<'r> Vm<'r> {
 
     /// The declaration of the variable a slot stands for, in the module
     /// that declares it.
-    fn decl(&self, s: usize) -> &'r hbds_acode::Slot {
+    fn decl(&self, s: usize) -> &hbds_acode::Slot {
         let (f, t) = self.resolve(s);
-        &self.unit.modules[self.frames[f].module].slots[t]
+        &self.modules[self.frames[f].module].slots[t]
     }
 
-    fn name(&self, s: usize) -> &'r str {
-        &self.module().slots[s].name
+    fn name(&self, s: usize) -> String {
+        self.modules[self.frame().module].slots[s].name.clone()
     }
 
     fn pop(&mut self) -> Value {
@@ -245,31 +350,30 @@ impl<'r> Vm<'r> {
         }
     }
 
-    fn exec(&mut self) -> Result<End, RuntimeError> {
+    /// Runs until the frames are back to `base` deep, the outermost
+    /// above it having returned, or the program ends.
+    fn exec(&mut self, base: usize) -> Result<Exit, RuntimeError> {
         loop {
             let m = self.module();
             let f = self.frames.last_mut().expect("a frame");
             let pc = f.pc;
             f.pc += 1;
             let span = m.spans[pc];
-            let next = self.step(&m.code[pc], m).map_err(|f| RuntimeError {
+            let next = self.step(&m.code[pc], &m).map_err(|f| RuntimeError {
                 span: f.at.unwrap_or(span),
                 message: f.message,
             })?;
             match next {
                 Next::Go => {}
                 Next::Jump(t) => self.frames.last_mut().expect("a frame").pc = t,
-                Next::End(end) => return Ok(end),
+                Next::End(end) => return Ok(Exit::End(end)),
                 Next::Return(value) => {
                     let callee = self.frames.pop().expect("a frame");
-                    let kind = self.unit.modules[callee.module].kind;
-                    if self.frames.is_empty() {
-                        return Ok(End::Done);
-                    }
+                    let kind = self.modules[callee.module].kind;
                     let result = match kind {
                         Kind::Function => value,
                         Kind::Functor => {
-                            let m = &self.unit.modules[callee.module];
+                            let m = &self.modules[callee.module];
                             let r = m.result.expect("a functor's result slot");
                             let v = match &callee.cells[r] {
                                 Cell::Own(v) => v.value.clone(),
@@ -283,6 +387,9 @@ impl<'r> Vm<'r> {
                         }
                         _ => None,
                     };
+                    if self.frames.len() == base {
+                        return Ok(Exit::Returned(result));
+                    }
                     if let Some(v) = result {
                         self.push(v);
                     }
@@ -291,7 +398,227 @@ impl<'r> Vm<'r> {
         }
     }
 
-    fn step(&mut self, i: &Instr, m: &'r Module) -> Run<Next> {
+    /// Module `m` run nested, to completion, THIS `this`: a callback.
+    fn nested(&mut self, m: usize, this: AdtRef, depth: usize) -> Result<Exit, RuntimeError> {
+        let base = self.frames.len();
+        let height = self.stack.len();
+        self.enter(m, Vec::new(), Some(this), depth);
+        let exit = self.exec(base);
+        self.frames.truncate(base);
+        self.stack.truncate(height);
+        exit
+    }
+
+    /// Code the store keeps, compiled the first time it runs.
+    fn compiled(&mut self, part: &str, language: &str, text: &str, what: &str) -> Run<usize> {
+        if language != self.language.name() {
+            return Err(format!(
+                "the {part} of {what} is written in {language}, which {} does not run",
+                self.language.name()
+            )
+            .into());
+        }
+        let key = (part.to_string(), text.to_string());
+        if let Some(&m) = self.compiled.get(&key) {
+            return Ok(m);
+        }
+        let module = self.language.compile(part, text, what, self.unit)?;
+        self.modules.push(Rc::new(module));
+        let m = self.modules.len() - 1;
+        self.compiled.insert(key, m);
+        Ok(m)
+    }
+
+    /// An expression the store keeps, its truth, THIS `this`; or the
+    /// program's end, if it ends there.
+    fn holds(
+        &mut self,
+        part: &str,
+        code: &hbds_gtad::Code,
+        this: AdtRef,
+        what: &str,
+    ) -> Run<Result<bool, End>> {
+        let m = self.compiled(part, &code.language, &code.text, what)?;
+        let depth = self.frame().depth + 1;
+        match self
+            .nested(m, this, depth)
+            .map_err(|e| within(e.into(), part, what))?
+        {
+            Exit::Returned(v) => {
+                let v = v.expect("an expression's value");
+                let t = hbds_values::truth(&v).map_err(|f| within(fault(f), part, what))?;
+                Ok(Ok(t))
+            }
+            Exit::End(end) => Ok(Err(end)),
+        }
+    }
+
+    fn property(&self, r: AdtRef, name: &str) -> Option<hbds_gtad::Code> {
+        self.store.props(r)?.properties.get(name).cloned()
+    }
+
+    /// The CONDs and ACTIONs a change runs: the class's, class
+    /// attribute's or class link's, then the object's own, THIS being the
+    /// object (pages 156 to 158). A false COND refuses the change.
+    fn trigger(&mut self, event: Invoked) -> Run<Next> {
+        let (adts, this) = match event {
+            Invoked::Created(o) => (AdtRef::Class(self.store.objects()[&o].class), o),
+            Invoked::Set(o, a) => (AdtRef::ClassAttribute(a), o),
+            Invoked::Linked(l) => {
+                let link = &self.store.object_links()[&l];
+                (AdtRef::ClassLink(link.class_link), link.from)
+            }
+        };
+        let object = AdtRef::Object(this);
+        if let Some(code) = self.property(adts, "MODIFIABLE") {
+            let what = self.store.describe(object);
+            match self.holds("MODIFIABLE", &code, object, &what)? {
+                Ok(true) => {}
+                Ok(false) => {
+                    let what = self.store.describe(adts);
+                    return Err(format!("{what} is not MODIFIABLE but by a rule").into());
+                }
+                Err(end) => return Ok(Next::End(end)),
+            }
+        }
+        for r in [adts, object] {
+            let (cond, action) = (self.property(r, "COND"), self.property(r, "ACTION"));
+            if cond.is_none() && action.is_none() {
+                continue;
+            }
+            if self.frame().depth >= DEPTH {
+                return Err("COND and ACTION nest too deep".into());
+            }
+            let what = self.store.describe(r);
+            if let Some(code) = cond {
+                match self.holds("COND", &code, object, &what)? {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let refused =
+                            format!("the COND of {what} refuses this change: {}", code.text);
+                        return Err(refused.into());
+                    }
+                    Err(end) => return Ok(Next::End(end)),
+                }
+            }
+            if let Some(code) = action {
+                let m = self.compiled("ACTION", &code.language, &code.text, &what)?;
+                let depth = self.frame().depth + 1;
+                let exit = self.nested(m, object, depth);
+                if let Exit::End(end) = exit.map_err(|e| within(e.into(), "ACTION", &what))? {
+                    return Ok(Next::End(end));
+                }
+            }
+        }
+        Ok(Next::Go)
+    }
+
+    // The store's names and designations, as the reference's `named`,
+    // `text`, `class` and `designate`.
+
+    /// FACT, RULE and PROCESS, created the first time a program names them.
+    fn system(&mut self, name: &str) -> Run<()> {
+        let rules = hbds_rules::is_system(name);
+        if !rules && !hbds_simulation::is_system(name) {
+            return Ok(());
+        }
+        if self.store.find_class(name).is_some() {
+            return Ok(());
+        }
+        match rules {
+            true => stored(hbds_rules::install(self.store)),
+            false => stored(hbds_simulation::install(self.store)),
+        }
+    }
+
+    fn pop_adt(&mut self) -> AdtRef {
+        match self.pop() {
+            Value::Adt(r) => r,
+            v => unreachable!("an a.d.t. expected, not {v}"),
+        }
+    }
+
+    fn pop_text(&mut self) -> String {
+        match self.pop().scalar() {
+            Some(Scalar::String(s)) => s.to_string(),
+            v => unreachable!("a name expected, not {v:?}"),
+        }
+    }
+
+    fn pop_class(&mut self) -> Id {
+        match self.pop_adt() {
+            AdtRef::Class(c) => c,
+            r => unreachable!("a class expected, not {r:?}"),
+        }
+    }
+
+    fn pop_object(&mut self) -> Id {
+        match self.pop_adt() {
+            AdtRef::Object(o) => o,
+            r => unreachable!("an object expected, not {r:?}"),
+        }
+    }
+
+    /// The class named so: any state if `any`, else active.
+    fn class_named(&self, name: &str, any: bool) -> Run<Id> {
+        match (any, self.store.find_class(name)) {
+            (true, Some(c)) => Ok(c),
+            _ => stored(self.store.class(name)),
+        }
+    }
+
+    /// An object's attribute: computed by its function (pages 127 and
+    /// 128), with THIS the object, or stored.
+    fn attribute_value(&mut self, o: Id, name: &str) -> Run<Next> {
+        let c = self.store.objects()[&o].class;
+        let class = self.store.classes()[&c].name.clone();
+        let a = stored(self.store.attribute(c, name))?;
+        let computed = self.store.attributes()[&a].props.computed;
+        if let Some(&m) = self.computed.get(&(fold(&class), fold(name))) {
+            self.enter(m, Vec::new(), Some(AdtRef::Object(o)), 0);
+            return Ok(Next::Go);
+        }
+        if computed {
+            return Err(format!(
+                "\"{class}\" . \"{name}\" is COMPUTED, but no FUNCTION computes it"
+            )
+            .into());
+        }
+        if let Some(v) = self.live(o, a) {
+            self.push(v);
+            return Ok(Next::Go);
+        }
+        match self.store.get(o, a).cloned() {
+            Some(v) => self.push(v),
+            None => {
+                let what = self.store.describe(AdtRef::ObjectAttribute(o, a));
+                return Err(format!("{what} has no value").into());
+            }
+        }
+        Ok(Next::Go)
+    }
+
+    /// STATE and CLOCK as the simulation has them, or as the store kept
+    /// them, or passive at 0 for a process never run.
+    fn live(&self, o: Id, a: Id) -> Option<Value> {
+        if !hbds_simulation::is_live(self.store, a) {
+            return None;
+        }
+        let state = same(&self.store.attributes()[&a].name, hbds_simulation::STATE);
+        let kept = self.store.get(o, a).cloned();
+        let p = Agent::Process(o);
+        if !self.sim.knows(p) && kept.is_some() {
+            return kept;
+        }
+        Some(if state {
+            let name = hbds_simulation::state_name(self.sim.state(p));
+            Value::exact(Scalar::String(name.into()))
+        } else {
+            Value::exact(Scalar::Float(self.sim.clock(p)))
+        })
+    }
+
+    fn step(&mut self, i: &Instr, m: &Module) -> Run<Next> {
         match i {
             Instr::Stmt => {
                 self.statements += 1;
@@ -513,7 +840,7 @@ impl<'r> Vm<'r> {
             }
             Instr::Call(callee, n) => {
                 let args = self.stack.split_off(self.stack.len() - n);
-                self.enter(*callee, args);
+                self.enter(*callee, args, None, 0);
             }
             Instr::Result => return Ok(Next::Return(Some(self.pop()))),
             Instr::Return => return Ok(Next::Return(None)),
@@ -529,14 +856,14 @@ impl<'r> Vm<'r> {
                 let Value::One(x) = self.pop() else {
                     unreachable!("ExpectOne comes first")
                 };
-                let y: Fz = self.support.native(name, &x).map_err(fault)?;
+                let y: Fz = self.language.native(name, &x).map_err(fault)?;
                 self.push(Value::One(y));
             }
             Instr::Print(n) => {
                 let values = self.stack.split_off(self.stack.len() - n);
                 let texts: Vec<String> = (values.iter())
                     .map(|i| match i {
-                        Item::Value(v) => show(v),
+                        Item::Value(v) => self.store.show(v),
                         Item::Ref(..) => unreachable!("a value to print"),
                     })
                     .collect();
@@ -547,7 +874,7 @@ impl<'r> Vm<'r> {
                 let line = line.ok_or("READ finds no more input")?;
                 let v = match as_text {
                     true => Value::exact(Scalar::String(line.into())),
-                    false => self.support.read(&line)?,
+                    false => self.language.read(&line)?,
                 };
                 self.push(v);
             }
@@ -602,7 +929,20 @@ impl<'r> Vm<'r> {
                         Item::Ref(..) => unreachable!("a functor's argument"),
                     })
                     .collect();
-                let Value::List(mut list) = self.pop() else {
+                let mut prefix = self.pop();
+                // SIGMA adds attributes' values (page 78).
+                if let (Value::List(l), "SIGMA") = (&mut prefix, key.as_str()) {
+                    for item in std::sync::Arc::make_mut(&mut l.items).iter_mut() {
+                        if let Value::Adt(AdtRef::ObjectAttribute(o, a)) = item {
+                            let v = self.store.get(*o, *a).cloned();
+                            *item = v.ok_or_else(|| {
+                                let what = self.store.describe(AdtRef::ObjectAttribute(*o, *a));
+                                Failure::from(format!("{what} has no value"))
+                            })?;
+                        }
+                    }
+                }
+                let Value::List(mut list) = prefix else {
                     return Err(format!("`{spelling}` applies to a list").into());
                 };
                 let result = hbds_lists::apply(key, &mut list, &args)?;
@@ -620,6 +960,361 @@ impl<'r> Vm<'r> {
             Instr::Restart => return Ok(Next::End(End::Restart)),
             Instr::Chain(m) => return Ok(Next::End(End::Chain(*m))),
             Instr::Fail(message) => return Err(message.clone().into()),
+            Instr::Named => {
+                let v = self.pop();
+                let named = match v {
+                    Value::Adt(_) => v,
+                    Value::One(Fz {
+                        x: Scalar::String(ref s),
+                        ..
+                    }) => {
+                        self.system(&s.clone())?;
+                        Value::exact(Scalar::String(s.clone()))
+                    }
+                    Value::One(Fz {
+                        x: Scalar::Character(c),
+                        ..
+                    }) => Value::exact(Scalar::String(c.to_string().into())),
+                    v => return Err(format!("{v} names no a.d.t.").into()),
+                };
+                self.push(named);
+            }
+            Instr::Text => {
+                if let Some(Item::Value(Value::Adt(r))) = self.stack.last() {
+                    return Err(format!("{} is not a name", self.store.describe(*r)).into());
+                }
+            }
+            Instr::ToClass => {
+                let c = match self.pop() {
+                    Value::Adt(AdtRef::Class(c)) => c,
+                    Value::Adt(r) => {
+                        return Err(format!("{} is not a class", self.store.describe(r)).into());
+                    }
+                    v => {
+                        let name = text_of(&v);
+                        stored(self.store.class(&name))?
+                    }
+                };
+                self.push(Value::Adt(AdtRef::Class(c)));
+            }
+            Instr::Designate(any) => {
+                let r = match self.pop() {
+                    Value::Adt(r) => r,
+                    v => AdtRef::Class(self.class_named(&text_of(&v), *any)?),
+                };
+                self.push(Value::Adt(r));
+            }
+            Instr::ObjectNamed(any) => {
+                let class = self.pop_text();
+                let name = self.pop_text();
+                let c = self.class_named(&class, *any)?;
+                let o = match (any, self.store.find_object(c, &name)) {
+                    (true, Some(o)) => o,
+                    _ => stored(self.store.object(c, &name))?,
+                };
+                self.push(Value::Adt(AdtRef::Object(o)));
+            }
+            Instr::IsObject => {
+                let r = self.pop_adt();
+                if !matches!(r, AdtRef::Object(_)) {
+                    return Err(format!("{} is not an object", self.store.describe(r)).into());
+                }
+                self.push(Value::Adt(r));
+            }
+            Instr::AttrOf => {
+                let name = self.pop_text();
+                let r = match self.pop_adt() {
+                    AdtRef::Class(c) => {
+                        AdtRef::ClassAttribute(stored(self.store.attribute(c, &name))?)
+                    }
+                    AdtRef::Object(o) => {
+                        let c = self.store.objects()[&o].class;
+                        AdtRef::ObjectAttribute(o, stored(self.store.attribute(c, &name))?)
+                    }
+                    r => {
+                        return Err(format!("{} has no attributes", self.store.describe(r)).into());
+                    }
+                };
+                self.push(Value::Adt(r));
+            }
+            Instr::LinkOf(relation) => {
+                let to = self.pop_adt();
+                let from = self.pop_adt();
+                let r = match (from, to) {
+                    (AdtRef::Class(a), AdtRef::Class(b)) => {
+                        AdtRef::ClassLink(stored(self.store.class_link(a, relation, b))?)
+                    }
+                    (AdtRef::Object(a), AdtRef::Object(b)) => self
+                        .store
+                        .object_link(a, relation, b)
+                        .map(AdtRef::ObjectLink)
+                        .ok_or("these objects are not linked so")?,
+                    _ => return Err("a link joins two classes or two objects".into()),
+                };
+                self.push(Value::Adt(r));
+            }
+            Instr::ClassAttr => {
+                let name = self.pop_text();
+                let c = self.pop_class();
+                let a = stored(self.store.attribute(c, &name))?;
+                self.push(Value::Adt(AdtRef::ClassAttribute(a)));
+            }
+            Instr::FindAttribute => {
+                let name = self.pop_text();
+                let c = self.pop_class();
+                let a = self.store.find_attribute(c, &name);
+                let a = a.ok_or_else(|| Failure::from(format!("no attribute \"{name}\"")))?;
+                self.push(Value::Adt(AdtRef::ClassAttribute(a)));
+            }
+            Instr::FindLink(relation) => {
+                let to = self.pop_class();
+                let from = self.pop_class();
+                let l = self.store.find_class_link(from, relation, to);
+                let l = l.ok_or("no such link")?;
+                self.push(Value::Adt(AdtRef::ClassLink(l)));
+            }
+            Instr::This(message) => match self.frame().this {
+                Some(r) => self.push(Value::Adt(r)),
+                None => return Err(message.clone().into()),
+            },
+            Instr::Begin => {
+                self.store.begin();
+                self.open += 1;
+            }
+            Instr::Commit => {
+                self.open -= 1;
+                stored(self.store.end(true))?;
+            }
+            Instr::CreateClass(embryo) => {
+                let name = self.pop_text();
+                let kind = if *embryo {
+                    ClassKind::Embryo
+                } else {
+                    ClassKind::Class
+                };
+                stored(self.store.create_class(&name, kind))?;
+            }
+            Instr::CreateObject => {
+                let name = self.pop_text();
+                let c = self.pop_class();
+                let o = stored(self.store.create_object(c, &name))?;
+                return self.trigger(Invoked::Created(o));
+            }
+            Instr::CreateAttribute => {
+                let name = self.pop_text();
+                let c = self.pop_class();
+                stored(self.store.create_attribute(c, &name))?;
+            }
+            Instr::CreateLink(relation, named, reflexive) => {
+                let reverse = named.then(|| self.pop_text());
+                let to = self.pop_class();
+                let from = self.pop_class();
+                let r = self.store.create_class_link(
+                    from,
+                    relation,
+                    to,
+                    reverse.as_deref(),
+                    *reflexive,
+                );
+                stored(r)?;
+            }
+            Instr::StateChange(op, n) => {
+                let targets: Vec<Value> = (self.stack.split_off(self.stack.len() - n))
+                    .into_iter()
+                    .map(|i| match i {
+                        Item::Value(v) => v,
+                        Item::Ref(..) => unreachable!("an a.d.t."),
+                    })
+                    .collect();
+                for t in targets {
+                    let Value::Adt(t) = t else {
+                        unreachable!("an a.d.t.")
+                    };
+                    let r = match op {
+                        StateOp::Hibern => {
+                            self.store
+                                .change_state(t, AdtState::Active, AdtState::Hibernating)
+                        }
+                        StateOp::Awake => {
+                            self.store
+                                .change_state(t, AdtState::Hibernating, AdtState::Active)
+                        }
+                        StateOp::Destroy => {
+                            self.store
+                                .change_state(t, AdtState::Active, AdtState::Destroyed)
+                        }
+                        StateOp::Resur => {
+                            self.store
+                                .change_state(t, AdtState::Destroyed, AdtState::Active)
+                        }
+                        StateOp::Purge => self.store.purge_adt(t),
+                    };
+                    stored(r)?;
+                }
+            }
+            Instr::SetAttribute => {
+                let name = self.pop_text();
+                let o = self.pop_object();
+                let v = self.pop();
+                let c = self.store.objects()[&o].class;
+                let a = stored(self.store.attribute(c, &name))?;
+                if hbds_simulation::is_live(self.store, a) {
+                    return Err(format!("{name} is the simulation engine's").into());
+                }
+                stored(self.store.set(o, a, v))?;
+                return self.trigger(Invoked::Set(o, a));
+            }
+            Instr::SetHeld(variable, at) => {
+                let held = self.pop();
+                let v = self.pop();
+                let Value::Adt(AdtRef::ObjectAttribute(o, a)) = held else {
+                    return Err(format!("`{variable}` holds no object's attribute").into());
+                };
+                let elsewhere = |f: Failure| Failure {
+                    message: f.message,
+                    at: f.at.or(Some(*at)),
+                };
+                stored(self.store.set(o, a, v)).map_err(elsewhere)?;
+                return self.trigger(Invoked::Set(o, a)).map_err(elsewhere);
+            }
+            Instr::SetProperty(key, at) => {
+                let target = self.pop_adt();
+                let v = self.pop();
+                let text = match v.scalar() {
+                    Some(Scalar::String(s)) => s.to_string(),
+                    Some(Scalar::Character(c)) => c.to_string(),
+                    _ => return Err(format!("a property is a string, not {v}").into()),
+                };
+                if hbds_gtad::is_property(key) || hbds_rules::is_property(key) {
+                    self.language
+                        .check(key, &text)
+                        .map_err(|e| Failure::from(format!("this {key} does not parse: {e}")))?;
+                }
+                let name = self.language.name().to_string();
+                stored(self.store.set_property(target, key, &name, &text)).map_err(|f| {
+                    Failure {
+                        message: f.message,
+                        at: Some(*at),
+                    }
+                })?;
+            }
+            Instr::Assert(relation, probability, negated) => {
+                let b = self.pop_object();
+                let a = self.pop_object();
+                if *negated {
+                    stored(self.store.retract_link(a, relation, b))?;
+                } else {
+                    let l = stored(self.store.assert_link(a, relation, b, *probability))?;
+                    return self.trigger(Invoked::Linked(l));
+                }
+            }
+            Instr::Specify(spec, unit, computed) => {
+                let target = self.pop_adt();
+                stored(
+                    self.store
+                        .specify(target, Some(*spec), unit.clone(), *computed),
+                )?;
+            }
+            Instr::Include(n, m, include) => {
+                let hypers: Vec<Id> = (0..*m).map(|_| self.pop_class()).collect::<Vec<_>>();
+                let classes: Vec<Id> = (0..*n).map(|_| self.pop_class()).collect::<Vec<_>>();
+                for c in classes.iter().rev() {
+                    for h in hypers.iter().rev() {
+                        let r = match include {
+                            true => self.store.include(*c, *h),
+                            false => self.store.exclude(*c, *h),
+                        };
+                        stored(r)?;
+                    }
+                }
+            }
+            Instr::Assoc(assoc) => {
+                let b = self.pop_adt();
+                let a = self.pop_adt();
+                stored(match assoc {
+                    true => self.store.assoc(a, b),
+                    false => self.store.dissoc(a, b),
+                })?;
+            }
+            Instr::Compose(n) => {
+                let mut embryos: Vec<Id> = (0..*n).map(|_| self.pop_class()).collect();
+                embryos.reverse();
+                let name = self.pop_text();
+                stored(
+                    self.store
+                        .create_class(&name, ClassKind::Prototype(embryos)),
+                )?;
+            }
+            Instr::Build(n) => {
+                let mut names: Vec<String> = (0..*n).map(|_| self.pop_text()).collect();
+                names.reverse();
+                let prototype = self.pop_class();
+                if !matches!(
+                    self.store.classes()[&prototype].kind,
+                    ClassKind::Prototype(_)
+                ) {
+                    return Err("BUILD builds structures AS a prototype".into());
+                }
+                for name in names {
+                    stored(
+                        self.store
+                            .create_class(&name, ClassKind::Structure(prototype)),
+                    )?;
+                }
+            }
+            Instr::AttrValue => {
+                let name = self.pop_text();
+                let o = self.pop_object();
+                return self.attribute_value(o, &name);
+            }
+            Instr::Linked(relation) => {
+                let b = self.pop_object();
+                let a = self.pop_object();
+                let linked = self.store.object_link(a, relation, b).is_some();
+                self.push(Value::boolean(linked));
+            }
+            Instr::KeepOr(t) => {
+                let top = match self.stack.last() {
+                    Some(Item::Value(v)) => v,
+                    _ => unreachable!("a value"),
+                };
+                if !matches!(top, Value::List(_) | Value::Adt(_)) {
+                    self.stack.pop();
+                    return Ok(Next::Jump(*t));
+                }
+            }
+            Instr::AdtFunctor(key, spelling, n) => {
+                let args: Vec<Value> = (self.stack.split_off(self.stack.len() - n))
+                    .into_iter()
+                    .map(|i| match i {
+                        Item::Value(v) => v,
+                        Item::Ref(..) => unreachable!("a functor's argument"),
+                    })
+                    .collect();
+                let prefix = self.pop();
+                let not_adt = |v: &Value| format!("`{spelling}` applies to a.d.t., not to {v}");
+                let refs = match &prefix {
+                    Value::Adt(r) => vec![*r],
+                    Value::List(l) => (l.items.iter())
+                        .map(|v| match v {
+                            Value::Adt(r) => Ok(*r),
+                            v => Err(Failure::from(not_adt(v))),
+                        })
+                        .collect::<Run<Vec<_>>>()?,
+                    v => return Err(not_adt(v).into()),
+                };
+                let args = (args.iter())
+                    .map(|a| match a.scalar() {
+                        Some(Scalar::String(s)) => Ok(s.to_string()),
+                        Some(Scalar::Character(c)) => Ok(c.to_string()),
+                        _ => Err(Failure::from(format!("`{spelling}` takes strings"))),
+                    })
+                    .collect::<Run<Vec<String>>>()?;
+                let found = stored(hbds_functors::apply(self.store, key, &refs, &args))?;
+                self.push(Value::List(List::new(
+                    found.into_iter().map(Value::Adt).collect(),
+                )));
+            }
         }
         Ok(Next::Go)
     }

@@ -213,7 +213,8 @@ fn measure(s: &Scenario, source: &str, n: u64) -> Result<Measure, String> {
         let statements = match &unit {
             Some(unit) => {
                 let mut io = pipe.lock().unwrap();
-                hbds_vm::run(unit, &mut *io, &Adt81, None).map_err(|e| e.to_string())?
+                let mut store = store.lock().unwrap();
+                hbds_vm::run(unit, &mut store, &mut *io, &Adt81, None).map_err(|e| e.to_string())?
             }
             None => interp::run_counted(program.clone(), pipe.clone(), store.clone())
                 .map_err(|e| e.to_string())?,
