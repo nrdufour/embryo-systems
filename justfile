@@ -52,8 +52,12 @@ bench *scenarios:
 bench-record:
     cargo run --quiet --release -p embryo-systems-bench -- --record
 
+# The NixOS module: a system with it enabled gets the service it should.
+module:
+    python3 tools/check_module.py
+
 # What CI runs, so a red build is reproducible in one command.
-check: fmt-check lint test check-grammar engines docs confusables bench
+check: fmt-check lint test check-grammar engines docs confusables module bench
 
 # Characters that render like ASCII, or render as nothing at all, but compare
 # unequal. CI runs this in its own workflow, without a path filter, so it

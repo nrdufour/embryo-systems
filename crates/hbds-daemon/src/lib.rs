@@ -6,6 +6,10 @@
 //! /store` gives the store's dump, `GET /sessions` how many run, `GET
 //! /journal` how far the journal has got. On a durable store, what a
 //! client hears waits until what came before it is on disk (decision 5).
+//! `GET /events` is the feed (the UI's, step 7): the store's changes as
+//! the journal writes them, sessions starting and ending, the time and
+//! the pace, what processes print with no client to print to. `POST
+//! /sessions/ID/kill` ends a session (decision 3's administrator).
 //!
 //! Client to daemon: `{"run": ACODE}`, `{"input": LINE}`, `{"eof": true}`.
 //! Daemon to client: `{"output": TEXT}`, `{"input?": true}`, and last
@@ -47,7 +51,10 @@ enum Msg {
     Wake(u64),
     Gone(u64),
     Dump(Sender<String>),
-    Sessions(Sender<usize>),
+    Sessions(Sender<Vec<u64>>),
+    Subscribe(Events),
+    /// An administrator ends a session: whether there was one.
+    Kill(u64, Sender<bool>),
     /// The pace set, if given; what it is now, answered.
     Pace(Option<Clock>, Sender<String>),
     Time(Sender<String>),
@@ -122,6 +129,8 @@ enum What {
     Output(String),
     WantsInput,
     End(Option<String>),
+    /// A frame of the feed.
+    Feed(Json),
 }
 
 impl What {
@@ -131,6 +140,7 @@ impl What {
             What::WantsInput => Json::one("input?", Json::Bool(true)),
             What::End(None) => Json::one("end", Json::Null),
             What::End(Some(e)) => Json::one("end", Json::String(e.clone())),
+            What::Feed(j) => j.clone(),
         }
     }
 }
@@ -143,9 +153,10 @@ struct Events {
 }
 
 impl Events {
-    fn send(&self, what: What) {
+    /// Whether whoever listens is still there.
+    fn send(&self, what: What) -> bool {
         let after = self.durable.as_ref().map_or(0, Durable::stamp);
-        let _ = self.to.send(Event { what, after });
+        self.to.send(Event { what, after }).is_ok()
     }
 }
 
@@ -208,6 +219,8 @@ struct Client {
 struct Router {
     clients: BTreeMap<u64, Events>,
     owner: Option<u64>,
+    process: Option<u64>,
+    feed: Vec<Events>,
 }
 
 impl hbds_vm::Io for Router {
@@ -217,12 +230,24 @@ impl hbds_vm::Io for Router {
 
     fn write(&mut self, text: &str) {
         match self.owner.and_then(|id| self.clients.get(&id)) {
-            Some(events) => events.send(What::Output(text.to_string())),
-            None => print!("{text}"),
+            Some(events) => {
+                events.send(What::Output(text.to_string()));
+            }
+            None => {
+                let mut j = BTreeMap::from([("output".to_string(), Json::String(text.into()))]);
+                if let Some(p) = self.process {
+                    j.insert("process".into(), Json::Number(p as f64));
+                }
+                broadcast(&mut self.feed, Json::Object(j));
+            }
         }
     }
 
-    fn running(&mut self, owner: Option<Agent>) {
+    fn running(&mut self, process: Agent, owner: Option<Agent>) {
+        self.process = match process {
+            Agent::Process(p) => Some(p),
+            _ => None,
+        };
         self.owner = match owner {
             Some(Agent::Client(id)) => Some(id),
             _ => None,
@@ -298,10 +323,24 @@ fn connection(
             Response::text(200, "OK", &text).write(&mut writer)
         }
         ("GET", "/sessions") => {
-            let (reply, count) = mpsc::channel();
+            let (reply, ids) = mpsc::channel();
             let _ = tx.send(Msg::Sessions(reply));
-            let n = count.recv().unwrap_or_default();
-            Response::text(200, "OK", &format!("{n}\n")).write(&mut writer)
+            let ids = ids.recv().unwrap_or_default();
+            let text: String = ids.iter().map(|id| format!("{id}\n")).collect();
+            Response::text(200, "OK", &text).write(&mut writer)
+        }
+        ("POST", path) if path.starts_with("/sessions/") && path.ends_with("/kill") => {
+            let id = path["/sessions/".len()..path.len() - "/kill".len()].parse::<u64>();
+            let (reply, killed) = mpsc::channel();
+            match id {
+                Ok(id) if tx.send(Msg::Kill(id, reply)).is_ok() && killed.recv() == Ok(true) => {
+                    Response::text(200, "OK", "killed\n").write(&mut writer)
+                }
+                _ => Response::text(404, "Not Found", "no such session\n").write(&mut writer),
+            }
+        }
+        ("GET", "/events") if hbds_http::is_upgrade(&request) => {
+            feed(&request, reader, writer, tx, durable)
         }
         ("GET", "/journal") => {
             let s = durable.as_ref().map(Durable::stats).unwrap_or_default();
@@ -347,6 +386,77 @@ fn connection(
         }
         _ => Response::text(404, "Not Found", "no such thing here\n").write(&mut writer),
     }
+}
+
+/// A subscriber to the feed: frames written as they come, each once what
+/// came before it is on disk; the subscriber's own frames read and let
+/// go, until it closes.
+fn feed(
+    request: &Request,
+    mut reader: BufReader<UnixStream>,
+    writer: UnixStream,
+    tx: Sender<Msg>,
+    durable: Option<Durable>,
+) -> io::Result<()> {
+    let (to, events) = mpsc::channel::<Event>();
+    // Subscribed before the answer: nothing after it is missed.
+    let _ = tx.send(Msg::Subscribe(Events {
+        to,
+        durable: durable.clone(),
+    }));
+    let mut out = writer;
+    hbds_http::upgrade(request).write(&mut out)?;
+    let write = std::thread::spawn(move || {
+        for e in events {
+            if let Some(d) = &durable
+                && d.wait(e.after).is_err()
+            {
+                return;
+            }
+            let text = e.what.json().to_string();
+            if hbds_http::write_message(&mut out, &Message::Text(text), false).is_err() {
+                return;
+            }
+        }
+    });
+    while !matches!(
+        hbds_http::read_message(&mut reader),
+        Err(_) | Ok(Message::Close)
+    ) {}
+    let _ = reader.get_ref().shutdown(std::net::Shutdown::Both);
+    drop(write);
+    Ok(())
+}
+
+/// A frame to every subscriber still there.
+fn broadcast(feed: &mut Vec<Events>, j: Json) {
+    feed.retain(|e| e.send(What::Feed(j.clone())));
+}
+
+/// The changes the store kept, to the feed: a module by its hash, the
+/// kernel's saved state left out.
+fn changes(store: &mut Store, feed: &mut Vec<Events>) {
+    for c in store.take_kept() {
+        let j = match &c {
+            hbds_gtad::Change::Fibers { .. } | hbds_gtad::Change::Sequencing { .. } => continue,
+            hbds_gtad::Change::Module { hash, .. } => {
+                Json::one("module", Json::String(hash.clone()))
+            }
+            c => Json::one("change", Json::String(hbds_journal::line(c))),
+        };
+        broadcast(feed, j);
+    }
+}
+
+/// A session's end, to the feed.
+fn ended(feed: &mut Vec<Events>, id: u64, error: Option<String>) {
+    broadcast(
+        feed,
+        Json::Object(BTreeMap::from([
+            ("session".to_string(), Json::Number(id as f64)),
+            ("ended".to_string(), error.map_or(Json::Null, Json::String)),
+        ])),
+    );
 }
 
 fn session(
@@ -496,6 +606,7 @@ fn executor(
     pace: Pace,
 ) {
     let mut clients: BTreeMap<u64, Client> = BTreeMap::new();
+    let mut feed: Vec<Events> = Vec::new();
     let mut after = 0;
     let mut sim = Sequencing::kernel();
     let mut kernel = Session::kernel();
@@ -519,6 +630,8 @@ fn executor(
     {
         eprintln!("the store's processes do not read: {e}");
     }
+    store.observe();
+    let mut told_time = sim.now();
     let mut clock = pace.clock;
     let mut real_from = (Instant::now(), 0.0);
     loop {
@@ -595,8 +708,18 @@ fn executor(
                                 held: false,
                             },
                         );
+                        changes(&mut store, &mut feed);
+                        broadcast(
+                            &mut feed,
+                            Json::Object(BTreeMap::from([
+                                ("session".to_string(), Json::Number(id as f64)),
+                                ("started".to_string(), Json::Bool(true)),
+                            ])),
+                        );
                     }
-                    Err(e) => events.send(What::End(Some(e))),
+                    Err(e) => {
+                        events.send(What::End(Some(e)));
+                    }
                 },
                 Msg::Wake(id) => {
                     if let Some(c) = clients.get_mut(&id) {
@@ -605,19 +728,33 @@ fn executor(
                 }
                 Msg::Gone(id) => {
                     // Its processes stay; its own agent goes.
-                    clients.remove(&id);
+                    if clients.remove(&id).is_some() {
+                        ended(&mut feed, id, Some("the client left".into()));
+                    }
                     sim.forget(Agent::Client(id));
                 }
                 Msg::Dump(reply) => {
                     let _ = reply.send(store.dump());
                 }
                 Msg::Sessions(reply) => {
-                    let _ = reply.send(clients.len());
+                    let _ = reply.send(clients.keys().copied().collect());
+                }
+                Msg::Subscribe(events) => feed.push(events),
+                Msg::Kill(id, reply) => {
+                    let found = clients.remove(&id);
+                    if let Some(c) = &found {
+                        let why = "killed by an administrator".to_string();
+                        c.wire.events.send(What::End(Some(why.clone())));
+                        sim.forget(Agent::Client(id));
+                        ended(&mut feed, id, Some(why));
+                    }
+                    let _ = reply.send(found.is_some());
                 }
                 Msg::Pace(set, reply) => {
                     if let Some(c) = set {
                         clock = c;
                         real_from = (Instant::now(), sim.now());
+                        broadcast(&mut feed, Json::one("pace", clock.json()));
                     }
                     let _ = reply.send(clock.json().to_string());
                 }
@@ -640,6 +777,8 @@ fn executor(
                 language,
                 Some(pace.slice),
             );
+            // What the turn kept, before its end.
+            changes(&mut store, &mut feed);
             let gone = match turn {
                 Turn::Yield | Turn::Idle | Turn::Due(_) => false,
                 Turn::Input => {
@@ -653,10 +792,12 @@ fn executor(
                 }
                 Turn::Done(_) => {
                     c.wire.events.send(What::End(None));
+                    ended(&mut feed, id, None);
                     true
                 }
                 Turn::Failed(e) => {
                     c.wire.events.send(What::End(Some(e.to_string())));
+                    ended(&mut feed, id, Some(e.to_string()));
                     true
                 }
             };
@@ -664,6 +805,7 @@ fn executor(
                 clients.remove(&id);
                 sim.forget(Agent::Client(id));
             }
+            changes(&mut store, &mut feed);
         }
         // The simulation, between the clients' turns: its active process
         // runs until it holds, never switched for another.
@@ -679,9 +821,12 @@ fn executor(
                     .map(|(&id, c)| (id, c.wire.events.clone()))
                     .collect(),
                 owner: None,
+                process: None,
+                feed: std::mem::take(&mut feed),
             };
             let turn =
                 kernel.kernel_turn(&mut store, &mut sim, &mut io, language, Some(pace.slice), b);
+            feed = io.feed;
             if let (Clock::Step(_), Some(left)) = (clock, kernel.events_left()) {
                 clock = if left == 0 {
                     Clock::Paused
@@ -689,6 +834,7 @@ fn executor(
                     Clock::Step(left)
                 };
             }
+            changes(&mut store, &mut feed);
             match turn {
                 // Due, the client runs on, in time: the kernel waits for it.
                 Turn::Due(id) => {
@@ -706,11 +852,17 @@ fn executor(
                             let c = clients.remove(&id).expect("a client");
                             c.wire.events.send(What::End(Some(e.to_string())));
                             sim.forget(Agent::Client(id));
+                            ended(&mut feed, id, Some(e.to_string()));
                         }
                         _ => eprintln!("a process ends on an error: {e}"),
                     }
                 }
                 _ => {}
+            }
+            changes(&mut store, &mut feed);
+            if sim.now() != told_time {
+                told_time = sim.now();
+                broadcast(&mut feed, Json::one("time", Json::Number(told_time)));
             }
         }
         if let Some(d) = &durable {

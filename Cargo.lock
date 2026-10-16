@@ -25,6 +25,7 @@ dependencies = [
  "hbds-acode",
  "hbds-daemon",
  "hbds-gtad",
+ "hbds-http",
  "hbds-journal",
  "hbds-vm",
 ]

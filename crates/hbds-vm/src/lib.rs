@@ -42,9 +42,9 @@ pub trait Io: Send {
         true
     }
 
-    /// The kernel runs a process for `owner`, the agent that activated
+    /// The kernel runs `process` for `owner`, the agent that activated
     /// it: what it writes may go there.
-    fn running(&mut self, _owner: Option<Agent>) {}
+    fn running(&mut self, _process: Agent, _owner: Option<Agent>) {}
 }
 
 /// `line:column: runtime error: message`, as the reference writes it.
@@ -441,7 +441,7 @@ impl Vm<'_> {
         if let Some(p) = self.o.running {
             self.sim.run_as(Agent::Process(p));
             let owner = self.sim.owner(Agent::Process(p));
-            self.io.running(owner);
+            self.io.running(Agent::Process(p), owner);
         } else {
             match self.dispatch() {
                 Ok(Some(stop)) => return Ok(stop_turn(stop)),
@@ -1001,7 +1001,7 @@ impl<'r> Vm<'r> {
                 self.o.running = Some(p);
                 if self.o.mode == Mode::Kernel {
                     let owner = self.sim.owner(Agent::Process(p));
-                    self.io.running(owner);
+                    self.io.running(Agent::Process(p), owner);
                     // Its writes wait for its pause, to be journalled with
                     // what it then is (decision 5).
                     self.store.hold_records();
