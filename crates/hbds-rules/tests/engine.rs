@@ -199,6 +199,20 @@ fn highest_priority_first_then_oldest() {
     assert_eq!(w.names(&run.tried), ["OLD", "NEW", "LOW"]);
 }
 
+/// A priority a rule changes during the run orders what follows.
+#[test]
+fn a_priority_changed_by_a_rule_counts_at_once() {
+    let mut w = world();
+    let low = w.rule("LOW", &[]);
+    let old = w.rule("OLD", &[("YES", "set LOW PRIORITY 9")]);
+    let new = w.rule("NEW", &[]);
+    w.set(low, PRIORITY, Value::integer(1));
+    w.set(old, PRIORITY, Value::integer(5));
+    w.set(new, PRIORITY, Value::integer(5));
+    let run = chav(&mut w, &[]).unwrap();
+    assert_eq!(w.names(&run.tried), ["OLD", "LOW", "NEW"]);
+}
+
 #[test]
 fn only_the_rules_consuming_a_change_are_tried_again() {
     let mut w = world();
