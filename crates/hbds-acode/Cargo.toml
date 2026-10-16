@@ -1,0 +1,12 @@
+[package]
+name = "hbds-acode"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# A-code, HBDS's machine code (docs/architecture.md, decisions 1 and 2):
+# the format, its version, its text form.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-values = { path = "../hbds-values" }

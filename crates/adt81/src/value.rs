@@ -32,21 +32,11 @@ pub trait Ask {
 
 impl Ask for Value {
     fn as_integer(&self) -> Computed<i64> {
-        match self.scalar() {
-            Some(Scalar::Integer(n)) => Ok(*n),
-            _ => fault(format!("{self} is not an integer")),
-        }
+        hbds_values::integer(self)
     }
 
     fn truth(&self) -> Computed<bool> {
-        match self {
-            Value::One(Fz {
-                x: Scalar::Boolean(b),
-                ..
-            }) => Ok(*b),
-            Value::Many(_) => fault("a multiple value is not a condition"),
-            _ => fault(format!("{self} is not a boolean")),
-        }
+        hbds_values::truth(self)
     }
 }
 

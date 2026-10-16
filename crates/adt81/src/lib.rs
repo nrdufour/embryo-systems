@@ -3,6 +3,7 @@
 
 pub mod ast;
 pub mod builtins;
+pub mod compile;
 pub mod diagnostic;
 pub mod interp;
 pub mod lexer;

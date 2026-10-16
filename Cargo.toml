@@ -3,6 +3,8 @@ members = [
     "crates/hbds-core",
     "crates/hbds-maps",
     "crates/hbds-values",
+    "crates/hbds-acode",
+    "crates/hbds-vm",
     "crates/hbds-lists",
     "crates/hbds-gtad",
     "crates/hbds-functors",
@@ -29,3 +31,5 @@ license.workspace = true
 adt81 = { path = "crates/adt81" }
 hbds-gtad = { path = "crates/hbds-gtad" }
 hbds-journal = { path = "crates/hbds-journal" }
+hbds-acode = { path = "crates/hbds-acode" }
+hbds-vm = { path = "crates/hbds-vm" }

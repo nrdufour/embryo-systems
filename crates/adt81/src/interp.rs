@@ -133,9 +133,9 @@ pub fn run_counted(
     run_within(program, io, store, None)
 }
 
-/// What the run is refused, by the budget's statement: the VM says the
-/// same, so that a program that never ends is an outcome both share.
-pub const BUDGET_SPENT: &str = "the statement budget is spent";
+/// What the run is refused past its budget: the VM's words, so that a
+/// program that never ends is an outcome both share.
+pub use hbds_acode::BUDGET_SPENT;
 
 /// [`run_counted`], stopped at the statement past `budget`, if any.
 pub fn run_within(
@@ -848,7 +848,7 @@ impl Machine {
         let v = at(value::convert(v, &element), span)?;
         match &mut var.value {
             Some(Value::Array(a)) => {
-                let i = at(offset(a, &indices), target.name.span)?;
+                let i = at(hbds_values::offset(a, &indices), target.name.span)?;
                 Arc::make_mut(&mut a.cells)[i] = v;
                 Ok(())
             }
@@ -1432,7 +1432,7 @@ impl Machine {
         }
         match value {
             Value::Array(a) => {
-                let i = at(offset(a, &indices), v.name.span)?;
+                let i = at(hbds_values::offset(a, &indices), v.name.span)?;
                 Ok(a.cells[i].clone())
             }
             _ => Err(error(
@@ -2535,28 +2535,6 @@ impl Machine {
         }
         Ok(result)
     }
-}
-
-fn offset(a: &value::Array, indices: &[i64]) -> Computed<usize> {
-    if indices.len() != a.dims.len() {
-        return Err(value::Fault(format!(
-            "{} index(es) for an array of {}",
-            indices.len(),
-            a.dims.len()
-        )));
-    }
-    let mut at = 0;
-    for ((i, low), dim) in indices.iter().zip(&a.lows).zip(&a.dims) {
-        let k = i - low;
-        if k < 0 || k >= *dim as i64 {
-            return Err(value::Fault(format!(
-                "the index {i} is outside {low}:{}",
-                low + *dim as i64 - 1
-            )));
-        }
-        at = at * dim + k as usize;
-    }
-    Ok(at)
 }
 
 /// A line of input as a value of type `ty`: text as it is, anything else

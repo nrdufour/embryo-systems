@@ -50,19 +50,14 @@ enum Callee<'c> {
 }
 
 /// EXIT, NEXT and RELOOP count the loops around them in their module
-/// (docs/adt81.md, "Running").
+/// (docs/adt81.md, "Running"): A-code's rule, and its words.
 pub fn too_far(kind: ExitKind, n: i64, loops: usize) -> String {
-    let word = match kind {
-        ExitKind::Exit => "EXIT",
-        ExitKind::Next => "NEXT",
-        ExitKind::Reloop => "RELOOP",
+    let leave = match kind {
+        ExitKind::Exit => hbds_acode::Leave::Exit,
+        ExitKind::Next => hbds_acode::Leave::Next,
+        ExitKind::Reloop => hbds_acode::Leave::Reloop,
     };
-    let around = match loops {
-        0 => "no loop is around it".to_string(),
-        1 => "one loop is around it".to_string(),
-        k => format!("{k} loops are around it"),
-    };
-    format!("{word} {n} counts {n} loop(s), and {around} in its module")
+    hbds_acode::too_far(leave, n, loops)
 }
 
 fn returns_of_module(m: &Module) -> Typed {
