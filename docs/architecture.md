@@ -134,6 +134,12 @@ out has its open transactions ended, refused, before the engine hears
 of it. The gate: 43 corpus programs run both ways, the 13 left are the
 processes'; the random programs make rules over their schema.
 
+As built (2026-10-16, step 4d): `run` compiles to A-code and runs on the
+VM; `run --reference` runs the interpreter, which stays the VM's
+specification and the gate's other half. `tests/cli.rs` checks the
+command's wiring, a store kept by one engine read by the other. Step 4
+is done but for interned names (decision 11).
+
 ### 3. Fibers, and a sequential world with threads around it
 
 Everything that runs as its own flow of control is a **fiber**: the main
@@ -377,6 +383,11 @@ now ordered by priority, each read when a rule goes on it and read again
 after a try that may change it, with the rules consuming each fact
 indexed, so `react` no longer walks every rule. `chav` 1000 rules:
 176 ms to 77, lookups 1 043 051 to 44 051; every scenario linear.
+
+Changed (2026-10-16): interned names wait for a profile that asks for
+them. With the VM built, they are a constant factor across GTAD, A-code
+and the VM, about 2% when last measured; A-code is versioned, so carrying
+numbers later is a new version of the format, not a migration.
 
 As built (2026-10-15, step 2d): strings are `Arc<str>`, lists' items
 and arrays' cells `Arc<Vec<Value>>`, changed through `Arc::make_mut`,
