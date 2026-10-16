@@ -7,19 +7,25 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::DerefMut;
 use std::rc::Rc;
 
 use hbds_acode::{
-    BUDGET_SPENT, Instr, Kind, Language, ListOp, Module, Place, SlotType, Span, StateOp, Unit,
-    too_far,
+    BUDGET_SPENT, Instr, Kind, ListOp, Module, Place, SlotType, Span, StateOp, Unit, too_far,
 };
 use hbds_core::{AdtRef, Id, fold, same};
-use hbds_gtad::{ClassKind, State as AdtState, Store, Stored};
+use hbds_gtad::{ClassKind, Code, State as AdtState, Store, Stored};
 use hbds_simulation::{Agent, Sequencing};
 use hbds_values::{Fault, Fz, List, Op, Scalar, Value};
 
 /// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
 const DEPTH: usize = 64;
+
+/// The language a run's code is in: it compiles the code the store
+/// keeps, and tells SES what a rule's part uses.
+pub trait Language: hbds_acode::Language + hbds_rules::Compiler {}
+
+impl<L: hbds_acode::Language + hbds_rules::Compiler> Language for L {}
 
 /// Where the program reads its input and writes its output.
 pub trait Io: Send {
@@ -90,6 +96,7 @@ fn run_here(
         frames: Vec::new(),
         stack: Vec::new(),
         open: 0,
+        ses: Ses::default(),
         sim: Sequencing::new(),
     };
     let mut current = 0;
@@ -157,6 +164,20 @@ enum Exit {
     End(End),
 }
 
+/// The rule code running, for the expert-system engines (docs/hbds.md,
+/// "Expert systems").
+#[derive(Default, Clone)]
+struct Ses {
+    /// How many rules' code this runs within: their changes may touch
+    /// facts that are not MODIFIABLE.
+    inside: usize,
+    /// In PREMISES: the lowest probability read, and whether a fact read
+    /// was not known.
+    premises: Option<(f64, bool)>,
+    /// In YES or NO: the probability what is written takes.
+    stamp: Option<f64>,
+}
+
 /// A change that runs CONDs and ACTIONs.
 enum Invoked {
     Created(Id),
@@ -189,6 +210,7 @@ struct Vm<'r> {
     stack: Vec<Item>,
     /// Transactions begun and not yet ended.
     open: usize,
+    ses: Ses,
     /// The simulation: no process runs yet on the VM (step 4c).
     sim: Sequencing,
 }
@@ -249,6 +271,106 @@ fn within(f: Failure, kind: &str, what: &str) -> Failure {
         return f.message.into();
     }
     format!("in the {kind} of {what}: {}", f.message).into()
+}
+
+/// What went wrong in a rule's part, or in HYPOCHAV's hypotheses: an
+/// error, or a jump out of it (`None`).
+fn told(message: Option<String>, part: &str, rule: Option<&str>) -> String {
+    let message = match message {
+        Some(m) if m.starts_with("in ") => return m,
+        Some(m) => m,
+        None => "EXIT, NEXT, RELOOP, STOP, RESTART or CHAIN leaves it".into(),
+    };
+    match rule {
+        Some(r) => format!("in the {part} of {r}: {message}"),
+        None => format!("in HYPOCHAV's hypotheses: {message}"),
+    }
+}
+
+/// The expert-system engines' way into the VM: they decide what runs
+/// when, the VM runs it.
+struct Engine<'a, 'r> {
+    vm: &'a mut Vm<'r>,
+}
+
+impl hbds_rules::Compiler for Engine<'_, '_> {
+    fn uses(&self, part: &str, code: &Code) -> Result<hbds_rules::Uses, String> {
+        self.vm.language.uses(part, code)
+    }
+}
+
+impl hbds_rules::Host for Engine<'_, '_> {
+    fn store(&mut self) -> Box<dyn DerefMut<Target = Store> + '_> {
+        Box::new(&mut *self.vm.store)
+    }
+
+    fn premises(&mut self, rule: Id, code: &Code) -> Result<(bool, f64), String> {
+        let this = AdtRef::Object(rule);
+        let what = self.vm.store.describe(this);
+        let m = (self
+            .vm
+            .compiled("PREMISES", &code.language, &code.text, &what))
+        .map_err(|f| f.message)?;
+        let (exit, ses) = self.vm.with_ses(
+            |s| {
+                s.inside += 1;
+                s.premises = Some((1.0, false));
+                s.stamp = None;
+            },
+            |vm| vm.callback(m, Some(this)),
+        );
+        let (reliability, unknown) = ses.premises.expect("in PREMISES");
+        let holds = match exit {
+            Ok(Exit::Returned(v)) => {
+                hbds_values::truth(&v.expect("an expression's value")).map_err(|f| Some(f.0))
+            }
+            Ok(Exit::End(_)) => Err(None),
+            Err(e) => Err(Some(e.message)),
+        };
+        match holds {
+            Ok(holds) => Ok((holds, reliability)),
+            Err(_) if unknown => Ok((false, reliability)),
+            Err(message) => Err(told(message, "PREMISES", Some(&what))),
+        }
+    }
+
+    fn run(
+        &mut self,
+        rule: Option<Id>,
+        part: &str,
+        code: &Code,
+        reliability: f64,
+    ) -> Result<(), String> {
+        let what = rule.map(|r| self.vm.store.describe(AdtRef::Object(r)));
+        let named = what.as_deref().unwrap_or("HYPOCHAV");
+        let m =
+            (self.vm.compiled(part, &code.language, &code.text, named)).map_err(|f| f.message)?;
+        let (exit, _) = self.vm.with_ses(
+            |s| {
+                s.inside += 1;
+                s.premises = None;
+                s.stamp = (reliability < 1.0).then_some(reliability);
+            },
+            |vm| vm.callback(m, rule.map(AdtRef::Object)),
+        );
+        match exit {
+            Ok(Exit::Returned(_)) => Ok(()),
+            Ok(Exit::End(_)) => Err(told(None, part, what.as_deref())),
+            Err(e) => Err(told(Some(e.message), part, what.as_deref())),
+        }
+    }
+
+    fn holds(&mut self, code: &Code, this: AdtRef) -> Result<bool, String> {
+        match self.vm.fact_holds("EDITABLE", code, this) {
+            Ok(Ok(holds)) => Ok(holds),
+            Ok(Err(_)) => Err("an EDITABLE leaves by a jump".into()),
+            Err(f) => Err(f.message),
+        }
+    }
+
+    fn edit(&mut self, line: &str) {
+        self.vm.io.write(&format!("{line}\n"));
+    }
 }
 
 impl<'r> Vm<'r> {
@@ -399,14 +521,113 @@ impl<'r> Vm<'r> {
     }
 
     /// Module `m` run nested, to completion, THIS `this`: a callback.
-    fn nested(&mut self, m: usize, this: AdtRef, depth: usize) -> Result<Exit, RuntimeError> {
+    fn nested(
+        &mut self,
+        m: usize,
+        this: Option<AdtRef>,
+        depth: usize,
+    ) -> Result<Exit, RuntimeError> {
         let base = self.frames.len();
         let height = self.stack.len();
-        self.enter(m, Vec::new(), Some(this), depth);
+        self.enter(m, Vec::new(), this, depth);
         let exit = self.exec(base);
         self.frames.truncate(base);
         self.stack.truncate(height);
         exit
+    }
+
+    /// A rule's part run for an engine, THIS the rule: the transactions
+    /// it leaves open, failing or jumping out, are refused, as the
+    /// reference's `atomic` refuses them on the way out.
+    fn callback(&mut self, m: usize, this: Option<AdtRef>) -> Result<Exit, RuntimeError> {
+        let open = self.open;
+        let exit = self.nested(m, this, 0);
+        if !matches!(exit, Ok(Exit::Returned(_))) {
+            for _ in open..self.open {
+                let _ = self.store.end(false);
+            }
+            self.open = open;
+        }
+        exit
+    }
+
+    /// Runs `body` with the rule state `set` makes, then puts it back;
+    /// gives what `body` gives and the state it ended with.
+    fn with_ses<T>(
+        &mut self,
+        set: impl FnOnce(&mut Ses),
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> (T, Ses) {
+        let saved = self.ses.clone();
+        set(&mut self.ses);
+        let result = body(self);
+        let ended = std::mem::replace(&mut self.ses, saved);
+        (result, ended)
+    }
+
+    /// Whether a fact's ASKABLE, EDITABLE or MODIFIABLE holds, THIS the
+    /// object concerned; what it reads is not the PREMISES'.
+    fn fact_holds(&mut self, part: &str, code: &Code, this: AdtRef) -> Run<Result<bool, End>> {
+        let what = self.store.describe(this);
+        let (holds, _) = self.with_ses(
+            |s| s.premises = None,
+            |vm| vm.holds(part, code, this, &what, 0),
+        );
+        holds
+    }
+
+    /// A value PREMISES read: the lowest probability is theirs.
+    fn read_fact(&mut self, probability: Option<f64>) {
+        if let Some((low, _)) = &mut self.ses.premises {
+            *low = low.min(probability.unwrap_or(1.0));
+        }
+    }
+
+    /// What YES or NO writes takes their reliability as its probability.
+    fn stamped(&self, v: Value) -> Value {
+        match (self.ses.stamp, v) {
+            (Some(p), Value::One(mut fz)) => {
+                fz.prob = Some(p);
+                Value::One(fz)
+            }
+            (_, v) => v,
+        }
+    }
+
+    /// A value not there: in PREMISES, asked if the fact is ASKABLE, and
+    /// otherwise not known, which makes them false; elsewhere, an error.
+    fn unknown(&mut self, o: Id, a: Id) -> Run<Next> {
+        let what = self.store.describe(AdtRef::ObjectAttribute(o, a));
+        if self.ses.premises.is_none() {
+            return Err(format!("{what} has no value").into());
+        }
+        if let Some(code) = self.property(AdtRef::ClassAttribute(a), "ASKABLE") {
+            let asked = match self.fact_holds("ASKABLE", &code, AdtRef::Object(o))? {
+                Ok(asked) => asked,
+                Err(end) => return Ok(Next::End(end)),
+            };
+            if asked {
+                self.io.write(&format!("{what} ? "));
+                if let Some(line) = self.io.read_line() {
+                    let line = line.trim();
+                    let v = (self.language.read(line))
+                        .unwrap_or_else(|_| Value::exact(Scalar::String(line.into())));
+                    stored(self.store.set(o, a, v.clone()))?;
+                    if let Next::End(end) = self.trigger(Invoked::Set(o, a), 0)? {
+                        return Ok(Next::End(end));
+                    }
+                    if let Value::One(fz) = &v {
+                        self.read_fact(fz.prob);
+                    }
+                    self.push(v);
+                    return Ok(Next::Go);
+                }
+            }
+        }
+        if let Some((_, unknown)) = &mut self.ses.premises {
+            *unknown = true;
+        }
+        Err(format!("{what} is not known").into())
     }
 
     /// Code the store keeps, compiled the first time it runs.
@@ -434,14 +655,14 @@ impl<'r> Vm<'r> {
     fn holds(
         &mut self,
         part: &str,
-        code: &hbds_gtad::Code,
+        code: &Code,
         this: AdtRef,
         what: &str,
+        depth: usize,
     ) -> Run<Result<bool, End>> {
         let m = self.compiled(part, &code.language, &code.text, what)?;
-        let depth = self.frame().depth + 1;
         match self
-            .nested(m, this, depth)
+            .nested(m, Some(this), depth)
             .map_err(|e| within(e.into(), part, what))?
         {
             Exit::Returned(v) => {
@@ -453,14 +674,14 @@ impl<'r> Vm<'r> {
         }
     }
 
-    fn property(&self, r: AdtRef, name: &str) -> Option<hbds_gtad::Code> {
+    fn property(&self, r: AdtRef, name: &str) -> Option<Code> {
         self.store.props(r)?.properties.get(name).cloned()
     }
 
     /// The CONDs and ACTIONs a change runs: the class's, class
     /// attribute's or class link's, then the object's own, THIS being the
     /// object (pages 156 to 158). A false COND refuses the change.
-    fn trigger(&mut self, event: Invoked) -> Run<Next> {
+    fn trigger(&mut self, event: Invoked, depth: usize) -> Run<Next> {
         let (adts, this) = match event {
             Invoked::Created(o) => (AdtRef::Class(self.store.objects()[&o].class), o),
             Invoked::Set(o, a) => (AdtRef::ClassAttribute(a), o),
@@ -470,9 +691,10 @@ impl<'r> Vm<'r> {
             }
         };
         let object = AdtRef::Object(this);
-        if let Some(code) = self.property(adts, "MODIFIABLE") {
-            let what = self.store.describe(object);
-            match self.holds("MODIFIABLE", &code, object, &what)? {
+        if self.ses.inside == 0
+            && let Some(code) = self.property(adts, "MODIFIABLE")
+        {
+            match self.fact_holds("MODIFIABLE", &code, object)? {
                 Ok(true) => {}
                 Ok(false) => {
                     let what = self.store.describe(adts);
@@ -486,12 +708,12 @@ impl<'r> Vm<'r> {
             if cond.is_none() && action.is_none() {
                 continue;
             }
-            if self.frame().depth >= DEPTH {
+            if depth >= DEPTH {
                 return Err("COND and ACTION nest too deep".into());
             }
             let what = self.store.describe(r);
             if let Some(code) = cond {
-                match self.holds("COND", &code, object, &what)? {
+                match self.holds("COND", &code, object, &what, depth + 1)? {
                     Ok(true) => {}
                     Ok(false) => {
                         let refused =
@@ -503,8 +725,7 @@ impl<'r> Vm<'r> {
             }
             if let Some(code) = action {
                 let m = self.compiled("ACTION", &code.language, &code.text, &what)?;
-                let depth = self.frame().depth + 1;
-                let exit = self.nested(m, object, depth);
+                let exit = self.nested(m, Some(object), depth + 1);
                 if let Exit::End(end) = exit.map_err(|e| within(e.into(), "ACTION", &what))? {
                     return Ok(Next::End(end));
                 }
@@ -589,11 +810,13 @@ impl<'r> Vm<'r> {
             return Ok(Next::Go);
         }
         match self.store.get(o, a).cloned() {
-            Some(v) => self.push(v),
-            None => {
-                let what = self.store.describe(AdtRef::ObjectAttribute(o, a));
-                return Err(format!("{what} has no value").into());
+            Some(v) => {
+                if let Value::One(fz) = &v {
+                    self.read_fact(fz.prob);
+                }
+                self.push(v);
             }
+            None => return self.unknown(o, a),
         }
         Ok(Next::Go)
     }
@@ -1098,7 +1321,7 @@ impl<'r> Vm<'r> {
                 let name = self.pop_text();
                 let c = self.pop_class();
                 let o = stored(self.store.create_object(c, &name))?;
-                return self.trigger(Invoked::Created(o));
+                return self.trigger(Invoked::Created(o), self.frame().depth);
             }
             Instr::CreateAttribute => {
                 let name = self.pop_text();
@@ -1156,13 +1379,14 @@ impl<'r> Vm<'r> {
                 let name = self.pop_text();
                 let o = self.pop_object();
                 let v = self.pop();
+                let v = self.stamped(v);
                 let c = self.store.objects()[&o].class;
                 let a = stored(self.store.attribute(c, &name))?;
                 if hbds_simulation::is_live(self.store, a) {
                     return Err(format!("{name} is the simulation engine's").into());
                 }
                 stored(self.store.set(o, a, v))?;
-                return self.trigger(Invoked::Set(o, a));
+                return self.trigger(Invoked::Set(o, a), self.frame().depth);
             }
             Instr::SetHeld(variable, at) => {
                 let held = self.pop();
@@ -1170,12 +1394,15 @@ impl<'r> Vm<'r> {
                 let Value::Adt(AdtRef::ObjectAttribute(o, a)) = held else {
                     return Err(format!("`{variable}` holds no object's attribute").into());
                 };
+                let v = self.stamped(v);
                 let elsewhere = |f: Failure| Failure {
                     message: f.message,
                     at: f.at.or(Some(*at)),
                 };
                 stored(self.store.set(o, a, v)).map_err(elsewhere)?;
-                return self.trigger(Invoked::Set(o, a)).map_err(elsewhere);
+                return self
+                    .trigger(Invoked::Set(o, a), self.frame().depth)
+                    .map_err(elsewhere);
             }
             Instr::SetProperty(key, at) => {
                 let target = self.pop_adt();
@@ -1204,8 +1431,9 @@ impl<'r> Vm<'r> {
                 if *negated {
                     stored(self.store.retract_link(a, relation, b))?;
                 } else {
-                    let l = stored(self.store.assert_link(a, relation, b, *probability))?;
-                    return self.trigger(Invoked::Linked(l));
+                    let p = probability.or(self.ses.stamp);
+                    let l = stored(self.store.assert_link(a, relation, b, p))?;
+                    return self.trigger(Invoked::Linked(l), self.frame().depth);
                 }
             }
             Instr::Specify(spec, unit, computed) => {
@@ -1310,10 +1538,49 @@ impl<'r> Vm<'r> {
                         _ => Err(Failure::from(format!("`{spelling}` takes strings"))),
                     })
                     .collect::<Run<Vec<String>>>()?;
-                let found = stored(hbds_functors::apply(self.store, key, &refs, &args))?;
+                let found = if hbds_rules::functor(key).is_some() {
+                    let compiler: &dyn hbds_rules::Compiler = self.language;
+                    hbds_rules::apply(self.store, compiler, key, &refs)?
+                } else {
+                    stored(hbds_functors::apply(self.store, key, &refs, &args))?
+                };
                 self.push(Value::List(List::new(
                     found.into_iter().map(Value::Adt).collect(),
                 )));
+            }
+            Instr::Hypotheses => {
+                let wrong = "HYPOCHAV takes its hypotheses first, statements in a string";
+                let text = match self.pop().scalar() {
+                    Some(Scalar::String(s)) => s.to_string(),
+                    _ => return Err(wrong.into()),
+                };
+                (self.language.check("HYPOTHESES", &text))
+                    .map_err(|_| Failure::from("HYPOCHAV's hypotheses do not parse"))?;
+                self.push(Value::exact(Scalar::String(text.into())));
+            }
+            Instr::InstallRules => stored(hbds_rules::install(self.store))?,
+            Instr::RuleClass(engine) => {
+                let class = match self.pop() {
+                    Value::Adt(AdtRef::Class(c)) => c,
+                    v => match v.scalar() {
+                        Some(Scalar::String(name)) => stored(self.store.class(name))?,
+                        _ => return Err(format!("{engine} takes rule classes, not {v}").into()),
+                    },
+                };
+                self.push(Value::Adt(AdtRef::Class(class)));
+            }
+            Instr::Chav(hypothetical, n) => {
+                let mut scope: Vec<Id> = (0..*n).map(|_| self.pop_class()).collect();
+                scope.reverse();
+                let hypotheses = hypothetical.then(|| Code {
+                    language: self.language.name().into(),
+                    text: self.pop_text(),
+                });
+                let mut engine = Engine { vm: self };
+                match &hypotheses {
+                    Some(h) => hbds_rules::hypochav(&mut engine, h, &scope)?,
+                    None => hbds_rules::chav(&mut engine, &scope)?,
+                };
             }
         }
         Ok(Next::Go)

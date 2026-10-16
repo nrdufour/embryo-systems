@@ -6,7 +6,7 @@
 //! docs/hbds.md, "Expert systems", gives the rules.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::ops::DerefMut;
 
 use hbds_core::value::{Scalar, Value};
 use hbds_core::{AdtRef, AdtType, Functor, Gives, Id, Takes, same};
@@ -289,7 +289,9 @@ pub fn apply(
 
 /// What the engine asks of the language that runs it.
 pub trait Host: Compiler {
-    fn store(&self) -> &Mutex<Store>;
+    /// The store, for as long as the engine holds it: no other call
+    /// to the host while it does.
+    fn store(&mut self) -> Box<dyn DerefMut<Target = Store> + '_>;
 
     /// Whether a rule's PREMISES hold, THIS the rule, and how reliable the
     /// facts they read are: the lowest probability among them, 1 without.
@@ -473,23 +475,23 @@ impl<'h> Chainer<'h> {
         }
     }
 
-    fn pending(&self) -> usize {
-        self.host.store().lock().unwrap().pending().len()
+    fn pending(&mut self) -> usize {
+        self.host.store().pending().len()
     }
 
-    fn since(&self, mark: usize) -> Vec<Change> {
-        self.host.store().lock().unwrap().pending()[mark..].to_vec()
+    fn since(&mut self, mark: usize) -> Vec<Change> {
+        self.host.store().pending()[mark..].to_vec()
     }
 
     /// The whole run is a transaction of the store's, nested in any open.
     fn run(mut self, hypotheses: Option<&Code>) -> Result<Run, String> {
         let point = {
-            let mut store = self.host.store().lock().unwrap();
+            let mut store = self.host.store();
             store.begin();
             store.savepoint()
         };
         let result = self.chain(hypotheses);
-        let mut store = self.host.store().lock().unwrap();
+        let mut store = self.host.store();
         if result.is_ok()
             && self.hypothetical.is_some()
             && let Some(point) = point
@@ -530,17 +532,37 @@ impl<'h> Chainer<'h> {
         Ok(())
     }
 
+    /// [`consumed`], the store let go while the host compiles.
+    fn consumed(&mut self, rule: Id) -> Result<Vec<AdtRef>, String> {
+        let (code, what) = {
+            let store = self.host.store();
+            (
+                code(&store, rule, "PREMISES"),
+                store.describe(AdtRef::Object(rule)),
+            )
+        };
+        let Some(code) = code else {
+            return Ok(Vec::new());
+        };
+        let uses = (self.host.uses("PREMISES", &code))
+            .map_err(|e| format!("the PREMISES of {what} {e}"))?;
+        let mut out = Vec::new();
+        for f in facts(&self.host.store(), &uses) {
+            push_new(&mut out, f);
+        }
+        Ok(out)
+    }
+
     /// The rules of the scope, compiled again: new ones go on the agenda.
     fn refresh(&mut self) -> Result<(), String> {
-        let store = self.host.store().lock().unwrap();
+        let found = rules(&self.host.store(), &self.scope);
         let mut consumes = BTreeMap::new();
-        for r in rules(&store, &self.scope) {
-            consumes.insert(r, consumed(&store, &*self.host, r)?);
+        for r in found {
+            consumes.insert(r, self.consumed(r)?);
             if !self.consumes.contains_key(&r) {
-                self.agenda.insert(&store, r);
+                self.agenda.insert(&self.host.store(), r);
             }
         }
-        drop(store);
         self.agenda.retain(|r| consumes.contains_key(r));
         self.consumers.clear();
         for (r, facts) in &consumes {
@@ -556,7 +578,7 @@ impl<'h> Chainer<'h> {
     /// a rule's own values, or every rule's when attributes or the
     /// classes' inclusions change, which decide where PRIORITY comes from.
     fn reread(&mut self, changes: &[Change]) {
-        let store = self.host.store().lock().unwrap();
+        let store = self.host.store();
         let everything = changes.iter().any(|c| {
             matches!(
                 c,
@@ -587,7 +609,7 @@ impl<'h> Chainer<'h> {
     fn try_rule(&mut self, r: Id, urgent: bool) -> Result<(), String> {
         self.done.tried.push(r);
         let (part, reliability) = {
-            let store = self.host.store().lock().unwrap();
+            let store = self.host.store();
             let part = |name| code(&store, r, name);
             let reliability = number(attribute(&store, r, RELIABILITY)).unwrap_or(1.0);
             (
@@ -659,7 +681,7 @@ impl<'h> Chainer<'h> {
         urgent: bool,
         except: Option<Id>,
     ) -> Result<(), String> {
-        let store = self.host.store().lock().unwrap();
+        let store = self.host.store();
         let mut facts = BTreeSet::new();
         for change in changes {
             for (fact, realization) in realized(&store, change) {
@@ -711,7 +733,7 @@ impl<'h> Chainer<'h> {
     /// The rules a fired rule activates go on the agenda again; those it
     /// inhibits leave it, for the rest of the run.
     fn links(&mut self, r: Id) {
-        let store = self.host.store().lock().unwrap();
+        let store = self.host.store();
         let targets = |relation: &str| -> Vec<Id> {
             (store.links_from(r).into_iter())
                 .filter(|id| {
@@ -743,7 +765,7 @@ impl<'h> Chainer<'h> {
         let mut seen = Vec::new();
         for change in changes {
             let found = {
-                let store = self.host.store().lock().unwrap();
+                let store = self.host.store();
                 realized(&store, change)
                     .into_iter()
                     .take(1)
@@ -758,7 +780,7 @@ impl<'h> Chainer<'h> {
                 let this = match realization {
                     AdtRef::ObjectAttribute(o, _) => AdtRef::Object(o),
                     AdtRef::ObjectLink(l) => {
-                        let store = self.host.store().lock().unwrap();
+                        let store = self.host.store();
                         AdtRef::Object(store.object_links()[&l].from)
                     }
                     r => r,
@@ -774,8 +796,8 @@ impl<'h> Chainer<'h> {
     }
 
     /// `PIPE[P1].pressure = 2.5, by R1[RULES]: why`
-    fn establishes(&self, fact: AdtRef, rule: Option<Id>) -> String {
-        let store = self.host.store().lock().unwrap();
+    fn establishes(&mut self, fact: AdtRef, rule: Option<Id>) -> String {
+        let store = self.host.store();
         let mut line = store.describe(fact);
         if let AdtRef::ObjectAttribute(o, a) = fact
             && let Some(v) = store.get(o, a)

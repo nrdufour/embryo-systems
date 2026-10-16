@@ -2,6 +2,7 @@
 //! PREMISES: `has OBJ ATTR`, all of which must hold, or `false`; the
 //! other parts: `set OBJ ATTR N`, `inc OBJ ATTR`, `log TEXT`.
 
+use std::ops::DerefMut;
 use std::sync::Mutex;
 
 use hbds_core::value::{Fz, Scalar, Value};
@@ -42,8 +43,8 @@ impl Compiler for Fake {
 }
 
 impl Host for Fake {
-    fn store(&self) -> &Mutex<Store> {
-        &self.store
+    fn store(&mut self) -> Box<dyn DerefMut<Target = Store> + '_> {
+        Box::new(self.store.lock().unwrap())
     }
 
     fn premises(&mut self, _: Id, code: &Code) -> Result<(bool, f64), String> {

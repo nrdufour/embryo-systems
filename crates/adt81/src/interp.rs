@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -447,8 +448,8 @@ impl hbds_rules::Compiler for Engine<'_> {
 }
 
 impl hbds_rules::Host for Engine<'_> {
-    fn store(&self) -> &Mutex<Store> {
-        &self.m.store
+    fn store(&mut self) -> Box<dyn DerefMut<Target = Store> + '_> {
+        Box::new(self.m.store.lock().unwrap())
     }
 
     fn premises(&mut self, rule: Id, code: &Code) -> Result<(bool, f64), String> {
