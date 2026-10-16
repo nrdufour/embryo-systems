@@ -2,8 +2,13 @@
 //! 156's complexes and quaternions among them), fuzziness carried beside
 //! each (pages 152 and 153), lists, arrays, and a.d.t. Pure data, and its
 //! canonical text: what a value means in a computation is a language's.
+//!
+//! Strings, lists' items and arrays' cells are shared behind a reference
+//! count: a copy costs one count, and a shared one is copied only when it
+//! changes (`Arc::make_mut`).
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::AdtRef;
 
@@ -43,7 +48,7 @@ pub enum Scalar {
     Quaternion([f64; 4]),
     Boolean(bool),
     Character(char),
-    String(String),
+    String(Arc<str>),
 }
 
 /// A value and its fuzziness.
@@ -87,12 +92,12 @@ pub struct Array {
     pub lows: Vec<i64>,
     pub dims: Vec<usize>,
     /// Row-major.
-    pub cells: Vec<Value>,
+    pub cells: Arc<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct List {
-    pub items: Vec<Value>,
+    pub items: Arc<Vec<Value>>,
     /// The current element, for CURRENT, PRED and SUCC.
     pub cursor: usize,
     pub circular: bool,
@@ -101,7 +106,7 @@ pub struct List {
 impl List {
     pub fn new(items: Vec<Value>) -> List {
         List {
-            items,
+            items: Arc::new(items),
             cursor: 0,
             circular: false,
         }

@@ -314,6 +314,17 @@ after a try that may change it, with the rules consuming each fact
 indexed, so `react` no longer walks every rule. `chav` 1000 rules:
 176 ms to 77, lookups 1 043 051 to 44 051; every scenario linear.
 
+As built (2026-10-15, step 2d): strings are `Arc<str>`, lists' items
+and arrays' cells `Arc<Vec<Value>>`, changed through `Arc::make_mut`,
+so a copy costs a count and a list changes in place unless another
+value shares it, as `M := L` then `EXTRACT ... OUTOF L` checks (the
+corpus's lists.adt). A scenario of its own, `values`, assigns a list of
+n integers n times: before, x3.9 per doubling, 1.26 s at 8000 here; now
+linear, 15 ms at 8000, 0.46 s at 256 000, where the ladder now stands.
+The harness now discards a first run and keeps the median of five: the
+simulation, a thread per process, moved 17% between two runs a minute
+apart, its first run the slowest.
+
 ### 12. Benchmarks at the print's scale
 
 - **Scenarios**: the store and functors (a million objects, lookups,

@@ -3,6 +3,8 @@
 //! or take an element out; union, intersection and complement. The
 //! arithmetic SIGMA needs is a language's, given to it.
 
+use std::sync::Arc;
+
 use hbds_core::value::{List, Scalar, Value};
 use hbds_core::{Functor, Gives, Takes};
 
@@ -100,14 +102,14 @@ pub fn apply(
         }
         ("FIRSTOUT", []) => {
             l.cursor = 0;
-            l.items.remove(0)
+            Arc::make_mut(&mut l.items).remove(0)
         }
         ("LASTOUT", []) => {
             l.cursor = l.cursor.min(last.saturating_sub(1));
-            l.items.remove(last)
+            Arc::make_mut(&mut l.items).remove(last)
         }
         ("CURRENTOUT", []) => {
-            let v = l.items.remove(l.cursor);
+            let v = Arc::make_mut(&mut l.items).remove(l.cursor);
             l.cursor = l.cursor.min(l.items.len().saturating_sub(1));
             v
         }
@@ -130,7 +132,7 @@ pub fn apply(
         }
         ("SIGMA", []) => {
             let mut sum = Value::integer(0);
-            for v in &l.items {
+            for v in l.items.iter() {
                 sum = add(&sum, v)?;
             }
             sum
@@ -141,7 +143,7 @@ pub fn apply(
 
 /// UNION: `l`'s elements, then `m`'s that `l` lacks.
 pub fn union(l: &List, m: &List) -> List {
-    let mut items = l.items.clone();
+    let mut items = (*l.items).clone();
     items.extend(m.items.iter().filter(|x| !l.items.contains(x)).cloned());
     List::new(items)
 }
@@ -176,19 +178,19 @@ pub fn insert(l: &mut List, items: Vec<Value>, at: Option<usize>) -> Listed<()> 
         Some(k) if k <= l.items.len() => k,
         Some(_) => return Err("this position is outside the list".into()),
     };
-    l.items.splice(at..at, items);
+    Arc::make_mut(&mut l.items).splice(at..at, items);
     Ok(())
 }
 
 /// EXTRACT: every element equal to one of `items` out.
 pub fn extract(l: &mut List, items: &[Value]) {
-    l.items.retain(|x| !items.contains(x));
+    Arc::make_mut(&mut l.items).retain(|x| !items.contains(x));
     l.cursor = l.cursor.min(l.items.len().saturating_sub(1));
 }
 
 /// EMPTY.
 pub fn empty(l: &mut List) {
-    l.items.clear();
+    Arc::make_mut(&mut l.items).clear();
     l.cursor = 0;
 }
 

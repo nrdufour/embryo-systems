@@ -450,7 +450,7 @@ fn number(v: Option<Value>) -> Option<f64> {
 
 fn text(v: Option<Value>) -> Option<String> {
     match v?.scalar()? {
-        Scalar::String(s) => Some(s.clone()),
+        Scalar::String(s) => Some(s.to_string()),
         Scalar::Character(c) => Some(c.to_string()),
         _ => None,
     }

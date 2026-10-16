@@ -486,7 +486,7 @@ impl<'t> Reader<'t> {
                     _ => return Err(format!("{s:?} is not one character")),
                 }
             }
-            "s" => Scalar::String(self.text()?),
+            "s" => Scalar::String(self.text()?.into()),
             t => return Err(format!("{t:?} is not a value")),
         })
     }
@@ -534,7 +534,7 @@ impl<'t> Reader<'t> {
                 Value::List(List {
                     cursor,
                     circular,
-                    items: r.rest(|r| r.value())?,
+                    items: r.rest(|r| r.value())?.into(),
                 })
             }
             "array" => {
@@ -550,7 +550,7 @@ impl<'t> Reader<'t> {
                     rank,
                     lows,
                     dims,
-                    cells: r.rest(|r| r.value())?,
+                    cells: r.rest(|r| r.value())?.into(),
                 })
             }
             _ => Value::Adt(r.adt_ref()?),
@@ -696,7 +696,7 @@ mod tests {
             }),
             Value::Many(vec![fz(Scalar::Integer(1)), fz(Scalar::Float(2.5))]),
             Value::List(List {
-                items: vec![Value::integer(1), Value::Adt(AdtRef::ObjectAttribute(3, 4))],
+                items: vec![Value::integer(1), Value::Adt(AdtRef::ObjectAttribute(3, 4))].into(),
                 cursor: 1,
                 circular: true,
             }),
@@ -704,7 +704,7 @@ mod tests {
                 rank: Rank::Matrix,
                 lows: vec![0, -1],
                 dims: vec![1, 2],
-                cells: vec![Value::integer(1), Value::integer(2)],
+                cells: vec![Value::integer(1), Value::integer(2)].into(),
             }),
             Value::Adt(AdtRef::ClassLink(9)),
         ]
@@ -756,7 +756,7 @@ mod tests {
                 5 => Scalar::Quaternion([float(next), float(next), float(next), float(next)]),
                 6 => Scalar::Boolean(next(2) == 0),
                 7 => Scalar::Character(['a', '"', '\\', ' '][next(4) as usize]),
-                _ => Scalar::String(text(next)),
+                _ => Scalar::String(text(next).into()),
             };
             let fz = |next: &mut dyn FnMut(u64) -> u64| Fz {
                 x: scalar(next),
@@ -769,7 +769,10 @@ mod tests {
                 2 => Value::Adt(AdtRef::ObjectAttribute(next(99), next(99))),
                 3 => Value::Many((0..next(3)).map(|_| fz(next)).collect()),
                 4 => Value::List(List {
-                    items: (0..next(4)).map(|_| value(next, depth - 1)).collect(),
+                    items: (0..next(4))
+                        .map(|_| value(next, depth - 1))
+                        .collect::<Vec<_>>()
+                        .into(),
                     cursor: next(4) as usize,
                     circular: next(2) == 0,
                 }),
@@ -777,7 +780,10 @@ mod tests {
                     rank: Rank::Vector,
                     lows: vec![next(5) as i64 - 2],
                     dims: vec![2],
-                    cells: (0..2).map(|_| value(next, depth - 1)).collect(),
+                    cells: (0..2)
+                        .map(|_| value(next, depth - 1))
+                        .collect::<Vec<_>>()
+                        .into(),
                 }),
             }
         }

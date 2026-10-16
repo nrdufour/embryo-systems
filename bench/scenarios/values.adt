@@ -1,0 +1,22 @@
+-- Values passed around: a list of n integers assigned n times, and a --
+-- string of 4096 characters assigned n times. What sharing large values --
+-- saves: each copy one count, not the whole value. --
+
+program values ;
+local
+        l, m : list of integer ;
+        s, w : string ;
+        n, i, t : integer ;
+begin
+        read n ;
+        loop for i : 1 to n do insert (i) into l endloop ;
+        t := 0 ;
+        loop for i : 1 to n do
+                m := l ;
+                t := t + m ' card
+        endloop ;
+        s := "x" ;
+        loop for i : 1 to 12 do s := s & s endloop ;
+        loop for i : 1 to n do w := s endloop ;
+        print t
+end ;

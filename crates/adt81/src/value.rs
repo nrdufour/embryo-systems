@@ -143,7 +143,7 @@ pub fn convert(v: Value, to: &Ty) -> Computed<Value> {
             let character = *to == Ty::Character;
             return map_singles(v, &|fz| {
                 let x = match (&fz.x, character) {
-                    (Scalar::Character(c), false) => Scalar::String(c.to_string()),
+                    (Scalar::Character(c), false) => Scalar::String(c.to_string().into()),
                     (Scalar::String(s), true) => {
                         let mut chars = s.chars();
                         match (chars.next(), chars.next()) {
@@ -187,7 +187,7 @@ pub fn zero(ty: &Ty) -> Value {
         Ty::Quaternion => Scalar::Quaternion([0.0; 4]),
         Ty::Boolean => Scalar::Boolean(false),
         Ty::Character => Scalar::Character(' '),
-        Ty::String => Scalar::String(String::new()),
+        Ty::String => Scalar::String("".into()),
         _ => Scalar::Integer(0),
     })
 }
@@ -406,7 +406,7 @@ fn negate(s: &Scalar) -> Computed<Scalar> {
 fn text(s: &Scalar) -> Option<String> {
     match s {
         Scalar::Character(c) => Some(c.to_string()),
-        Scalar::String(s) => Some(s.clone()),
+        Scalar::String(s) => Some(s.to_string()),
         _ => None,
     }
 }
@@ -514,7 +514,7 @@ pub fn binary_fz(op: BinaryOp, a: &Fz, b: &Fz) -> Computed<Fz> {
         Or | Nor | Xor | And | Nand => (Scalar::Boolean(logic(op, &a.x, &b.x)?), None),
         Eq | Ne | Lt | Le | Gt | Ge => (Scalar::Boolean(compare(op, &a.x, &b.x)?), None),
         Concat => match (text(&a.x), text(&b.x)) {
-            (Some(s), Some(t)) => (Scalar::String(s + &t), None),
+            (Some(s), Some(t)) => (Scalar::String((s + &t).into()), None),
             _ => return fault("`&` takes characters and strings"),
         },
         Add | Sub | Mul | Div => (arith(op, &a.x, &b.x)?, approximation(op, a, b)?),
@@ -651,8 +651,11 @@ fn list_op(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
 fn array_op(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
     use BinaryOp::*;
     let cellwise = |x: &Array, f: &dyn Fn(&Value) -> Computed<Value>| -> Computed<Value> {
-        let cells = x.cells.iter().map(f).collect::<Computed<_>>()?;
-        Ok(Value::Array(Array { cells, ..x.clone() }))
+        let cells = x.cells.iter().map(f).collect::<Computed<Vec<_>>>()?;
+        Ok(Value::Array(Array {
+            cells: cells.into(),
+            ..x.clone()
+        }))
     };
     match (op, a, b) {
         (ArrayAdd, Value::Array(x), Value::Array(y)) => {
@@ -662,10 +665,13 @@ fn array_op(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
             let cells = x
                 .cells
                 .iter()
-                .zip(&y.cells)
+                .zip(y.cells.iter())
                 .map(|(p, q)| binary(Add, p, q))
-                .collect::<Computed<_>>()?;
-            Ok(Value::Array(Array { cells, ..x.clone() }))
+                .collect::<Computed<Vec<_>>>()?;
+            Ok(Value::Array(Array {
+                cells: cells.into(),
+                ..x.clone()
+            }))
         }
         (ArrayMul, Value::Array(x), Value::Array(y))
             if x.rank == Rank::Matrix && y.rank == Rank::Matrix =>
@@ -689,7 +695,7 @@ fn array_op(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
                 rank: Rank::Matrix,
                 lows: vec![x.lows[0], y.lows[1]],
                 dims: vec![rows, cols],
-                cells,
+                cells: cells.into(),
             }))
         }
         (ArrayMul, s, Value::Array(x)) | (ArrayMul, Value::Array(x), s)
@@ -704,7 +710,7 @@ fn array_op(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
                 return fault("[.] takes two vectors of the same length");
             }
             let mut sum = binary(Mul, &x.cells[0], &y.cells[0])?;
-            for (p, q) in x.cells.iter().zip(&y.cells).skip(1) {
+            for (p, q) in x.cells.iter().zip(y.cells.iter()).skip(1) {
                 sum = binary(Add, &sum, &binary(Mul, p, q)?)?;
             }
             Ok(sum)
@@ -724,7 +730,7 @@ fn array_op(op: BinaryOp, a: &Value, b: &Value) -> Computed<Value> {
                 )
             };
             Ok(Value::Array(Array {
-                cells: vec![term(1, 2)?, term(2, 0)?, term(0, 1)?],
+                cells: vec![term(1, 2)?, term(2, 0)?, term(0, 1)?].into(),
                 ..x.clone()
             }))
         }
@@ -902,7 +908,7 @@ mod tests {
             rank: Rank::Matrix,
             lows: vec![1, 1],
             dims: vec![2, 2],
-            cells: (1..=4).map(Value::integer).collect(),
+            cells: (1..=4).map(Value::integer).collect::<Vec<_>>().into(),
         });
         assert_eq!(m.to_string(), "[[1, 2], [3, 4]]");
     }
