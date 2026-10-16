@@ -108,6 +108,20 @@ four planted bugs fail it. On the benchmarks the VM is no faster yet
 time is in hbds-values' arithmetic, which both share, not in walking
 the tree. Fast paths for exact numbers are the lever, later.
 
+As built (2026-10-16, step 4b1): the store's operations are A-code's,
+each popping its operands in the reference's order. Code the store keeps
+(COND, ACTION, MODIFIABLE) is compiled the first time it runs, by the
+unit's language through `hbds_acode::Language`, against the unit's
+modules, cached by part and text; the store and the journal keep text
+(compiling when stored comes with step 6). It runs nested in the same
+fiber, as decision 3 says code an engine calls back does, 64 deep at
+most; so the VM, as the reference, runs on a thread with a large stack.
+Computed attributes are functions called, THIS their object. The gate
+compares the store's dump too: 33 corpus programs run both ways, the
+22 left are the expert systems' and the processes'; the random programs
+build a schema with CONDs and ACTIONs. The store's work counts are the
+same on both engines, and so are the times: the time is the engines'.
+
 ### 3. Fibers, and a sequential world with threads around it
 
 Everything that runs as its own flow of control is a **fiber**: the main

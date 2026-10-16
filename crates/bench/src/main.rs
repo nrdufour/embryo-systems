@@ -53,6 +53,14 @@ const SCENARIOS: &[Scenario] = &[
         expected: |n| format!("{n} {}\n", triangle(n)),
     },
     Scenario {
+        name: "store-vm",
+        program: "store",
+        vm: true,
+        sizes: &[500, 1000, 2000, 4000],
+        input: |n| format!("{n}\n{}", names("o", n)),
+        expected: |n| format!("{n} {}\n", triangle(n)),
+    },
+    Scenario {
         name: "lookup",
         program: "lookup",
         vm: false,
@@ -64,9 +72,34 @@ const SCENARIOS: &[Scenario] = &[
         expected: |n| format!("{}\n", triangle(n)),
     },
     Scenario {
+        name: "lookup-vm",
+        program: "lookup",
+        vm: true,
+        sizes: &[500, 1000, 2000, 4000],
+        input: |n| {
+            let back: String = (1..=n).rev().map(|i| format!("o{i}\n")).collect();
+            format!("{n}\n{}{back}", names("o", n))
+        },
+        expected: |n| format!("{}\n", triangle(n)),
+    },
+    Scenario {
         name: "functors",
         program: "functors",
         vm: false,
+        sizes: &[125, 250, 500, 1000],
+        input: |n| {
+            let mut s = format!("{n}\n{}", names("p", n));
+            for i in 1..=n {
+                writeln!(s, "s{i}\np{i}\np{}", i % n + 1).unwrap();
+            }
+            s
+        },
+        expected: |n| format!("{n} {}\n", triangle(n)),
+    },
+    Scenario {
+        name: "functors-vm",
+        program: "functors",
+        vm: true,
         sizes: &[125, 250, 500, 1000],
         input: |n| {
             let mut s = format!("{n}\n{}", names("p", n));
