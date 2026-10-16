@@ -121,3 +121,64 @@ fn the_corpus() {
     assert!(differ.is_empty(), "\n{}", differ.join("\n"));
     assert!(run > 0);
 }
+
+/// Random programs: those that check run both ways, under a budget small
+/// enough that one that never ends ends both runs alike.
+#[test]
+fn random_programs() {
+    const SEEDS: u64 = 2000;
+    const SMALL: u64 = 3000;
+    let (mut checked, mut errors, mut spent, mut differ) = (0, 0, 0, Vec::new());
+    let mut rejected = Vec::new();
+    for seed in 0..SEEDS {
+        let (source, input) = adt81::sample::runnable(seed);
+        let program = lower::parse_program(&source)
+            .unwrap_or_else(|e| panic!("seed {seed} does not parse: {e}\n{source}"));
+        let diagnostics: Vec<String> = (adt81::check(&program).iter())
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.to_string())
+            .collect();
+        if !diagnostics.is_empty() {
+            rejected.push(diagnostics[0].clone());
+            continue;
+        }
+        checked += 1;
+        let unit = compile(&program)
+            .unwrap_or_else(|e| panic!("seed {seed}: not yet on the VM: {e:?}\n{source}"));
+        let run = |budget| {
+            let io = Arc::new(Mutex::new(capture(&input)));
+            let store = Arc::new(Mutex::new(Store::memory()));
+            let r = interp::run_within(program.clone(), io.clone(), store, Some(budget));
+            let output = std::mem::take(&mut io.lock().unwrap().output);
+            (output, r.map_err(|e| e.to_string()))
+        };
+        let r = run(SMALL);
+        let mut io = capture(&input);
+        let v = hbds_vm::run(&unit, &mut io, &Adt81, Some(SMALL));
+        let v = (io.output, v.map_err(|e| e.to_string()));
+        match &r.1 {
+            Err(e) if e.ends_with(interp::BUDGET_SPENT) => spent += 1,
+            Err(e) => {
+                errors += 1;
+                if std::env::var("VM_ERRORS").is_ok() {
+                    println!("ERROR {}", e.split("runtime error: ").nth(1).unwrap_or(e));
+                }
+            }
+            Ok(_) => {}
+        }
+        if r != v && differ.len() < 3 {
+            differ.push(format!(
+                "seed {seed}\n  reference: {r:?}\n  vm:        {v:?}\n{source}\ninput: {input:?}"
+            ));
+        }
+    }
+    rejected.sort();
+    println!(
+        "random: {checked} of {SEEDS} check; {errors} end in a runtime error, {spent} past the budget"
+    );
+    if let Some(r) = rejected.first() {
+        println!("a rejection: {r}");
+    }
+    assert!(differ.is_empty(), "\n{}", differ.join("\n"));
+    assert!(checked * 2 > SEEDS, "too few random programs check");
+}
