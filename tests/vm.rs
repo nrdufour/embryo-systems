@@ -1,8 +1,7 @@
 //! The gate (docs/architecture.md, decision 2): the VM gives exactly the
 //! reference's outcome, its output, then how it ends (normally, by a
 //! runtime error, its message and place, or past the statement budget),
-//! and the statements it executed. Every corpus program the compiler
-//! takes is run by both; those it leaves to a later slice are counted.
+//! and the statements it executed. Every corpus program is run by both.
 
 use std::collections::VecDeque;
 use std::fs;
@@ -80,20 +79,20 @@ fn programs(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
-/// Compiles `source` and runs it both ways: None if the compiler leaves
-/// it to a later slice, else the two outcomes.
-fn both(source: &str, input: &str) -> Option<(Outcome, Outcome, String)> {
+/// Compiles `source` and runs it both ways: the two outcomes, and the
+/// A-code.
+fn both(source: &str, input: &str) -> (Outcome, Outcome, String) {
     let program = lower::parse_program(source).unwrap_or_else(|e| panic!("{e}"));
     let errors = adt81::check(&program)
         .iter()
         .any(|d| d.severity == Severity::Error);
     assert!(!errors, "the program does not check");
-    let unit = compile(&program).ok()?;
-    Some((
+    let unit = compile(&program);
+    (
         reference(&program, input, BUDGET),
         vm(&unit, input, BUDGET),
         unit.text(),
-    ))
+    )
 }
 
 #[test]
@@ -104,32 +103,21 @@ fn the_corpus() {
         paths.extend(programs(&root.join(dir)));
     }
     paths.extend(programs(&root.join("../acode")));
-    let (mut run, mut skipped, mut differ) = (0, Vec::new(), Vec::new());
+    let mut differ = Vec::new();
     for path in &paths {
         let source = fs::read_to_string(path).unwrap();
         let input = fs::read_to_string(path.with_extension("in")).unwrap_or_default();
         let name = path.strip_prefix(&root).unwrap().display().to_string();
-        match both(&source, &input) {
-            None => skipped.push(name),
-            Some((r, v, text)) => {
-                run += 1;
-                if r != v {
-                    differ.push(format!(
-                        "{name}\n  reference: {r:?}\n  vm:        {v:?}\n{text}"
-                    ));
-                }
-            }
+        let (r, v, text) = both(&source, &input);
+        if r != v {
+            differ.push(format!(
+                "{name}\n  reference: {r:?}\n  vm:        {v:?}\n{text}"
+            ));
         }
     }
-    println!(
-        "vm gate: {run} programs run both ways, {} left to later slices",
-        skipped.len()
-    );
-    if std::env::var("VM_SKIPPED").is_ok() {
-        println!("left: {}", skipped.join(" "));
-    }
+    println!("vm gate: {} programs run both ways", paths.len());
     assert!(differ.is_empty(), "\n{}", differ.join("\n"));
-    assert!(run > 0);
+    assert!(!paths.is_empty());
 }
 
 /// Random programs: those that check run both ways, under a budget small
@@ -153,8 +141,7 @@ fn random_programs() {
             continue;
         }
         checked += 1;
-        let unit = compile(&program)
-            .unwrap_or_else(|e| panic!("seed {seed}: not yet on the VM: {e:?}\n{source}"));
+        let unit = compile(&program);
         let r = reference(&program, &input, SMALL);
         let v = vm(&unit, &input, SMALL);
         match &r.1 {

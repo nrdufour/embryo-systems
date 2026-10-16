@@ -76,6 +76,8 @@ pub struct Module {
     /// The class and attribute (folded) a function computes, pages 127
     /// and 128.
     pub computes: Option<(String, String)>,
+    /// The class (folded) a coroutine is the body of, page 112.
+    pub body: Option<String>,
     pub result: Option<usize>,
     pub code: Vec<Instr>,
     /// Where each instruction comes from.
@@ -128,6 +130,16 @@ pub enum ListOp {
     Union,
     Inter,
     Compl,
+}
+
+/// When ACTIVATE or REACTIVATE makes a process due: now, AT a time,
+/// BEFORE or AFTER another process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Due {
+    Now,
+    At,
+    Before,
+    After,
 }
 
 /// HIBERN, AWAKE, DESTROY, RESUR, PURGE.
@@ -343,6 +355,34 @@ pub enum Instr {
     /// Pops n rule classes, and the hypotheses if HYPOCHAV: runs CHAV or
     /// HYPOCHAV over them.
     Chav(bool, usize),
+    /// RESUME of coroutine m once started: refused with arguments, ended
+    /// or running; else it goes on, and then the code at `t`.
+    ResumeStarted(usize, bool, usize),
+    /// The first RESUME of coroutine m: pops its n arguments.
+    ResumeFirst(usize, usize),
+    /// Pops an object: pushes it back if it is a process.
+    Process,
+    /// Pops a process: pushes it back once its class has a body that
+    /// takes no parameters.
+    HasBody,
+    /// Pops a duration or a time: pushes it as a real.
+    AsTime,
+    /// Pops when, if not now, and a process: ACTIVATE or REACTIVATE.
+    Activate(Due),
+    /// Pops a process.
+    Cancel,
+    Kill,
+    /// Pops a duration and a process.
+    Delay,
+    /// The statement named so may give way here: the main program or a
+    /// process does, not a coroutine nor code the store calls back.
+    Running(String),
+    /// Pops a process: the running one, HOLD's.
+    IsRunning,
+    /// Pops a duration.
+    Hold,
+    Passivate,
+    Terminate,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -420,6 +460,13 @@ const RANKS: &[(&str, Rank)] = &[
     ("vector", Rank::Vector),
     ("matrix", Rank::Matrix),
     ("tensor", Rank::Tensor),
+];
+
+const DUES: &[(&str, Due)] = &[
+    ("now", Due::Now),
+    ("at", Due::At),
+    ("before", Due::Before),
+    ("after", Due::After),
 ];
 
 const STATE_OPS: &[(&str, StateOp)] = &[
@@ -595,6 +642,20 @@ fn instr(i: &Instr) -> Vec<Term> {
         Instr::InstallRules => vec![word("install.rules")],
         Instr::RuleClass(e) => vec![word("rule.class"), text(e)],
         Instr::Chav(hypotheses, k) => vec![word("chav"), word(hypotheses), n(k)],
+        Instr::ResumeStarted(m, args, t) => vec![word("resume.started"), n(m), word(args), n(t)],
+        Instr::ResumeFirst(m, k) => vec![word("resume.first"), n(m), n(k)],
+        Instr::Process => vec![word("process")],
+        Instr::HasBody => vec![word("has.body")],
+        Instr::AsTime => vec![word("as.time")],
+        Instr::Activate(due) => vec![word("activate"), word(name_of(DUES, *due))],
+        Instr::Cancel => vec![word("cancel")],
+        Instr::Kill => vec![word("kill")],
+        Instr::Delay => vec![word("delay")],
+        Instr::Running(what) => vec![word("running"), text(what)],
+        Instr::IsRunning => vec![word("is.running")],
+        Instr::Hold => vec![word("hold")],
+        Instr::Passivate => vec![word("passivate")],
+        Instr::Terminate => vec![word("terminate")],
     }
 }
 
@@ -701,6 +762,20 @@ fn read_instr(r: &mut Reader) -> Result<Instr, String> {
         "install.rules" => Instr::InstallRules,
         "rule.class" => Instr::RuleClass(r.text()?),
         "chav" => Instr::Chav(r.parse()?, n(r)?),
+        "resume.started" => Instr::ResumeStarted(n(r)?, r.parse()?, n(r)?),
+        "resume.first" => Instr::ResumeFirst(n(r)?, n(r)?),
+        "process" => Instr::Process,
+        "has.body" => Instr::HasBody,
+        "as.time" => Instr::AsTime,
+        "activate" => Instr::Activate(named(DUES, r.word()?, "a due")?),
+        "cancel" => Instr::Cancel,
+        "kill" => Instr::Kill,
+        "delay" => Instr::Delay,
+        "running" => Instr::Running(r.text()?),
+        "is.running" => Instr::IsRunning,
+        "hold" => Instr::Hold,
+        "passivate" => Instr::Passivate,
+        "terminate" => Instr::Terminate,
         w => return Err(format!("{w:?} is not an instruction")),
     })
 }
@@ -792,6 +867,9 @@ impl Unit {
             if let Some((c, a)) = &m.computes {
                 writeln!(out, "{}", line(&[word("computes"), text(c), text(a)])).unwrap();
             }
+            if let Some(c) = &m.body {
+                writeln!(out, "{}", line(&[word("body"), text(c)])).unwrap();
+            }
             for (pc, (i, s)) in m.code.iter().zip(&m.spans).enumerate() {
                 writeln!(out, "{pc:>4} {:<8} {}", span_text(*s), line(&instr(i))).unwrap();
             }
@@ -841,6 +919,7 @@ impl Unit {
                     prefix: None,
                     result: None,
                     computes: None,
+                    body: None,
                     code: Vec::new(),
                     spans: Vec::new(),
                 });
@@ -872,6 +951,11 @@ impl Unit {
                 "computes" => {
                     r.word().map_err(at)?;
                     m.computes = Some((r.text().map_err(at)?, r.text().map_err(at)?));
+                    r.end().map_err(at)?;
+                }
+                "body" => {
+                    r.word().map_err(at)?;
+                    m.body = Some(r.text().map_err(at)?);
                     r.end().map_err(at)?;
                 }
                 "prefix" | "result" => {
@@ -938,6 +1022,7 @@ mod tests {
                     prefix: None,
                     result: None,
                     computes: None,
+                    body: None,
                     code: vec![
                         Instr::Stmt,
                         Instr::Const(Value::exact(Scalar::String("say \"hi\"".into()))),
@@ -962,6 +1047,11 @@ mod tests {
                         Instr::InstallRules,
                         Instr::RuleClass("hypochav".into()),
                         Instr::Chav(true, 1),
+                        Instr::ResumeStarted(1, true, 20),
+                        Instr::ResumeFirst(1, 2),
+                        Instr::Activate(Due::Before),
+                        Instr::Running("HOLD".into()),
+                        Instr::Terminate,
                     ],
                     spans: vec![
                         at(3, 9),
@@ -980,6 +1070,11 @@ mod tests {
                         at(8, 1),
                         at(8, 9),
                         at(8, 1),
+                        at(9, 1),
+                        at(9, 1),
+                        at(9, 2),
+                        at(9, 3),
+                        at(9, 4),
                     ],
                 },
                 Module {
@@ -1006,6 +1101,7 @@ mod tests {
                     prefix: Some(0),
                     result: Some(1),
                     computes: None,
+                    body: Some("worker".into()),
                     code: vec![Instr::Return],
                     spans: vec![at(10, 1)],
                 },

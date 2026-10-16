@@ -1,0 +1,21 @@
+-- An ACTION resumes a coroutine, which pauses: back in the ACTION, --
+-- which then ends. The coroutine is its own flow of control, not code --
+-- the store calls back. Written for the VM's gate. --
+
+program resumed ;
+begin
+        create "c" ;
+        let "c" ' action := "resume k" ;
+        create "o" [ "c" ], "q" [ "c" ] ;
+        print "done"
+end ;
+
+coroutine k ;
+local
+        i : integer ;
+begin
+        loop for i : 1 to 5 do
+                print "k", i ;
+                pause
+        endloop
+end ;

@@ -1,0 +1,1 @@
+20:9: runtime error: PAUSE where the store calls back: COND, ACTION, rules and computed attributes run to completion

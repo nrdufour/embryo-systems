@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -185,6 +185,7 @@ pub fn run_within(
         processes: Arc::new(Mutex::new(HashMap::new())),
         role: Role::Main,
         statements: Arc::new(AtomicU64::new(0)),
+        calling_back: Arc::new(AtomicUsize::new(0)),
         budget,
     };
     // The interpreter recurses (statements, calls, CONDs and ACTIONs): it
@@ -409,6 +410,9 @@ struct Machine {
     role: Role,
     /// Statements executed, on every thread.
     statements: Arc<AtomicU64>,
+    /// How many callbacks run on this thread: code the store calls back,
+    /// which runs to completion (docs/architecture.md, decision 3).
+    calling_back: Arc<AtomicUsize>,
     /// How many statements the run may execute.
     budget: Option<u64>,
 }
@@ -467,7 +471,7 @@ impl hbds_rules::Host for Engine<'_> {
                 s.premises = Some((1.0, false));
                 s.stamp = None;
             },
-            || self.m.truth(&e, &mut f),
+            || self.m.called_back(|| self.m.truth(&e, &mut f)),
         );
         let (reliability, unknown) = ses.premises.expect("in PREMISES");
         match holds {
@@ -499,7 +503,10 @@ impl hbds_rules::Host for Engine<'_> {
                 s.premises = None;
                 s.stamp = (reliability < 1.0).then_some(reliability);
             },
-            || self.m.run_fragment(&fragment, &mut f),
+            || {
+                self.m
+                    .called_back(|| self.m.run_fragment(&fragment, &mut f))
+            },
         );
         done.map_err(|flow| told(flow, part, what.as_deref()))
     }
@@ -742,6 +749,7 @@ impl Machine {
             let mut machine = self.clone();
             machine.link = Some(link.clone());
             machine.role = Role::Coroutine;
+            machine.calling_back = Arc::new(AtomicUsize::new(0));
             self.coroutines.lock().unwrap().insert(
                 c.name.key.clone(),
                 Coroutine {
@@ -1093,8 +1101,12 @@ impl Machine {
             }
             StmtKind::Return => Err(Flow::Return),
             StmtKind::Reproc => Err(error(s.span, "the meaning of REPROC is not established")),
-            StmtKind::Pause if matches!(self.role, Role::Process(_)) => {
-                Err(error(s.span, "PAUSE in a process: it HOLDs or PASSIVATEs"))
+            StmtKind::Pause if self.link.is_some() => {
+                self.gives_way("PAUSE", s.span)?;
+                if let Role::Process(_) = self.role {
+                    return Err(error(s.span, "PAUSE in a process: it HOLDs or PASSIVATEs"));
+                }
+                self.pause()
             }
             StmtKind::Pause => self.pause(),
             StmtKind::Stop => Err(Flow::Stop),
@@ -1319,6 +1331,7 @@ impl Machine {
                 self.sim_op(s.span, |sim, d| sim.delay(p, dt, d))
             }
             StmtKind::Hold { object, duration } => {
+                self.gives_way("HOLD", s.span)?;
                 let running = self.running(s.span)?;
                 if let Some(o) = object
                     && self.process(o, f, s.span)? != running
@@ -1334,11 +1347,13 @@ impl Machine {
                 self.give_way(s.span)
             }
             StmtKind::Passivate => {
+                self.gives_way("PASSIVATE", s.span)?;
                 self.running(s.span)?;
                 self.sim_op(s.span, |sim, _| sim.passivate())?;
                 self.give_way(s.span)
             }
             StmtKind::Terminate => {
+                self.gives_way("TERMINATE", s.span)?;
                 self.running(s.span)?;
                 self.sim_op(s.span, |sim, _| sim.terminate())?;
                 // The body stops here; its thread ends.
@@ -1786,7 +1801,7 @@ impl Machine {
         };
         if let Some(&i) = self.computed.get(&(fold(&class), fold(name))) {
             let m = &self.program.modules[i];
-            let v = self.call(m, Vec::new(), None, Some(AdtRef::Object(o)))?;
+            let v = self.called_back(|| self.call(m, Vec::new(), None, Some(AdtRef::Object(o))))?;
             return Ok(v.expect("a function's result"));
         }
         if computed {
@@ -1874,6 +1889,29 @@ impl Machine {
         (result, ended)
     }
 
+    /// Code the store calls back, run to completion: no HOLD, PASSIVATE
+    /// nor PAUSE of a coroutine inside it.
+    fn called_back<T>(&self, body: impl FnOnce() -> T) -> T {
+        self.calling_back.fetch_add(1, Ordering::Relaxed);
+        let result = body();
+        self.calling_back.fetch_sub(1, Ordering::Relaxed);
+        result
+    }
+
+    /// Refuses `what` (HOLD, PASSIVATE, TERMINATE, a coroutine's PAUSE)
+    /// in code the store calls back.
+    fn gives_way(&self, what: &str, span: Span) -> Exec<()> {
+        if self.calling_back.load(Ordering::Relaxed) == 0 {
+            return Ok(());
+        }
+        Err(error(
+            span,
+            format!(
+                "{what} where the store calls back: COND, ACTION, rules and computed attributes run to completion"
+            ),
+        ))
+    }
+
     /// A property's code, ADT'81's and parsed, or what is wrong with it.
     fn part(&self, part: &str, code: &Code, what: &str) -> Result<Part, String> {
         if code.language != LANGUAGE {
@@ -1897,7 +1935,10 @@ impl Machine {
             this: Some(this),
             ..Frame::default()
         };
-        let (holds, _) = self.with_ses(|s| s.premises = None, || self.truth(&e, &mut f));
+        let (holds, _) = self.with_ses(
+            |s| s.premises = None,
+            || self.called_back(|| self.truth(&e, &mut f)),
+        );
         holds.map_err(|flow| within(flow, kind, &what, span))
     }
 
@@ -2079,6 +2120,7 @@ impl Machine {
             let mut machine = self.clone();
             machine.link = Some(link.clone());
             machine.role = Role::Process(p);
+            machine.calling_back = Arc::new(AtomicUsize::new(0));
             self.processes.lock().unwrap().insert(
                 p,
                 Coroutine {
@@ -2238,7 +2280,7 @@ impl Machine {
                     _ => return Err(error(span, format!("the COND of {what} does not parse"))),
                 };
                 let holds = self
-                    .truth(&value, &mut inner)
+                    .called_back(|| self.truth(&value, &mut inner))
                     .map_err(|flow| within(flow, "COND", &what, span))?;
                 if !holds {
                     return Err(error(
@@ -2252,7 +2294,7 @@ impl Machine {
                 let fragment = lower::parse_fragment(&code.text).map_err(|e| {
                     error(span, format!("the ACTION of {what} does not parse: {e}"))
                 })?;
-                self.run_fragment(&fragment, &mut inner)
+                self.called_back(|| self.run_fragment(&fragment, &mut inner))
                     .map_err(|flow| within(flow, "ACTION", &what, span))?;
             }
         }
