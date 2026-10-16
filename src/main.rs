@@ -2,6 +2,8 @@ use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
+mod build;
+
 use adt81::compile::{Adt81, compile};
 use adt81::diagnostic::Severity;
 use adt81::{interp, lexer, lower, parser};
@@ -14,6 +16,8 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems check FILE
        embryo-systems run [--store DIR] [--reference] FILE
        embryo-systems acode FILE
+       embryo-systems exec [--store DIR] FILE
+       embryo-systems build FILE -o OUT
        embryo-systems store DIR
 
 FILE - reads standard input, but for run. parse prints the syntax tree,
@@ -24,7 +28,9 @@ READ reads standard input, PRINT writes standard output; its classes and
 objects last the run, or go in the store in DIR, created if need be. It
 runs compiled to A-code, on the VM; --reference runs it on the
 interpreter, the VM's specification. acode prints a program compiled to
-A-code. store prints what the store in DIR holds.";
+A-code, an .acode file's contents; exec runs one, as run does. build
+writes OUT, an executable that runs the program, OUT [--store DIR]. store
+prints what the store in DIR holds.";
 
 /// READ on standard input, PRINT on standard output.
 struct Terminal;
@@ -74,9 +80,90 @@ fn open_store(dir: Option<&str>) -> Result<Store, String> {
     Ok(store)
 }
 
+/// Runs `unit` on the VM, on the store in `dir` or one for the run;
+/// `what` names it in errors.
+fn exec(unit: &hbds_acode::Unit, dir: Option<&str>, what: &str) -> bool {
+    // The language that compiles the code the store keeps: ADT'81 the
+    // only one yet.
+    if unit.language != hbds_acode::Language::name(&Adt81) {
+        eprintln!(
+            "{what}: A-code in {}, a language this embryo-systems does not have",
+            unit.language
+        );
+        return false;
+    }
+    let mut store = match open_store(dir) {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("{e}");
+            return false;
+        }
+    };
+    match hbds_vm::run(unit, &mut store, &mut Terminal, &Adt81, None) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("{what}:{e}");
+            false
+        }
+    }
+}
+
+/// The A-code in `text`, run on the VM.
+fn exec_text(text: &str, dir: Option<&str>, what: &str) -> ExitCode {
+    let ok = match hbds_acode::Unit::read(text) {
+        Ok(unit) => exec(&unit, dir, what),
+        Err(e) => {
+            eprintln!("{what}: {e}");
+            false
+        }
+    };
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    // A built program is the program, not the command.
+    match build::carried() {
+        Ok(Some(text)) => {
+            let me = std::env::args().next().unwrap_or_default();
+            return match args.as_slice() {
+                [] => exec_text(&text, None, &me),
+                ["--store", dir] => exec_text(&text, Some(dir), &me),
+                _ => {
+                    eprintln!("usage: {me} [--store DIR]");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    }
+    let exec_args = match args.as_slice() {
+        ["exec", "--store", dir, path] => Some((Some(*dir), *path)),
+        ["exec", path] => Some((None, *path)),
+        _ => None,
+    };
+    if let Some((dir, path)) = exec_args {
+        return match std::fs::read_to_string(path) {
+            Ok(text) => exec_text(&text, dir, path),
+            Err(e) => {
+                eprintln!("{path}: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let (args, out) = match args.as_slice() {
+        ["build", path, "-o", out] => (vec!["build", *path], Some(*out)),
+        _ => (args.clone(), None),
+    };
     if let ["store", dir] = args.as_slice() {
         if !std::path::Path::new(dir).join("journal").exists() {
             eprintln!("{dir}: no store here");
@@ -107,6 +194,7 @@ fn main() -> ExitCode {
     };
     let (command, fragment, path) = match args.as_slice() {
         [command @ ("lex" | "check" | "acode"), path] => (*command, false, *path),
+        ["build", path] if *path != "-" && out.is_some() => ("build", false, *path),
         ["run", path] if *path != "-" => ("run", false, *path),
         [command @ ("parse" | "fmt"), "--program", path] | [command @ ("parse" | "fmt"), path] => {
             (*command, false, *path)
@@ -161,21 +249,7 @@ fn main() -> ExitCode {
                 return false;
             }
             if vm {
-                let unit = compile(&program);
-                let mut store = match open_store(store_dir) {
-                    Ok(store) => store,
-                    Err(e) => {
-                        eprintln!("{e}");
-                        return false;
-                    }
-                };
-                return match hbds_vm::run(&unit, &mut store, &mut Terminal, &Adt81, None) {
-                    Ok(_) => true,
-                    Err(e) => {
-                        eprintln!("{path}:{e}");
-                        false
-                    }
-                };
+                return exec(&compile(&program), store_dir, path);
             }
             let store = match open_store(store_dir) {
                 Ok(store) => Arc::new(Mutex::new(store)),
@@ -192,7 +266,7 @@ fn main() -> ExitCode {
                 }
             }
         })
-    } else if command == "acode" {
+    } else if command == "acode" || command == "build" {
         lower::parse_program(&source).map(|program| {
             let diagnostics = adt81::check(&program);
             for d in &diagnostics {
@@ -201,8 +275,18 @@ fn main() -> ExitCode {
             if diagnostics.iter().any(|d| d.severity == Severity::Error) {
                 return false;
             }
-            print!("{}", compile(&program).text());
-            true
+            let text = compile(&program).text();
+            let Some(out) = out else {
+                print!("{text}");
+                return true;
+            };
+            match build::write(std::path::Path::new(out), &text) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!("{out}: {e}");
+                    false
+                }
+            }
         })
     } else if command == "fmt" && fragment {
         lower::parse_fragment(&source)

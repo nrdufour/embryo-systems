@@ -46,6 +46,9 @@ pub struct Span {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unit {
+    /// The language its code is in, as the store records it beside code
+    /// (`ADT'81`): it also compiles the code the store keeps.
+    pub language: String,
     pub modules: Vec<Module>,
 }
 
@@ -837,6 +840,7 @@ impl Unit {
     pub fn text(&self) -> String {
         use terms::{text, word};
         let mut out = format!("acode {VERSION}\n");
+        writeln!(out, "{}", line(&[word("language"), text(&self.language)])).unwrap();
         for m in &self.modules {
             let header = [
                 word("module"),
@@ -893,6 +897,12 @@ impl Unit {
                 "A-code version {version} is newer than this reader's, {VERSION}"
             )));
         }
+        let (n, second) = lines.next().ok_or_else(|| Error("no A-code here".into()))?;
+        let terms = terms::read_terms(second.trim()).map_err(|e| fail(n, e))?;
+        let language = match terms.as_slice() {
+            [Term::Word(w), Term::Text(l)] if w == "language" => l.clone(),
+            _ => return Err(fail(n, "a `language \"NAME\"` line expected".into())),
+        };
         let mut modules: Vec<Module> = Vec::new();
         for (n, l) in lines {
             let terms = terms::read_terms(l.trim()).map_err(|e| fail(n, e))?;
@@ -983,7 +993,7 @@ impl Unit {
                 }
             }
         }
-        Ok(Unit { modules })
+        Ok(Unit { language, modules })
     }
 }
 
@@ -995,6 +1005,7 @@ mod tests {
     fn sample() -> Unit {
         let at = |line, column| Span { line, column };
         Unit {
+            language: "ADT'81".into(),
             modules: vec![
                 Module {
                     name: "P".into(),
@@ -1125,6 +1136,13 @@ mod tests {
                 "A-code version 2 is newer than this reader's, 1".into()
             ))
         );
+    }
+
+    #[test]
+    fn a_unit_says_its_language() {
+        let text = sample().text().replacen("language \"ADT'81\"\n", "", 1);
+        let e = Unit::read(&text).unwrap_err().0;
+        assert!(e.contains("a `language \"NAME\"` line expected"), "{e}");
     }
 
     #[test]

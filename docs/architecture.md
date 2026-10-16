@@ -331,6 +331,18 @@ well (two doors). Who may change which a.d.t. is for later, near NINJAS
 Not chosen: `.acode` alone (needs embryo-systems installed); native code
 first; only the engines a program uses (a runtime per combination).
 
+As built (2026-10-16, step 5): the runtime is embryo-systems' own
+binary, which the VM needs whole anyway, its language compiling the code
+a store keeps. `build FILE -o OUT` writes that binary, the A-code's text,
+its length and a magic; a binary that ends so runs what it carries,
+`OUT [--store DIR]`, and is not the command. An `.acode` file is the
+text form, `acode 1`, which now names its language; `exec [--store DIR]
+FILE` runs one, refusing a newer version or a language it does not have.
+Embedded only: `--connect` waits for the daemon, and other platforms
+(`build --target`, aarch64, WASM) for runtimes the flake builds.
+`tests/cli.rs` runs what `acode` writes and what `build` writes, copied
+elsewhere.
+
 ### 10. Versions: read older, refuse newer; modules side by side
 
 - **Every format carries its version**: the journal, A-code, saved
