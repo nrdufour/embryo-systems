@@ -38,7 +38,9 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (its operators mapped onto HBDS's operations, math functions, what an unknown name means); it wires the engines together | the engines |
 | `hbds-acode` | A-code, HBDS's machine code: the format, its version, its text form, and what a unit asks of its language | core, values |
 | `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation |
-| `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal, acode, vm |
+| `hbds-http` | the daemon's wire: HTTP/1.1, WebSocket, JSON | none |
+| `hbds-daemon` | the daemon: the executor owning the store, clients' sessions in turns over a Unix socket, and the client side; no language of its own | acode, gtad, http, vm |
+| `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal, acode, vm, daemon |
 | `embryo-systems-bench` | the benchmarks, `just bench`: the programs of `bench/scenarios` on a ladder of sizes, by the reference and the VM, against `bench/work.txt` and `bench/<host>.txt` | adt81, gtad, vm |
 
 The rules: an engine depends on the core and on as few engines as it

@@ -1,0 +1,10 @@
+[package]
+name = "hbds-http"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The daemon's wire (docs/architecture.md, decision 8): HTTP/1.1,
+# WebSocket and JSON, written here. No dependency.
+[dependencies]

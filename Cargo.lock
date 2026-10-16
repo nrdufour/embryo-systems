@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "adt81",
  "hbds-acode",
+ "hbds-daemon",
  "hbds-gtad",
  "hbds-journal",
  "hbds-vm",
@@ -50,6 +51,16 @@ name = "hbds-core"
 version = "0.1.0"
 
 [[package]]
+name = "hbds-daemon"
+version = "0.1.0"
+dependencies = [
+ "hbds-acode",
+ "hbds-gtad",
+ "hbds-http",
+ "hbds-vm",
+]
+
+[[package]]
 name = "hbds-functors"
 version = "0.1.0"
 dependencies = [
@@ -64,6 +75,10 @@ dependencies = [
  "hbds-core",
  "hbds-maps",
 ]
+
+[[package]]
+name = "hbds-http"
+version = "0.1.0"
 
 [[package]]
 name = "hbds-journal"

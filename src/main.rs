@@ -14,10 +14,11 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems parse [--program | --fragment] FILE
        embryo-systems fmt [--program | --fragment] FILE
        embryo-systems check FILE
-       embryo-systems run [--store DIR] [--reference] FILE
+       embryo-systems run [--store DIR | --connect SOCKET] [--reference] FILE
        embryo-systems acode FILE
-       embryo-systems exec [--store DIR] FILE
+       embryo-systems exec [--store DIR | --connect SOCKET] FILE
        embryo-systems build FILE -o OUT
+       embryo-systems daemon --socket SOCKET [--store DIR] [--slice N]
        embryo-systems store DIR
 
 FILE - reads standard input, but for run. parse prints the syntax tree,
@@ -29,8 +30,10 @@ objects last the run, or go in the store in DIR, created if need be. It
 runs compiled to A-code, on the VM; --reference runs it on the
 interpreter, the VM's specification. acode prints a program compiled to
 A-code, an .acode file's contents; exec runs one, as run does. build
-writes OUT, an executable that runs the program, OUT [--store DIR]. store
-prints what the store in DIR holds.";
+writes OUT, an executable that runs the program, OUT [--store DIR |
+--connect SOCKET]. daemon serves the store in DIR, or one for its life,
+on SOCKET: --connect runs a program there, its clients taking turns of N
+instructions (10000). store prints what the store in DIR holds.";
 
 /// READ on standard input, PRINT on standard output.
 struct Terminal;
@@ -108,6 +111,31 @@ fn exec(unit: &hbds_acode::Unit, dir: Option<&str>, what: &str) -> bool {
     }
 }
 
+/// ADT'81, lent to the daemon for the code its store keeps.
+static ADT81: Adt81 = Adt81;
+
+/// The A-code in `text`, run as a session of the daemon at `socket`.
+fn remote(text: &str, socket: &str, what: &str) -> ExitCode {
+    let stdin = std::io::stdin();
+    let r = hbds_daemon::client::run(
+        std::path::Path::new(socket),
+        text,
+        &mut std::io::stdout(),
+        &mut stdin.lock(),
+    );
+    match r {
+        Ok(None) => ExitCode::SUCCESS,
+        Ok(Some(e)) => {
+            eprintln!("{what}:{e}");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// The A-code in `text`, run on the VM.
 fn exec_text(text: &str, dir: Option<&str>, what: &str) -> ExitCode {
     let ok = match hbds_acode::Unit::read(text) {
@@ -124,6 +152,43 @@ fn exec_text(text: &str, dir: Option<&str>, what: &str) -> ExitCode {
     }
 }
 
+/// `daemon --socket SOCKET [--store DIR] [--slice N]`.
+fn daemon(args: &[&str]) -> ExitCode {
+    let usage = || {
+        eprintln!("{USAGE}");
+        ExitCode::FAILURE
+    };
+    let (mut socket, mut dir, mut slice) = (None, None, 10_000);
+    for pair in args.chunks(2) {
+        match pair {
+            ["--socket", s] => socket = Some(*s),
+            ["--store", d] => dir = Some(*d),
+            ["--slice", n] => match n.parse::<u64>() {
+                Ok(n) if n > 0 => slice = n,
+                _ => return usage(),
+            },
+            _ => return usage(),
+        }
+    }
+    let Some(socket) = socket else {
+        return usage();
+    };
+    let store = match open_store(dir) {
+        Ok(store) => store,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match hbds_daemon::serve(store, std::path::Path::new(socket), &ADT81, slice) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -134,8 +199,9 @@ fn main() -> ExitCode {
             return match args.as_slice() {
                 [] => exec_text(&text, None, &me),
                 ["--store", dir] => exec_text(&text, Some(dir), &me),
+                ["--connect", socket] => remote(&text, socket, &me),
                 _ => {
-                    eprintln!("usage: {me} [--store DIR]");
+                    eprintln!("usage: {me} [--store DIR | --connect SOCKET]");
                     ExitCode::FAILURE
                 }
             };
@@ -146,6 +212,26 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+    if let ["daemon", rest @ ..] = args.as_slice() {
+        return daemon(rest);
+    }
+    if let ["exec", "--connect", socket, path] = args.as_slice() {
+        return match std::fs::read_to_string(path) {
+            Ok(text) => remote(&text, socket, path),
+            Err(e) => {
+                eprintln!("{path}: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let (args, connect) = match args.as_slice() {
+        ["run", "--connect", socket, rest @ ..] => {
+            let mut a = vec!["run"];
+            a.extend(rest);
+            (a, Some(*socket))
+        }
+        _ => (args.clone(), None),
+    };
     let exec_args = match args.as_slice() {
         ["exec", "--store", dir, path] => Some((Some(*dir), *path)),
         ["exec", path] => Some((None, *path)),
@@ -247,6 +333,13 @@ fn main() -> ExitCode {
             }
             if diagnostics.iter().any(|d| d.severity == Severity::Error) {
                 return false;
+            }
+            if let Some(socket) = connect {
+                if !vm {
+                    eprintln!("{path}: --reference runs here, not in a daemon");
+                    return false;
+                }
+                return remote(&compile(&program).text(), socket, path) == ExitCode::SUCCESS;
             }
             if vm {
                 return exec(&compile(&program), store_dir, path);
