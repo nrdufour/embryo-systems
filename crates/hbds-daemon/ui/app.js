@@ -162,6 +162,54 @@ $("pace").addEventListener("submit", async (e) => {
   if (r.ok) showPace(await r.json());
 });
 
+// The REPL: an entry, statements, compiled by the daemon's language and
+// run as a session of its own; what it prints, and how it ends.
+
+function run(source) {
+  const li = el("li");
+  li.append(el("div", "source", source));
+  const out = el("div", "output");
+  li.append(out);
+  $("entries").prepend(li);
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${scheme}://${location.host}/session`);
+  ws.addEventListener("open", () => ws.send(JSON.stringify({ source })));
+  ws.addEventListener("message", (m) => {
+    const f = JSON.parse(m.data);
+    if ("output" in f) out.textContent += f.output;
+    // An entry has nothing to read from: its input ends at once.
+    if ("input?" in f) ws.send(JSON.stringify({ eof: true }));
+    if ("end" in f) {
+      if (f.end !== null) li.append(el("div", "error", f.end));
+      ws.close();
+    }
+  });
+}
+
+$("repl").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const source = $("repl-source").value.trim();
+  if (source) run(source);
+});
+
+$("repl-source").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    $("repl").requestSubmit();
+  }
+});
+
+// Rules firing: each CHAV or HYPOCHAV run, newest first.
+
+function rules(r) {
+  const who = "session" in r ? `session ${r.session}` : "process" in r ? `process ${r.process}` : "";
+  const li = el("li");
+  li.append(el("div", null, `${r.engine} by ${who}: ${r.tried.length} tried`));
+  li.append(el("div", "fired", r.fired.length ? `fired: ${r.fired.join(", ")}` : "none fired"));
+  $("rules").prepend(li);
+  while ($("rules").children.length > TAIL) $("rules").lastChild.remove();
+}
+
 // The feed
 
 const refreshSchema = later(() => schema().catch(console.error), 200);
@@ -189,6 +237,8 @@ function frame(f) {
     refreshTime();
   } else if ("pace" in f) {
     showPace(f.pace);
+  } else if ("rules" in f) {
+    rules(f.rules);
   }
 }
 

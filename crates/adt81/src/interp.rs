@@ -572,27 +572,7 @@ impl Machine {
                 .insert(n.key.clone(), slot(None, Typed::of(returns), false));
         }
         for d in &m.locals {
-            let ty = Typed::of(&d.ty);
-            let init = match &d.init {
-                Some(Init::Initial(c) | Init::Constant(c)) => {
-                    Some(at(value::convert(constant(c), &ty.ty), d.span)?)
-                }
-                None => None,
-            };
-            let constant = matches!(d.init, Some(Init::Constant(_)));
-            for n in &d.names {
-                let value = match &d.ty {
-                    DataType::Array { shape, element, .. } => {
-                        let element = Typed::of_scalar(element).ty;
-                        let fill = init.clone().unwrap_or_else(|| value::zero(&element));
-                        Some(self.array(shape, fill, &f, n.span)?)
-                    }
-                    DataType::List(_) => Some(Value::List(List::new(Vec::new()))),
-                    _ => init.clone(),
-                };
-                f.vars
-                    .insert(n.key.clone(), slot(value, ty.clone(), constant));
-            }
+            self.local(d, &mut f)?;
         }
         if let (
             ModuleKind::Functor {
@@ -2316,17 +2296,37 @@ impl Machine {
     }
 
     /// An ACTION's statements, its declarations its own locals.
+    /// A local variable, its initial value or constant set, an array
+    /// filled, a list empty: a module's, or an ACTION's.
+    fn local(&self, d: &Declaration, f: &mut Frame) -> Exec<()> {
+        let ty = Typed::of(&d.ty);
+        let init = match &d.init {
+            Some(Init::Initial(c) | Init::Constant(c)) => {
+                Some(at(value::convert(constant(c), &ty.ty), d.span)?)
+            }
+            None => None,
+        };
+        let constant = matches!(d.init, Some(Init::Constant(_)));
+        for n in &d.names {
+            let value = match &d.ty {
+                DataType::Array { shape, element, .. } => {
+                    let element = Typed::of_scalar(element).ty;
+                    let fill = init.clone().unwrap_or_else(|| value::zero(&element));
+                    Some(self.array(shape, fill, f, n.span)?)
+                }
+                DataType::List(_) => Some(Value::List(List::new(Vec::new()))),
+                _ => init.clone(),
+            };
+            f.vars
+                .insert(n.key.clone(), slot(value, ty.clone(), constant));
+        }
+        Ok(())
+    }
+
     fn run_fragment(&self, fragment: &Fragment, f: &mut Frame) -> Exec<()> {
         for item in &fragment.items {
             match item {
-                Item::Local(d) => {
-                    let ty = Typed::of(&d.ty);
-                    for n in &d.names {
-                        let value = matches!(d.ty, DataType::List(_))
-                            .then(|| Value::List(List::new(Vec::new())));
-                        f.vars.insert(n.key.clone(), slot(value, ty.clone(), false));
-                    }
-                }
+                Item::Local(d) => self.local(d, f)?,
                 Item::Parameter(p) => {
                     return Err(error(p.span, "an ACTION has no parameters"));
                 }

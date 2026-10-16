@@ -78,6 +78,11 @@ impl Language for Adt81 {
                 Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),
                 Err(e) => Err(format!("the ACTION of {what} does not parse: {e}")),
             },
+            // An entry of the daemon's REPL: statements, as an ACTION's.
+            "REPL" => match lower::parse_fragment(text) {
+                Ok(f) => Ok(Compiler::new(&callees).fragment(part, &f)),
+                Err(e) => Err(format!("this does not parse: {e}")),
+            },
             part => match uses::parse(part, text) {
                 Ok(Part::Expr(e)) => Ok(Compiler::new(&callees).expression(part, &e)),
                 Ok(Part::Stmts(f)) => Ok(Compiler::new(&callees).fragment(part, &f)),
@@ -313,17 +318,7 @@ impl<'p> Compiler<'p> {
     fn fragment(mut self, part: &str, f: &Fragment) -> AModule {
         for item in &f.items {
             match item {
-                Item::Local(d) => {
-                    let ty = Typed::of(&d.ty);
-                    for n in &d.names {
-                        let s = self.declare(n, &ty.ty, false);
-                        if matches!(d.ty, DataType::List(_)) {
-                            let empty = Value::List(value::List::new(Vec::new()));
-                            self.emit(Instr::Const(empty), n.span);
-                            self.emit(Instr::Init(s), n.span);
-                        }
-                    }
-                }
+                Item::Local(d) => self.local(d),
                 Item::Parameter(p) => self.fail(p.span, "an ACTION has no parameters"),
                 Item::Stmt(s) => self.stmt(s),
             }

@@ -45,6 +45,10 @@ pub trait Io: Send {
     /// The kernel runs `process` for `owner`, the agent that activated
     /// it: what it writes may go there.
     fn running(&mut self, _process: Agent, _owner: Option<Agent>) {}
+
+    /// CHAV or HYPOCHAV has run: the rules it tried and those that
+    /// fired, named as PRINT names them.
+    fn rules(&mut self, _engine: &str, _tried: &[String], _fired: &[String]) {}
 }
 
 /// `line:column: runtime error: message`, as the reference writes it.
@@ -2457,10 +2461,17 @@ impl<'r> Vm<'r> {
                     text: self.pop_text(),
                 });
                 let mut engine = Engine { vm: self };
-                match &hypotheses {
-                    Some(h) => hbds_rules::hypochav(&mut engine, h, &scope)?,
-                    None => hbds_rules::chav(&mut engine, &scope)?,
+                let (name, run) = match &hypotheses {
+                    Some(h) => ("HYPOCHAV", hbds_rules::hypochav(&mut engine, h, &scope)?),
+                    None => ("CHAV", hbds_rules::chav(&mut engine, &scope)?),
                 };
+                let names = |rules: &[Id]| -> Vec<String> {
+                    (rules.iter())
+                        .map(|&r| self.store.describe(AdtRef::Object(r)))
+                        .collect()
+                };
+                let (tried, fired) = (names(&run.tried), names(&run.fired));
+                self.io.rules(name, &tried, &fired);
             }
         }
         Ok(Next::Go)
