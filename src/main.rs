@@ -19,6 +19,7 @@ const USAGE: &str = "usage: embryo-systems lex FILE
        embryo-systems exec [--store DIR | --connect SOCKET] FILE
        embryo-systems build FILE -o OUT
        embryo-systems daemon --socket SOCKET [--store DIR] [--slice N] [--compact-at N]
+                             [--pace paused | fast [--horizon T] | real [--factor F]]
        embryo-systems store DIR
        embryo-systems compact DIR
 
@@ -36,6 +37,9 @@ writes OUT, an executable that runs the program, OUT [--store DIR |
 on SOCKET: --connect runs a program there, its clients taking turns of N
 instructions (10000); its journal syncs what comes together, and is
 compacted once past N lines (10000) and twice what compaction leaves.
+Its store's time is one, the kernel's, which moves at the pace: paused
+(the default), as fast as it can up to T, or real time times F; POST
+/pace changes it, GET /time shows it.
 store prints what the store in DIR holds; compact rewrites its journal
 as the shortest that rebuilds it.";
 
@@ -167,7 +171,10 @@ fn daemon(args: &[&str]) -> ExitCode {
     let mut pace = hbds_daemon::Pace {
         slice: 10_000,
         compact_at: 10_000,
+        clock: hbds_daemon::Clock::Paused,
     };
+    let (mut clock, mut horizon, mut factor) = ("paused", None, None);
+    let real = |n: &str| n.parse::<f64>().ok().filter(|x| x.is_finite());
     let mut delay = 0;
     for pair in args.chunks(2) {
         match pair {
@@ -177,6 +184,9 @@ fn daemon(args: &[&str]) -> ExitCode {
             ["--compact-at", n] if number(n).is_some() => {
                 pace.compact_at = number(n).expect("checked")
             }
+            ["--pace", c @ ("paused" | "fast" | "real")] => clock = c,
+            ["--horizon", t] if real(t).is_some() => horizon = real(t),
+            ["--factor", f] if real(f).is_some_and(|f| f > 0.0) => factor = real(f),
             // Slows each sync of the journal: for tests.
             ["--sync-delay", ms] if ms.parse::<u64>().is_ok() => {
                 delay = ms.parse().expect("checked")
@@ -186,6 +196,11 @@ fn daemon(args: &[&str]) -> ExitCode {
     }
     let Some(socket) = socket else {
         return usage();
+    };
+    pace.clock = match clock {
+        "fast" => hbds_daemon::Clock::Fast(horizon.unwrap_or(f64::INFINITY)),
+        "real" => hbds_daemon::Clock::Real(factor.unwrap_or(1.0)),
+        _ => hbds_daemon::Clock::Paused,
     };
     let opened = match dir {
         None => Ok((Store::memory(), None, Vec::new())),

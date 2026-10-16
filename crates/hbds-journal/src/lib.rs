@@ -529,6 +529,7 @@ fn encode(change: &Change) -> String {
             text(language),
             text(t),
         ],
+        Change::Module { hash, text: t } => vec![word("module"), text(hash), text(t)],
     };
     let mut out = String::new();
     for (i, t) in terms.iter().enumerate() {
@@ -638,6 +639,10 @@ fn decode(line: &str) -> Result<Change, String> {
             target: r.adt_ref()?,
             name: r.text()?,
             language: r.text()?,
+            text: r.text()?,
+        },
+        "module" => Change::Module {
+            hash: r.text()?,
             text: r.text()?,
         },
         w => return Err(format!("{w:?} is not a change")),
@@ -832,6 +837,10 @@ mod tests {
                 name: "COND".into(),
                 language: "ADT'81".into(),
                 text: "THIS . \"temp\" > 0.".into(),
+            },
+            Change::Module {
+                hash: "a9993e36".into(),
+                text: "acode 1\nlanguage \"ADT'81\"\n".into(),
             },
         ];
         for c in changes {

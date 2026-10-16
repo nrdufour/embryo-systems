@@ -231,6 +231,10 @@ The ten parameters page 106 asks the algorithm to take into account:
 
 ## Simulation
 
+In the daemon (docs/architecture.md, decision 6) the store has one
+sequencing set, a kernel driving it at a pace set live; a client takes
+part once it acts on time, and its processes outlive it.
+
 The discrete simulation engine (project 17, pages 112 to 115 and 125),
 SIMULA 67's, which the print names: processes are objects of classes
 included in the system hyperclass PROCESS, created the first time a

@@ -18,8 +18,9 @@ struct Daemon {
 }
 
 impl Daemon {
+    /// Time as fast as it goes, as a standalone run's.
     fn start(name: &str) -> Daemon {
-        Daemon::with(name, &[])
+        Daemon::with(name, &["--pace", "fast"])
     }
 
     /// A daemon with more arguments: a store, the journal's pace.
@@ -194,10 +195,13 @@ fn the_store_is_the_daemons() {
     assert!(daemon.client(&keeps).status().unwrap().success());
     let out = daemon.client(&finds).output().unwrap();
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "7\n");
-    assert_eq!(
-        daemon.get("/store"),
-        "class c\n  attribute a\n  object o\n    a = 7\n"
+    // The model, then the modules the two clients brought, kept by hash.
+    let dump = daemon.get("/store");
+    assert!(
+        dump.starts_with("class c\n  attribute a\n  object o\n    a = 7\nmodule "),
+        "{dump}"
     );
+    assert_eq!(dump.matches("module ").count(), 2, "{dump}");
     // An .acode file and a built program connect too.
     let acode = write("daemon-store", "finds.acode", "");
     let text = Command::new(BIN)
@@ -253,7 +257,8 @@ fn a_client_hears_nothing_before_its_sync() {
     );
     let journal = daemon.get("/journal");
     assert!(
-        journal.contains("\"submitted\":1,\"synced\":1"),
+        // The unit kept, then the class.
+        journal.contains("\"submitted\":2,\"synced\":2"),
         "{journal}"
     );
 }
@@ -300,4 +305,180 @@ fn the_journal_compacts_and_survives_a_kill() {
     let daemon = Daemon::with("compact", &["--store", &dir]);
     let out = daemon.client(&finds).output().unwrap();
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "300\n");
+}
+
+/// A client's output, failing the test if it runs past `secs`.
+fn within(mut child: Child, secs: u64) -> String {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            let mut out = String::new();
+            child
+                .stdout
+                .take()
+                .unwrap()
+                .read_to_string(&mut out)
+                .unwrap();
+            let mut err = String::new();
+            child
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_string(&mut err)
+                .unwrap();
+            assert!(status.success(), "{out}{err}");
+            return out;
+        }
+        if start.elapsed() > Duration::from_secs(secs) {
+            let _ = child.kill();
+            panic!("the client is still running after {secs} s");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn spawn(mut c: Command) -> Child {
+    c.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
+}
+
+impl Daemon {
+    fn post(&self, path: &str, body: &str) -> String {
+        let mut s = UnixStream::connect(&self.socket).unwrap();
+        write!(
+            s,
+            "POST {path} HTTP/1.1\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut text = String::new();
+        s.read_to_string(&mut text).unwrap();
+        text.split_once("\r\n\r\n").unwrap().1.to_string()
+    }
+
+    /// The store's time, `GET /time`'s `now`.
+    fn now(&self) -> f64 {
+        let t = self.get("/time");
+        let at = t.find("\"now\":").expect("now") + "\"now\":".len();
+        let n: String = t[at..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == 'e')
+            .collect();
+        n.parse().unwrap_or_else(|_| panic!("{t}"))
+    }
+}
+
+/// A process class "w" whose body, a loop, sets THIS's "v" to `version`
+/// and holds for 1, and `start` with objects `objects` activated.
+fn simulation(version: u32, objects: &[&str]) -> String {
+    let mut s = String::from("program start ;\nbegin\n");
+    if version == 1 {
+        s += "        create \"w\" ; include \"w\" into \"process\" ; create \"w\" . \"v\" ;\n";
+    }
+    for o in objects {
+        s += &format!("        create \"{o}\" [ \"w\" ] ;\n        activate \"{o}\" [ \"w\" ] ;\n");
+    }
+    s += "        print \"started\"\nend ;\n\n";
+    s += &format!(
+        "coroutine \"w\" ;\nbegin\n        loop while true do\n                let this . \"v\" := {version} ;\n                hold for 1\n        endloop\nend ;\n"
+    );
+    s
+}
+
+#[test]
+fn processes_outlive_their_client() {
+    let daemon = Daemon::start("outlive");
+    let start = write("daemon-outlive", "start.adt", &simulation(1, &["w1"]));
+    assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+    // Gone, its client; the process runs on, in the store's time.
+    let t = Instant::now();
+    while daemon.now() < 50.0 {
+        assert!(t.elapsed() < Duration::from_secs(20), "time stands still");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let reads = write(
+        "daemon-outlive",
+        "reads.adt",
+        // In time first, so as to read the process between its holds.
+        "program reads ;\nbegin\n        hold for 0 ;\n        print \"w1\" [ \"w\" ] . \"state\", \"w1\" [ \"w\" ] . \"v\", time > 49\nend ;\n",
+    );
+    assert_eq!(within(spawn(daemon.client(&reads)), 20), "HOLD 1 TRUE\n");
+}
+
+#[test]
+fn a_hold_waits_for_the_pace() {
+    let daemon = Daemon::with("paced", &["--pace", "paused"]);
+    let holds = write(
+        "daemon-paced",
+        "holds.adt",
+        "program holds ;\nbegin\n        print \"before\" ;\n        hold for 5 ;\n        print \"after\", time\nend ;\n",
+    );
+    let client = spawn(daemon.client(&holds));
+    // Paused: the client waits in the set.
+    let t = Instant::now();
+    while !daemon.get("/time").contains("client") {
+        assert!(
+            t.elapsed() < Duration::from_secs(20),
+            "{}",
+            daemon.get("/time")
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(daemon.get("/time").contains("client"), "it went on, paused");
+    assert_eq!(
+        daemon.post("/pace", "{\"pace\": \"fast\"}"),
+        "{\"pace\":\"fast\"}\n"
+    );
+    assert_eq!(within(client, 20), "before\nafter 5.0\n");
+}
+
+#[test]
+fn a_step_moves_one_event() {
+    let daemon = Daemon::with("step", &["--pace", "paused"]);
+    let start = write("daemon-step", "start.adt", &simulation(1, &["w1"]));
+    assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+    assert_eq!(daemon.now(), 0.0);
+    for expected in [0.0, 1.0, 2.0] {
+        daemon.post("/pace", "{\"pace\": \"step\"}");
+        let t = Instant::now();
+        while !daemon.get("/pace").contains("paused") {
+            assert!(
+                t.elapsed() < Duration::from_secs(20),
+                "{}",
+                daemon.get("/pace")
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(daemon.now(), expected);
+    }
+}
+
+#[test]
+fn real_time_moves_with_the_clock() {
+    let daemon = Daemon::with("real", &["--pace", "real", "--factor", "1000"]);
+    let start = write("daemon-real", "start.adt", &simulation(1, &["w1"]));
+    assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+    std::thread::sleep(Duration::from_millis(300));
+    let now = daemon.now();
+    // 0.3 s at a thousand times: about 300, never ahead of the clock.
+    assert!((100.0..=1000.0).contains(&now), "{now}");
+}
+
+#[test]
+fn a_new_body_serves_new_activations() {
+    let daemon = Daemon::start("versions");
+    let first = write("daemon-versions", "first.adt", &simulation(1, &["w1"]));
+    assert_eq!(within(spawn(daemon.client(&first)), 20), "started\n");
+    let second = write("daemon-versions", "second.adt", &simulation(2, &["w2"]));
+    assert_eq!(within(spawn(daemon.client(&second)), 20), "started\n");
+    // The first process finishes in the body it started in.
+    let reads = write(
+        "daemon-versions",
+        "reads.adt",
+        "program reads ;\nbegin\n        hold for 3 ;\n        print \"w1\" [ \"w\" ] . \"v\", \"w2\" [ \"w\" ] . \"v\"\nend ;\n",
+    );
+    assert_eq!(within(spawn(daemon.client(&reads)), 20), "1 2\n");
 }

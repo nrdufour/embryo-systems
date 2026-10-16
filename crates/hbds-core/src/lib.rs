@@ -5,6 +5,7 @@
 
 use std::fmt;
 
+pub mod sha1;
 pub mod spec;
 pub mod terms;
 pub mod value;

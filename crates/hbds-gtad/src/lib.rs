@@ -198,6 +198,12 @@ pub enum Change {
         language: String,
         text: String,
     },
+    /// An A-code unit the store keeps, named by its text's hash
+    /// (docs/architecture.md, decisions 1 and 10).
+    Module {
+        hash: String,
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -224,6 +230,8 @@ pub struct Store {
     class_links: PMap<Id, ClassLink>,
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
+    /// The modules kept, by hash, in the order they came.
+    modules: Vec<(String, String)>,
     ix: Indexes,
     recorder: Option<Box<dyn Recorder>>,
     transaction: Option<Transaction>,
@@ -263,6 +271,7 @@ struct Snapshot {
     class_links: PMap<Id, ClassLink>,
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
+    modules: Vec<(String, String)>,
     ix: Indexes,
 }
 
@@ -515,6 +524,7 @@ impl Store {
             class_links: self.class_links.clone(),
             object_links: self.object_links.clone(),
             associations: self.associations.clone(),
+            modules: self.modules.clone(),
             ix: self.ix.clone(),
         }
     }
@@ -527,6 +537,7 @@ impl Store {
         self.class_links.restore(s.class_links);
         self.object_links.restore(s.object_links);
         self.associations = s.associations;
+        self.modules = s.modules;
         self.ix.restore(s.ix);
     }
 
@@ -724,6 +735,11 @@ impl Store {
                 if let Some(c) = self.classes.get_mut(&class) {
                     c.hyper.remove(&hyper);
                     self.ix.members.remove(&(hyper, class));
+                }
+            }
+            Change::Module { hash, text } => {
+                if !self.modules.iter().any(|(h, _)| *h == hash) {
+                    self.modules.push((hash, text));
                 }
             }
             Change::Assoc { a, b } => {
@@ -1449,6 +1465,23 @@ impl Store {
 
     /// Everything the store holds, in a stable order: what `embryo-systems
     /// store DIR` prints.
+    /// Keeps an A-code unit's text, once: its hash.
+    pub fn keep_module(&mut self, text: &str) -> Stored<String> {
+        let hash = hbds_core::sha1::hex(text.as_bytes());
+        if !self.modules.iter().any(|(h, _)| *h == hash) {
+            self.commit(Change::Module {
+                hash: hash.clone(),
+                text: text.to_string(),
+            })?;
+        }
+        Ok(hash)
+    }
+
+    /// The modules kept, by hash, in the order they came.
+    pub fn modules(&self) -> &[(String, String)] {
+        &self.modules
+    }
+
     /// The shortest sequence of changes that rebuilds this store, ids
     /// kept: what compaction writes (docs/architecture.md, decision 5).
     pub fn changes(&self) -> Vec<Change> {
@@ -1560,6 +1593,12 @@ impl Store {
         }
         for &(a, b) in &self.associations {
             out.push(Change::Assoc { a, b });
+        }
+        for (hash, text) in &self.modules {
+            out.push(Change::Module {
+                hash: hash.clone(),
+                text: text.clone(),
+            });
         }
         let states = (self
             .classes
@@ -1676,6 +1715,9 @@ impl Store {
                     );
                 }
             }
+        }
+        for (hash, _) in &self.modules {
+            out += &format!("module {hash}\n");
         }
         for (a, b) in &self.associations {
             out += &format!("assoc {} WITH {}\n", self.describe(*a), self.describe(*b));

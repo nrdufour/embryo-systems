@@ -6,5 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 
 # The daemon's wire (docs/architecture.md, decision 8): HTTP/1.1,
-# WebSocket and JSON, written here. No dependency.
+# WebSocket and JSON, written here; SHA-1 is the core's.
 [dependencies]
+hbds-core = { path = "../hbds-core" }
