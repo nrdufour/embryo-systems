@@ -31,6 +31,7 @@ pub trait Language {
     fn read(&self, line: &str) -> Result<Value, String>;
     /// Code the store keeps, a COND, an ACTION or another part, compiled
     /// against `unit`'s modules; `what` names its carrier in messages.
+    /// `REPL` is a daemon's REPL entry: statements, as an ACTION's.
     fn compile(&self, part: &str, text: &str, what: &str, unit: &Unit) -> Result<Module, String>;
     /// Whether a property's code is good to keep: refused when written,
     /// as a COND that does not parse (page 80).

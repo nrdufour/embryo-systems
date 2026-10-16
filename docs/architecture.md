@@ -416,6 +416,18 @@ No browser runs in CI: `tests/daemon.rs` checks what the page reads, and
 the page itself was run by hand. 7b, the acting side (a REPL, rules
 firing in the feed), follows.
 
+As built (2026-10-16, step 7b): the page's REPL sends an entry as
+`{"source": TEXT}` on a session's WebSocket; the daemon's language
+compiles it as a fragment (the `REPL` part, statements as an ACTION's)
+and runs it as a client's session, in turns and in time as any. Each
+entry its own run (decided 2026-10-16): the store keeps what it did, its
+variables go with it. A fragment's local variables now take their
+initial value and constant in both engines, as a module's do (the
+reference had dropped them; `store/locals.adt`). CHAV and HYPOCHAV
+report the rules they tried and those that fired (`Io::rules`), which
+the feed carries as `{"rules": ...}`, said of the session or the process
+that ran them, and the page shows. Step 7 is done.
+
 ### 9. Standalone builds carry what they need
 
 - **Two products:** an `.acode` file, portable compiled modules (for

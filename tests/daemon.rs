@@ -832,3 +832,97 @@ fn the_ui_forwards_to_the_socket() {
         "{answer}"
     );
 }
+
+/// A REPL's entry, sent as the page sends it: its output and its end.
+fn entry(daemon: &Daemon, source: &str) -> (String, hbds_http::json::Json) {
+    use hbds_http::json::Json;
+    let stream = UnixStream::connect(&daemon.socket).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let mut writer = stream.try_clone().unwrap();
+    hbds_http::upgrade_request("/session")
+        .write(&mut writer)
+        .unwrap();
+    let mut reader = std::io::BufReader::new(stream);
+    assert_eq!(hbds_http::Response::read(&mut reader).unwrap().status, 101);
+    let run = Json::one("source", Json::String(source.into()));
+    hbds_http::write_message(
+        &mut writer,
+        &hbds_http::Message::Text(run.to_string()),
+        true,
+    )
+    .unwrap();
+    let mut out = String::new();
+    loop {
+        let hbds_http::Message::Text(t) = hbds_http::read_message(&mut reader).unwrap() else {
+            continue;
+        };
+        let f = Json::parse(&t).unwrap();
+        if let Some(o) = f.get("output").and_then(Json::as_str) {
+            out += o;
+        } else if let Some(end) = f.get("end") {
+            return (out, end.clone());
+        }
+    }
+}
+
+#[test]
+fn a_repl_entry_runs_as_a_session() {
+    use hbds_http::json::Json;
+    let daemon = Daemon::start("repl");
+    let (out, end) = entry(&daemon, "x : integer init 5 ; create \"c\" ; print x");
+    assert_eq!((out.as_str(), end), ("5\n", Json::Null));
+    // The store keeps what an entry did; its variables go with it.
+    let (out, end) = entry(&daemon, "create \"o\" [ \"c\" ] ; print \"c\" ' obj ' card");
+    assert_eq!((out.as_str(), end), ("1\n", Json::Null));
+    let (out, end) = entry(&daemon, "print x");
+    assert_eq!(out, "");
+    assert!(
+        end.as_str()
+            .is_some_and(|e| e.contains("`x` is not a variable here")),
+        "{end}"
+    );
+    let (_, end) = entry(&daemon, "print (");
+    assert!(
+        end.as_str()
+            .is_some_and(|e| e.starts_with("this does not parse")),
+        "{end}"
+    );
+}
+
+#[test]
+fn rules_firing_reach_the_feed() {
+    let daemon = Daemon::start("rules");
+    let mut feed = Feed::open(&daemon);
+    let chav = corpus().join("store/chav.adt");
+    assert!(
+        daemon
+            .client(chav.to_str().unwrap())
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    // Closed, the hydrant's rule tried and not fired; then open, the
+    // chain from it.
+    let first = feed.until("\"rules\"");
+    assert!(
+        first.contains("\"engine\":\"CHAV\",\"fired\":[]"),
+        "{first}"
+    );
+    let second = feed.until("\"rules\"");
+    assert!(second.contains("\"fired\":[\"hydrant[NETWORK_RULES]\",\"boost[NETWORK_RULES]\",\"output[NETWORK_RULES]\"]"), "{second}");
+    assert!(second.contains("\"session\":"), "{second}");
+    let hypochav = corpus().join("store/hypochav.adt");
+    assert!(
+        daemon
+            .client(hypochav.to_str().unwrap())
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let third = feed.until("\"rules\"");
+    assert!(third.contains("\"engine\":\"HYPOCHAV\""), "{third}");
+}

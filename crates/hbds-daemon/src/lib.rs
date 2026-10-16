@@ -43,7 +43,7 @@ const IDLE: std::time::Duration = std::time::Duration::from_millis(100);
 enum Msg {
     Start {
         id: u64,
-        acode: String,
+        program: Program,
         events: Events,
         input: Receiver<Option<String>>,
     },
@@ -119,6 +119,13 @@ impl Clock {
     }
 }
 
+/// What a session runs: A-code a client compiled, or an entry of the
+/// REPL, source the daemon's language compiles.
+enum Program {
+    ACode(String),
+    Source(String),
+}
+
 /// What the executor tells a session's connection, and how many of the
 /// journal's transactions must be on disk before the client hears it.
 struct Event {
@@ -168,6 +175,27 @@ struct Wire {
     lines: VecDeque<String>,
     ended: bool,
     events: Events,
+    /// CHAV and HYPOCHAV runs, for the feed.
+    rules: Vec<Json>,
+}
+
+/// A CHAV or HYPOCHAV run as the feed tells it.
+fn rules_json(engine: &str, tried: &[String], fired: &[String]) -> Json {
+    let names = |v: &[String]| Json::Array(v.iter().map(|n| Json::String(n.clone())).collect());
+    Json::Object(BTreeMap::from([
+        ("engine".to_string(), Json::String(engine.into())),
+        ("tried".to_string(), names(tried)),
+        ("fired".to_string(), names(fired)),
+    ]))
+}
+
+/// A run's report, said of who ran it, to the feed.
+fn rules_to_feed(feed: &mut Vec<Events>, report: Json, who: &str, id: u64) {
+    let Json::Object(mut o) = report else {
+        unreachable!("a report is an object")
+    };
+    o.insert(who.to_string(), Json::Number(id as f64));
+    broadcast(feed, Json::one("rules", Json::Object(o)));
 }
 
 impl Wire {
@@ -203,6 +231,10 @@ impl hbds_vm::Io for Wire {
         }
         self.ended || !self.lines.is_empty()
     }
+
+    fn rules(&mut self, engine: &str, tried: &[String], fired: &[String]) {
+        self.rules.push(rules_json(engine, tried, fired));
+    }
 }
 
 struct Client {
@@ -224,6 +256,15 @@ struct Router {
     feed: Vec<Events>,
 }
 
+impl Router {
+    fn report(&mut self, report: Json) {
+        match self.process {
+            Some(p) => rules_to_feed(&mut self.feed, report, "process", p),
+            None => broadcast(&mut self.feed, Json::one("rules", report)),
+        }
+    }
+}
+
 impl hbds_vm::Io for Router {
     fn read_line(&mut self) -> Option<String> {
         None
@@ -242,6 +283,10 @@ impl hbds_vm::Io for Router {
                 broadcast(&mut self.feed, Json::Object(j));
             }
         }
+    }
+
+    fn rules(&mut self, engine: &str, tried: &[String], fired: &[String]) {
+        self.report(rules_json(engine, tried, fired));
     }
 
     fn running(&mut self, process: Agent, owner: Option<Agent>) {
@@ -537,19 +582,21 @@ fn session(
             _ => None,
         };
         let Some(frame) = frame else { continue };
-        if let Some(acode) = frame.get("run").and_then(Json::as_str)
+        let program = match (frame.get("run"), frame.get("source")) {
+            (Some(Json::String(a)), _) => Some(Program::ACode(a.clone())),
+            (_, Some(Json::String(s))) => Some(Program::Source(s.clone())),
+            _ => None,
+        };
+        if let Some(program) = program
             && let (Some(events), Some(input)) = (events.take(), lines.take())
         {
-            let acode = acode.to_string();
-            if tx
-                .send(Msg::Start {
-                    id,
-                    acode,
-                    events,
-                    input,
-                })
-                .is_err()
-            {
+            let start = Msg::Start {
+                id,
+                program,
+                events,
+                input,
+            };
+            if tx.send(start).is_err() {
                 break;
             }
         } else if let Some(line) = frame.get("input").and_then(Json::as_str) {
@@ -790,14 +837,20 @@ fn executor(
             match msg {
                 Msg::Start {
                     id,
-                    acode,
+                    program,
                     events,
                     input,
-                } => match start(&acode, language, id) {
+                } => match start(&program, language, id) {
                     Ok((session, unit)) => {
                         // Kept by the store, once, and loaded into the
                         // kernel: its bodies serve the processes it starts.
-                        match store.keep_module(&unit.text()) {
+                        // A REPL's entry has none, and is not kept.
+                        let kept = match program {
+                            Program::ACode(_) => store.keep_module(&unit.text()),
+                            Program::Source(_) => Ok(String::new()),
+                        };
+                        match kept {
+                            Ok(hash) if hash.is_empty() => {}
                             Ok(hash) => {
                                 if loaded.insert(hash) {
                                     kernel.load(unit);
@@ -813,6 +866,7 @@ fn executor(
                             lines: VecDeque::new(),
                             ended: false,
                             events,
+                            rules: Vec::new(),
                         };
                         clients.insert(
                             id,
@@ -895,8 +949,11 @@ fn executor(
                 language,
                 Some(pace.slice),
             );
-            // What the turn kept, before its end.
+            // What the turn kept, and the rules it ran, before its end.
             changes(&mut store, &mut feed);
+            for report in std::mem::take(&mut c.wire.rules) {
+                rules_to_feed(&mut feed, report, "session", id);
+            }
             let gone = match turn {
                 Turn::Yield | Turn::Idle | Turn::Due(_) => false,
                 Turn::Input => {
@@ -989,9 +1046,22 @@ fn executor(
     }
 }
 
-/// A client's session for the A-code in `text`, if this daemon can run
-/// it, and the unit.
-fn start(text: &str, language: &dyn Language, id: u64) -> Result<(Session, Unit), String> {
+/// A client's session for its program, if this daemon can run it, and
+/// the unit: the A-code it sent, or a REPL's entry compiled here, against
+/// no unit (an entry calls no module of a program).
+fn start(program: &Program, language: &dyn Language, id: u64) -> Result<(Session, Unit), String> {
+    let text = match program {
+        Program::ACode(text) => text,
+        Program::Source(source) => {
+            let mut unit = Unit {
+                language: language.name().to_string(),
+                modules: Vec::new(),
+            };
+            let entry = language.compile("REPL", source, "the entry", &unit)?;
+            unit.modules.push(entry);
+            return Ok((Session::client(unit.clone(), id), unit));
+        }
+    };
     let unit = Unit::read(text).map_err(|e| e.0)?;
     if unit.language != language.name() {
         return Err(format!(

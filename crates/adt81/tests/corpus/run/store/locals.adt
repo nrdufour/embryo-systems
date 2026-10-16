@@ -1,0 +1,10 @@
+-- An ACTION's local variables start as a module's do: with their --
+-- initial value, a constant kept, a list empty. Written for the REPL, --
+-- whose entries are fragments too. --
+
+program locals ;
+begin
+        create "c" ;
+        let "c" ' action := "n : integer init 3 ; k : integer constante = 4 ; l : list of integer ; insert n into l ; print n + k, l" ;
+        create "o" [ "c" ]
+end ;
