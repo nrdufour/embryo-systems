@@ -1,0 +1,13 @@
+[package]
+name = "hbds-vm"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The VM that runs A-code (docs/architecture.md, decisions 2 and 3).
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-values = { path = "../hbds-values" }
+hbds-lists = { path = "../hbds-lists" }
+hbds-acode = { path = "../hbds-acode" }

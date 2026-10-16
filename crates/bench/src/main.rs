@@ -14,6 +14,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use adt81::compile::{Adt81, compile};
 use adt81::diagnostic::Severity;
 use adt81::interp::{self, Io};
 use adt81::lower;
@@ -33,6 +34,10 @@ const TARGET: &str = "\
 
 struct Scenario {
     name: &'static str,
+    /// The program in `bench/scenarios`.
+    program: &'static str,
+    /// Run compiled to A-code, on the VM, instead of by the reference.
+    vm: bool,
     sizes: &'static [u64],
     input: fn(u64) -> String,
     expected: fn(u64) -> String,
@@ -41,12 +46,16 @@ struct Scenario {
 const SCENARIOS: &[Scenario] = &[
     Scenario {
         name: "store",
+        program: "store",
+        vm: false,
         sizes: &[500, 1000, 2000, 4000],
         input: |n| format!("{n}\n{}", names("o", n)),
         expected: |n| format!("{n} {}\n", triangle(n)),
     },
     Scenario {
         name: "lookup",
+        program: "lookup",
+        vm: false,
         sizes: &[500, 1000, 2000, 4000],
         input: |n| {
             let back: String = (1..=n).rev().map(|i| format!("o{i}\n")).collect();
@@ -56,6 +65,8 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         name: "functors",
+        program: "functors",
+        vm: false,
         sizes: &[125, 250, 500, 1000],
         input: |n| {
             let mut s = format!("{n}\n{}", names("p", n));
@@ -68,6 +79,8 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         name: "chav",
+        program: "chav",
+        vm: false,
         sizes: &[125, 250, 500, 1000],
         input: |n| {
             let mut s = format!("{n}\n{}", names("s", n));
@@ -82,18 +95,44 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         name: "simulation",
+        program: "simulation",
+        vm: false,
         sizes: &[50, 100, 200, 400],
         input: |n| format!("{n}\n{}", names("w", n)),
         expected: |n| format!("21.0 {}\n", 20 * n),
     },
     Scenario {
         name: "values",
+        program: "values",
+        vm: false,
+        sizes: &[32_000, 64_000, 128_000, 256_000],
+        input: |n| format!("{n}\n"),
+        expected: |n| format!("{}\n", n * n),
+    },
+    Scenario {
+        name: "values-vm",
+        program: "values",
+        vm: true,
         sizes: &[32_000, 64_000, 128_000, 256_000],
         input: |n| format!("{n}\n"),
         expected: |n| format!("{}\n", n * n),
     },
     Scenario {
         name: "language",
+        program: "language",
+        vm: false,
+        sizes: &[125_000, 250_000, 500_000, 1_000_000],
+        input: |n| format!("{n}\n"),
+        expected: |n| {
+            let t: i64 = (1..=n as i64).map(|i| i * i / 3 - i / 2).sum();
+            let u: u64 = (1..=n).filter(|e| *e > n / 2).sum();
+            format!("{t} {n} {u}\n")
+        },
+    },
+    Scenario {
+        name: "language-vm",
+        program: "language",
+        vm: true,
         sizes: &[125_000, 250_000, 500_000, 1_000_000],
         input: |n| format!("{n}\n"),
         expected: |n| {
@@ -117,6 +156,16 @@ fn triangle(n: u64) -> u64 {
 struct Pipe {
     lines: std::vec::IntoIter<String>,
     out: String,
+}
+
+impl hbds_vm::Io for Pipe {
+    fn read_line(&mut self) -> Option<String> {
+        self.lines.next()
+    }
+
+    fn write(&mut self, text: &str) {
+        self.out.push_str(text);
+    }
 }
 
 impl Io for Pipe {
@@ -148,6 +197,10 @@ fn measure(s: &Scenario, source: &str, n: u64) -> Result<Measure, String> {
     }
     let input = (s.input)(n);
     let expected = (s.expected)(n);
+    let unit = match s.vm {
+        true => Some(compile(&program).map_err(|e| format!("not yet on the VM: {}", e.what))?),
+        false => None,
+    };
     let mut runs = Vec::new();
     for run in 0..=RUNS {
         let lines: Vec<String> = input.lines().map(String::from).collect();
@@ -157,8 +210,14 @@ fn measure(s: &Scenario, source: &str, n: u64) -> Result<Measure, String> {
         }));
         let store = Arc::new(Mutex::new(Store::memory()));
         let start = Instant::now();
-        let statements = interp::run_counted(program.clone(), pipe.clone(), store.clone())
-            .map_err(|e| e.to_string())?;
+        let statements = match &unit {
+            Some(unit) => {
+                let mut io = pipe.lock().unwrap();
+                hbds_vm::run(unit, &mut *io, &Adt81, None).map_err(|e| e.to_string())?
+            }
+            None => interp::run_counted(program.clone(), pipe.clone(), store.clone())
+                .map_err(|e| e.to_string())?,
+        };
         let ms = start.elapsed().as_secs_f64() * 1000.0;
         let out = std::mem::take(&mut pipe.lock().unwrap().out);
         if out != expected {
@@ -314,7 +373,7 @@ fn main() -> ExitCode {
         if !only.is_empty() && !only.iter().any(|o| *o == s.name) {
             continue;
         }
-        let path = root().join("scenarios").join(format!("{}.adt", s.name));
+        let path = root().join("scenarios").join(format!("{}.adt", s.program));
         let source = match std::fs::read_to_string(&path) {
             Ok(source) => source,
             Err(e) => {

@@ -744,3 +744,545 @@ impl Gen {
         Stmt { kind, span: span() }
     }
 }
+
+// Runnable programs, for the VM's gate: written as text, with variables
+// declared and used as their types allow, so that most check; whatever
+// they do, the reference and the VM must do it alike, runtime errors and
+// runs past a statement budget included.
+
+/// The types a runnable program's variables take.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum T {
+    Int,
+    Float,
+    Appr,
+    Rational,
+    Bool,
+    Str,
+    List,
+    Vector,
+}
+
+const SCALARS: &[T] = &[
+    T::Int,
+    T::Int,
+    T::Float,
+    T::Appr,
+    T::Rational,
+    T::Bool,
+    T::Str,
+];
+
+fn declared(t: T) -> &'static str {
+    match t {
+        T::Int => "integer",
+        T::Float => "float",
+        T::Appr => "float appr",
+        T::Rational => "rational",
+        T::Bool => "boolean",
+        T::Str => "string",
+        T::List => "list of integer",
+        T::Vector => "vector [1:4] of integer",
+    }
+}
+
+/// A module's signature: its name, its parameters' types and modes, and
+/// what it returns if it is a function.
+#[derive(Clone)]
+struct Signature {
+    name: String,
+    params: Vec<(T, &'static str)>,
+    returns: Option<T>,
+}
+
+struct Writer<'g> {
+    rng: &'g mut Rng,
+    /// The variables in scope, by type.
+    vars: Vec<(String, T)>,
+    /// Loop counters in use, which the body leaves alone.
+    busy: Vec<String>,
+    loops: usize,
+    /// The modules this one may call: those after it.
+    callees: &'g [Signature],
+    out: String,
+    depth: usize,
+}
+
+impl Writer<'_> {
+    fn var(&mut self, t: T) -> Option<String> {
+        let found: Vec<&String> = (self.vars.iter())
+            .filter(|(_, u)| *u == t)
+            .map(|(n, _)| n)
+            .collect();
+        (!found.is_empty()).then(|| found[self.rng.below(found.len())].clone())
+    }
+
+    /// A variable of type `t` the statement may change.
+    fn target(&mut self, t: T) -> Option<String> {
+        let free: Vec<String> = (self.vars.iter())
+            .filter(|(n, u)| *u == t && !self.busy.contains(n))
+            .map(|(n, _)| n.clone())
+            .collect();
+        (!free.is_empty()).then(|| free[self.rng.below(free.len())].clone())
+    }
+
+    fn int_literal(&mut self) -> String {
+        match self.rng.below(12) {
+            0 => "9223372036854775807".into(),
+            1 => "0".into(),
+            2 => format!("{}", self.rng.below(1000)),
+            _ => format!("{}", self.rng.below(6)),
+        }
+    }
+
+    /// A literal of type `t`, for a first value.
+    fn literal(&mut self, t: T) -> String {
+        match t {
+            T::Int => format!("{}", self.rng.below(6)),
+            T::Float | T::Appr => format!("{}.5", self.rng.below(9)),
+            T::Rational => format!("{} // {}", self.rng.below(5), 1 + self.rng.below(4)),
+            T::Bool => self.rng.pick(&["true", "false"]).into(),
+            T::Str => self.rng.pick(&["\"a\"", "\"bc\""]).into(),
+            T::List | T::Vector => unreachable!("lists and vectors start with a value"),
+        }
+    }
+
+    fn expr(&mut self, t: T, depth: usize) -> String {
+        let leaf = depth == 0 || self.rng.one_in(3);
+        if let Some(v) = self.var(t).filter(|_| leaf && !self.rng.one_in(4)) {
+            return v;
+        }
+        let d = depth.saturating_sub(1);
+        match t {
+            T::Int if leaf => self.int_literal(),
+            T::Int => match self.rng.below(9) {
+                0..=3 => {
+                    let op = self.rng.pick(&["+", "-", "*", "/", "MOD"]);
+                    format!("({} {op} {})", self.expr(T::Int, d), self.expr(T::Int, d))
+                }
+                4 => format!("(-{})", self.expr(T::Int, d)),
+                5 => format!("abs({})", self.expr(T::Int, d)),
+                6 => match self.var(T::List) {
+                    Some(l) => format!(
+                        "{l} ' {}",
+                        self.rng.pick(&["card", "first", "last", "sigma"])
+                    ),
+                    None => self.int_literal(),
+                },
+                7 => match self.var(T::Vector) {
+                    Some(v) => format!("{v}[{}]", self.expr(T::Int, d)),
+                    None => self.int_literal(),
+                },
+                _ => self
+                    .call_expr(T::Int, d)
+                    .unwrap_or_else(|| self.int_literal()),
+            },
+            T::Float | T::Appr if leaf => {
+                let x = format!("{}.{}", self.rng.below(50), self.rng.below(100));
+                if t == T::Appr && self.rng.one_in(2) {
+                    format!("({x} +- 0.{})", 1 + self.rng.below(9))
+                } else {
+                    x
+                }
+            }
+            T::Float | T::Appr => match self.rng.below(6) {
+                0..=2 => {
+                    let op = self.rng.pick(&["+", "-", "*", "/"]);
+                    format!("({} {op} {})", self.expr(t, d), self.expr(t, d))
+                }
+                3 => self.expr(T::Int, d),
+                4 => format!(
+                    "{}({})",
+                    self.rng.pick(&["sqrt", "sin", "exp", "ln"]),
+                    self.expr(t, d)
+                ),
+                _ => self.call_expr(T::Float, d).unwrap_or_else(|| "1.5".into()),
+            },
+            T::Rational if leaf => format!("{} // {}", self.rng.below(7), 1 + self.rng.below(6)),
+            T::Rational => match self.rng.below(3) {
+                0 => format!(
+                    "({} + {})",
+                    self.expr(T::Rational, d),
+                    self.expr(T::Rational, d)
+                ),
+                1 => format!("({} * {})", self.expr(T::Rational, d), self.expr(T::Int, d)),
+                _ => self.expr(T::Int, d),
+            },
+            T::Bool if leaf => self.rng.pick(&["true", "false"]).into(),
+            T::Bool => match self.rng.below(6) {
+                0 | 1 => {
+                    let op = self.rng.pick(&["<", "<=", ">", ">=", "=", "/="]);
+                    let u = self.rng.pick(&[T::Int, T::Float, T::Rational]);
+                    format!("({} {op} {})", self.expr(u, d), self.expr(u, d))
+                }
+                2 => {
+                    let op = self.rng.pick(&["and", "or", "xor"]);
+                    format!("({} {op} {})", self.expr(T::Bool, d), self.expr(T::Bool, d))
+                }
+                3 => format!("not {}", self.expr(T::Bool, d)),
+                4 => match self.var(T::List) {
+                    Some(l) => format!("({} in {l})", self.expr(T::Int, d)),
+                    None => "true".into(),
+                },
+                _ => format!("({} = {})", self.expr(T::Str, d), self.expr(T::Str, d)),
+            },
+            T::Str if leaf => self
+                .rng
+                .pick(&["\"a\"", "\"bc\"", "\"\"", "\"x y\""])
+                .into(),
+            // With a literal only: a string doubled in a loop would fill
+            // the memory long before the budget ends the run.
+            T::Str => {
+                let tail = self.rng.pick(&["\"a\"", "\"bc\"", "\" \""]);
+                format!("({} & {tail})", self.expr(T::Str, d))
+            }
+            T::List => match self.var(T::List) {
+                Some(l) if !leaf => {
+                    let op = self.rng.pick(&["union", "inter", "compl"]);
+                    format!("({l} {op} {})", self.expr(T::List, d))
+                }
+                Some(l) => l,
+                None => unreachable!("lists are always declared"),
+            },
+            T::Vector => self.var(T::Vector).expect("a vector is always declared"),
+        }
+    }
+
+    fn call_expr(&mut self, t: T, depth: usize) -> Option<String> {
+        let fs: Vec<Signature> = (self.callees.iter())
+            .filter(|s| s.returns == Some(t))
+            .cloned()
+            .collect();
+        if fs.is_empty() {
+            return None;
+        }
+        let f = fs[self.rng.below(fs.len())].clone();
+        let args = self.args(&f, depth)?;
+        Some(format!("{}({args})", f.name))
+    }
+
+    fn args(&mut self, s: &Signature, depth: usize) -> Option<String> {
+        let mut args = Vec::new();
+        for (t, mode) in &s.params {
+            args.push(match *mode {
+                "in" => self.expr(*t, depth),
+                _ => self.target(*t)?,
+            });
+        }
+        Some(args.join(", "))
+    }
+
+    fn line(&mut self, text: &str) {
+        self.out.push_str(&"        ".repeat(self.depth + 1));
+        self.out.push_str(text);
+    }
+
+    /// Statements separated by `;`, the last without.
+    fn block(&mut self, n: usize, depth: usize) {
+        let n = 1 + self.rng.below(n.max(1));
+        for i in 0..n {
+            self.stmt(depth);
+            self.out.push_str(if i + 1 < n { " ;\n" } else { "\n" });
+        }
+    }
+
+    fn stmt(&mut self, depth: usize) {
+        let compound = depth > 0 && self.depth < 4;
+        match self.rng.below(if compound { 20 } else { 11 }) {
+            0..=3 => {
+                let t = self.rng.pick(&[
+                    T::Int,
+                    T::Int,
+                    T::Float,
+                    T::Appr,
+                    T::Rational,
+                    T::Bool,
+                    T::Str,
+                ]);
+                match self.target(t) {
+                    Some(v) => {
+                        let e = self.expr(t, 3);
+                        self.line(&format!("{v} := {e}"));
+                    }
+                    None => self.line("print 0"),
+                }
+            }
+            4 => {
+                let n = 1 + self.rng.below(3);
+                let es: Vec<String> = (0..n)
+                    .map(|_| {
+                        let t = self.rng.pick(&[
+                            T::Int,
+                            T::Float,
+                            T::Appr,
+                            T::Rational,
+                            T::Bool,
+                            T::Str,
+                            T::List,
+                        ]);
+                        self.expr(t, 2)
+                    })
+                    .collect();
+                self.line(&format!("print {}", es.join(", ")));
+            }
+            5 => {
+                let l = self.var(T::List).expect("declared");
+                let e = self.expr(T::Int, 2);
+                match self.rng.below(5) {
+                    0 => self.line(&format!("extract ({e}) outof {l}")),
+                    1 => {
+                        let k = self.expr(T::Int, 1);
+                        self.line(&format!("insert ({e}) into {l} after {k}"))
+                    }
+                    2 if self.rng.one_in(3) => self.line(&format!("empty {l}")),
+                    _ => self.line(&format!("insert ({e}) into {l}")),
+                }
+            }
+            6 => {
+                let v = self.var(T::Vector).expect("declared");
+                let (i, e) = (self.expr(T::Int, 1), self.expr(T::Int, 2));
+                self.line(&format!("{v}[{i}] := {e}"));
+            }
+            7 => {
+                let t = self.rng.pick(&[T::Int, T::Float, T::Str]);
+                match self.target(t) {
+                    Some(v) => self.line(&format!("read {v}")),
+                    None => self.line("print 1"),
+                }
+            }
+            8 if self.loops > 0 => {
+                let word = self.rng.pick(&["exit", "next", "reloop"]);
+                let line = match self.rng.below(4) {
+                    0 => word.to_string(),
+                    1 => format!("{word} {}", 1 + self.rng.below(self.loops)),
+                    2 => format!("{word} {}", self.expr(T::Int, 1)),
+                    _ => format!("if {} then {word} endif", self.expr(T::Bool, 2)),
+                };
+                self.line(&line);
+            }
+            9 => {
+                let procs: Vec<Signature> = (self.callees.iter())
+                    .filter(|s| s.returns.is_none())
+                    .cloned()
+                    .collect();
+                match procs.first().cloned() {
+                    Some(p) => match self.args(&p, 2) {
+                        Some(args) if args.is_empty() => self.line(&format!("call {}", p.name)),
+                        Some(args) => self.line(&format!("call {}({args})", p.name)),
+                        None => self.line("print 2"),
+                    },
+                    None => self.line("print 3"),
+                }
+            }
+            10 => {
+                let t = self.rng.pick(SCALARS);
+                match self.target(t) {
+                    Some(v) => self.line(&format!("reset {v}")),
+                    None => self.line("print 4"),
+                }
+            }
+            11 | 12 => {
+                let c = self.expr(T::Bool, 2);
+                self.line(&format!("if {c} then\n"));
+                self.nested(depth);
+                if self.rng.one_in(2) {
+                    self.line("else\n");
+                    self.nested(depth);
+                }
+                self.line("endif");
+            }
+            13 | 14 => {
+                let Some(i) = self.target(T::Int) else {
+                    return self.line("print 5");
+                };
+                let (a, b) = (self.expr(T::Int, 1), self.expr(T::Int, 1));
+                let step = match self.rng.below(4) {
+                    0 => " step -1".to_string(),
+                    1 => format!(" step {}", self.rng.pick(&["2", "3", "0"])),
+                    _ => String::new(),
+                };
+                self.line(&format!("loop for {i} : {a} to {b}{step} do\n"));
+                self.busy.push(i);
+                self.looped(depth);
+                self.busy.pop();
+                self.line("endloop");
+            }
+            15 => {
+                let c = self.expr(T::Bool, 2);
+                self.line(&format!("loop while {c} do\n"));
+                self.looped(depth);
+                self.line("endloop");
+            }
+            16 => {
+                self.line("loop do\n");
+                self.looped(depth);
+                let c = self.expr(T::Bool, 2);
+                self.line(&format!("until {c} endloop"));
+            }
+            17 => {
+                let (Some(e), Some(l)) = (self.target(T::Int), self.var(T::List)) else {
+                    return self.line("print 6");
+                };
+                let filter = match self.rng.one_in(2) {
+                    true => format!(" / {}", self.expr(T::Bool, 1)),
+                    false => String::new(),
+                };
+                self.line(&format!("each {e} of {l}{filter} do\n"));
+                self.busy.push(e);
+                self.looped(depth);
+                self.busy.pop();
+                self.line("endeach");
+            }
+            18 => {
+                let s = self.expr(T::Int, 1);
+                self.line(&format!("case {s}\n"));
+                for _ in 0..1 + self.rng.below(3) {
+                    let (a, b) = (self.rng.below(4), self.rng.below(4));
+                    self.line(&format!("when {a}, {b} do\n"));
+                    self.nested(depth);
+                }
+                if self.rng.one_in(2) {
+                    self.line("others\n");
+                    self.nested(depth);
+                }
+                self.line("endcase");
+            }
+            19 => {
+                self.line("parbegin\n");
+                self.nested(depth);
+                self.line("par\n");
+                self.nested(depth);
+                self.line("endpar");
+            }
+            // EXIT and the others with no loop around: a PRINT instead.
+            _ => self.line("print 7"),
+        }
+    }
+
+    fn nested(&mut self, depth: usize) {
+        self.depth += 1;
+        self.block(3, depth - 1);
+        self.depth -= 1;
+    }
+
+    fn looped(&mut self, depth: usize) {
+        self.loops += 1;
+        self.nested(depth);
+        self.loops -= 1;
+    }
+}
+
+/// A program of a few modules that checks, mostly, and its input: for
+/// the VM's gate. Deterministic, as `program` is.
+pub fn runnable(seed: u64) -> (String, String) {
+    let mut rng = Rng::new(seed);
+    let count = rng.below(4);
+    let mut signatures = Vec::new();
+    for k in 0..count {
+        let returns = rng.one_in(2).then(|| rng.pick(&[T::Int, T::Float]));
+        // A function has a parameter: `f()` is not ADT'81.
+        let params = (0..rng.below(3) + returns.is_some() as usize)
+            .map(|_| {
+                let t = rng.pick(&[T::Int, T::Int, T::Float, T::Str, T::Bool]);
+                (t, rng.pick(&["in", "in", "out", "inout"]))
+            })
+            .collect();
+        signatures.push(Signature {
+            name: format!("m{k}"),
+            params,
+            returns,
+        });
+    }
+    let mut text = String::new();
+    for k in 0..=count {
+        let (header, mut vars, sig) = match k {
+            0 => ("program p ;\n".to_string(), Vec::new(), None),
+            k => {
+                let s = signatures[k - 1].clone();
+                let names: Vec<String> = (0..s.params.len()).map(|i| format!("a{i}")).collect();
+                let head = match s.returns {
+                    Some(t) => format!(
+                        "function {} ({}) returns {} ;\n",
+                        s.name,
+                        names.join(", "),
+                        declared(t)
+                    ),
+                    None => format!("subroutine {} ({}) ;\n", s.name, names.join(", ")),
+                };
+                let mut head = head.replace(" () ", " ");
+                let mut vars = Vec::new();
+                for (n, (t, mode)) in names.iter().zip(&s.params) {
+                    head += &format!("        {n} : {} {mode} ;\n", declared(*t));
+                    vars.push((n.clone(), *t));
+                }
+                (head, vars, Some(s))
+            }
+        };
+        text += &header;
+        text += "local\n";
+        let mut locals = vec![
+            ("n".to_string(), T::Int),
+            ("k".to_string(), T::Int),
+            ("l".to_string(), T::List),
+            ("v".to_string(), T::Vector),
+        ];
+        for i in 0..2 + rng.below(4) {
+            locals.push((format!("x{i}"), rng.pick(SCALARS)));
+        }
+        for (n, t) in &locals {
+            let init = match (t, rng.one_in(4)) {
+                (T::Int, true) => format!(" init {}", rng.below(5)),
+                _ => String::new(),
+            };
+            text += &format!("        {n} : {}{init} ;\n", declared(*t));
+        }
+        vars.extend(locals);
+        // The last declaration takes no `;` before BEGIN? It does: each
+        // declaration ends with one.
+        text += "begin\n";
+        let mut w = Writer {
+            rng: &mut rng,
+            vars,
+            busy: Vec::new(),
+            loops: 0,
+            callees: &signatures[k.min(signatures.len())..],
+            out: String::new(),
+            depth: 0,
+        };
+        // Most variables get a value first, so that the runs go further
+        // than `has no value`; one now and then is left without.
+        let scalars: Vec<(String, T)> = (w.vars.iter())
+            .filter(|(n, t)| n.starts_with('x') || (SCALARS.contains(t) && n.len() == 1))
+            .cloned()
+            .collect();
+        for (n, t) in scalars {
+            if !w.rng.one_in(12) {
+                let e = w.literal(t);
+                w.line(&format!("{n} := {e} ;\n"));
+            }
+        }
+        w.block(8, 3);
+        if let Some(Signature {
+            returns: Some(t), ..
+        }) = sig
+        {
+            let trimmed = w.out.trim_end().to_string();
+            w.out = trimmed;
+            let e = w.expr(t, 2);
+            w.out += &format!(" ;\n        result {e}\n");
+        }
+        text += &w.out;
+        text += "end ;\n\n";
+    }
+    let input: Vec<String> = (0..rng.below(6))
+        .map(|_| match rng.below(6) {
+            0 => format!("{}", rng.below(100)),
+            1 => format!("{}.5", rng.below(10)),
+            2 => "1.5 +- 0.2".into(),
+            3 => "word".into(),
+            4 => "2 + 3".into(),
+            _ => format!("{}", rng.below(4)),
+        })
+        .collect();
+    (text, input.join("\n"))
+}

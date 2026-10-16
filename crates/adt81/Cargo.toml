@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 hbds-core = { path = "../hbds-core" }
 hbds-values = { path = "../hbds-values" }
+hbds-acode = { path = "../hbds-acode" }
 hbds-functors = { path = "../hbds-functors" }
 hbds-gtad = { path = "../hbds-gtad" }
 hbds-lists = { path = "../hbds-lists" }

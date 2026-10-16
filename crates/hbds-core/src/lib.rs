@@ -6,6 +6,7 @@
 use std::fmt;
 
 pub mod spec;
+pub mod terms;
 pub mod value;
 
 pub type Id = u64;

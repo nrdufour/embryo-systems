@@ -26,6 +26,50 @@ fn fault<T>(message: impl Into<String>) -> Computed<T> {
     Err(Fault(message.into()))
 }
 
+/// The integer a value is, for an index, a count or a bound.
+pub fn integer(v: &Value) -> Computed<i64> {
+    match v.scalar() {
+        Some(Scalar::Integer(n)) => Ok(*n),
+        _ => fault(format!("{v} is not an integer")),
+    }
+}
+
+/// Where the cell at `indices` is in an array's row-major cells.
+pub fn offset(a: &Array, indices: &[i64]) -> Computed<usize> {
+    if indices.len() != a.dims.len() {
+        return fault(format!(
+            "{} index(es) for an array of {}",
+            indices.len(),
+            a.dims.len()
+        ));
+    }
+    let mut at = 0;
+    for ((i, low), dim) in indices.iter().zip(&a.lows).zip(&a.dims) {
+        match i.checked_sub(*low) {
+            Some(k) if k >= 0 && k < *dim as i64 => at = at * dim + k as usize,
+            _ => {
+                return fault(format!(
+                    "the index {i} is outside {low}:{}",
+                    low + *dim as i64 - 1
+                ));
+            }
+        }
+    }
+    Ok(at)
+}
+
+/// The truth of a condition: a boolean, fuzzy or not, but one.
+pub fn truth(v: &Value) -> Computed<bool> {
+    match v {
+        Value::One(Fz {
+            x: Scalar::Boolean(b),
+            ..
+        }) => Ok(*b),
+        Value::Many(_) => fault("a multiple value is not a condition"),
+        _ => fault(format!("{v} is not a boolean")),
+    }
+}
+
 /// The operations on two values. Lists' union, intersection and
 /// complement are the list engine's (hbds-lists).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
