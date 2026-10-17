@@ -32,7 +32,7 @@ cargo run -q -- store /tmp/hydro                                   # what the st
 | `embryo-systems acode FILE` | the program compiled to A-code, as text: an `.acode` file |
 | `embryo-systems exec [--store DIR] FILE` | runs an `.acode` file on the VM |
 | `embryo-systems daemon --socket SOCKET [--store DIR] [--pace paused\|fast\|real]` | serves a store on a Unix socket; `run`, `exec` and built programs take `--connect SOCKET` to run there, clients taking turns; one time for the store, its processes outliving their clients, at a pace `POST /pace` changes |
-| `embryo-systems ui --connect SOCKET [--port N]` | the daemon's page on 127.0.0.1: the schema, the time and its processes, the sessions, the journal's tail, the pace's controls, a REPL, the rules firing |
+| `embryo-systems ui --connect SOCKET [--port N]` | the daemon's page on 127.0.0.1: the schema, the time and its processes, the sessions, the journal's tail, the pace's controls, a REPL, the rules firing, the reflexes and constraints |
 | `GET /events`, `GET /sessions`, `POST /sessions/ID/kill` | on a daemon's socket: the feed of what happens (changes, sessions, time, processes' output), the sessions, killing one |
 | `embryo-systems build FILE -o OUT` | writes OUT, an executable carrying the program: `OUT [--store DIR]` runs it, anywhere on this platform |
 | `embryo-systems check FILE` | undeclared and misused names, type errors |
@@ -116,6 +116,8 @@ flowchart BT
 | `crates/hbds-journal` | GTAD's persistence, a journal in the spirit of the print's DAYFILE |
 | `crates/hbds-rules` | the expert systems: rules and facts, SES's four functors, CHAV and HYPOCHAV |
 | `crates/hbds-simulation` | the discrete simulation: PROCESS, the sequencing set, figure 52's primitives |
+| `crates/hbds-reflexes` | the reflex engine: REFLEX, its events, launchers and delays |
+| `crates/hbds-constraints` | the constraint engine: CONSTRAINT, its FORMULA and components |
 | `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
 | `src/main.rs` | the `embryo-systems` command |
 

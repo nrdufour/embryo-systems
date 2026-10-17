@@ -36,6 +36,7 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-simulation` | the discrete simulation (project 17): PROCESS, the sequencing set and figure 52's transitions; a language runs the bodies | core, gtad |
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `hbds-reflexes` | the reflex engine (project 18): REFLEX, what each change launches; a language runs the reactions | core, gtad |
+| `hbds-constraints` | the constraint engine (pages 157 to 160): CONSTRAINT, the constraints each change concerns; a language runs the FORMULAs | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (its operators mapped onto HBDS's operations, math functions, what an unknown name means); it wires the engines together | the engines |
 | `hbds-acode` | A-code, HBDS's machine code: the format, its version, its text form, and what a unit asks of its language | core, values |
 | `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation, reflexes |
@@ -488,6 +489,8 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `crates/hbds-journal` | the journal's format, recording and replay |
 | `crates/hbds-rules` | the expert systems: the model, the functors, the chaining |
 | `crates/hbds-simulation` | the simulation: PROCESS, the sequencing set |
+| `crates/hbds-reflexes` | the reflexes: REFLEX, launches |
+| `crates/hbds-constraints` | the constraints: CONSTRAINT, the constraints a change concerns |
 | `crates/hbds-simulation/tests/sequencing.rs` | every transition of figure 52, legal and not |
 | `crates/hbds-rules/tests/engine.rs` | the chaining rule by rule, on a fake language |
 | `tools/check_engines.py` | what each crate may depend on |
