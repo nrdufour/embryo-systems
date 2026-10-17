@@ -565,33 +565,6 @@ Times under 100 ms are not gated, noise being most of them. `just
 bench-record` writes the work and this host's times; the runner's times
 are copied from what its CI run prints.
 
-### 13. Two references, and the correlation between them
-
-- **The interpreter is the first reference.** The VM is held to `run
-  --reference` on every corpus program and 2000 random ones. It catches
-  divergence between the two, and nothing else.
-- **The print, with the decisions, is the second.** The polycopie and the
-  entries in [adt81.md](adt81.md) and [hbds.md](hbds.md) settle what a
-  divergence should be. It is read by hand, when a session thinks to.
-- **Correlated errors are invisible to the pair.** The interpreter and the
-  VM came from one reading of the same pages: a page misread makes both
-  wrong, and the differential test stays green for good. No amount of
-  differential testing sees it, by construction.
-- **A third reference is to be built, cheaply.** Goldens computed by hand
-  from the print's listings, pages 127 and 128 first (ARC.LENGTH 1.0,
-  AREA.PERIMETER 4.0 are already two of them), and the second human
-  reading of the pages the rebuild rests on. Twenty hand-traced goldens
-  break the correlation.
-- **The documentary reference gets gates of its own**, as every
-  convention here does:
-  - a departure entry in adt81.md or hbds.md carries its page and its
-    date, checked by `just check`
-  - a departure the code makes is asserted by a test whose comment cites
-    the page, so that changing the behaviour fails the test and sends the
-    reader back to the page
-
-Decided 2026-10-17.
-
 ## The order
 
 Each step is a plan and a pull request of its own:
