@@ -565,6 +565,33 @@ Times under 100 ms are not gated, noise being most of them. `just
 bench-record` writes the work and this host's times; the runner's times
 are copied from what its CI run prints.
 
+### 13. No SFSI and ZE: the journal is the persistence
+
+Decided on 2026-11-14. Project 13 (pages 86 to 105) is not rebuilt. The
+print specifies SFSI, its indexed-sequential file system, down to the
+byte: the FET, the FIT and the index blocks field by field, 2 KB
+granules, 96 files a user, six passwords a file, pools of buffers, a
+DAYFILE fed through two alternating buffers; and ZE, the exchange zone
+(page 103), a write-through cache of the persistent a.d.t. between GTAD
+and SFSI, circular buffers behind SAVE, LOAD and RESTORE.
+
+- **No program would see it.** Every other engine adds to what ADT'81
+  says; SFSI and ZE change only how bytes reach the disk. The corpus
+  would print the same.
+- **What it does is done.** The journal (decision 5) is the DAYFILE:
+  history, replay after a crash, compaction; GTAD's persistent maps
+  and transactions (decision 7) are what ZE's cache was for.
+- **Its design answers 1995's machines**: fixed buffers and granules
+  sized for a micro's memory. Rebuilt faithfully, it would emulate those
+  limits, not carry an idea.
+- **It would cost the most** of what is left, in the one place a mistake
+  loses data.
+
+What SFSI and ZE gave GTAD that we lack is a store larger than memory,
+its a.d.t. loaded on demand. Nothing asks for it; if a store outgrows
+memory, it comes as another `Recorder`, designed for its time, behind
+the interface `crates/hbds-journal` already implements.
+
 ## The order
 
 Each step is a plan and a pull request of its own:

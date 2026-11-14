@@ -154,9 +154,10 @@ The system's own steps (A-code and a VM, standalone builds, a daemon with a web 
 
 | engine | print |
 |---|---|
-| SFSI and ZE, the print's own file system and exchange zone, as another persistence | project 13, pages 86 to 105 |
 | NINJAS, protection against object-oriented viruses | project 20, page 150 |
 | ADTmin, precompilers to C, Ada, Pascal and Fortran | page 161 |
+
+SFSI and ZE, the print's own file system and exchange zone (project 13), are not rebuilt: the journal is the persistence ([docs/architecture.md](docs/architecture.md), decision 13).
 
 On NixOS, the flake's `nixosModules.default` runs the daemon as a service:
 

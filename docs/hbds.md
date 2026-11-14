@@ -11,9 +11,9 @@ query them. The print builds the store in three layers:
   granules, index blocks and DAYFILE journal (pages 86 to 102).
 
 `crates/hbds-gtad` is the first layer, made durable by a journal in the
-DAYFILE's spirit (`crates/hbds-journal`). A faithful SFSI and ZE are a
-project of their own, as they are in the print (project 13); they can
-come later behind the same interface.
+DAYFILE's spirit (`crates/hbds-journal`). SFSI and ZE are not rebuilt:
+[architecture.md](architecture.md), decision 13, says why; a store larger
+than memory would come behind the same interface.
 
 ## Engines and languages
 
@@ -32,7 +32,7 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-maps` | the persistent ordered map the store keeps its model in: a B-tree whose versions share nodes, so a transaction's snapshot costs nothing | nothing |
 | `hbds-gtad` | the a.d.t. engine (project 12): the model, its changes, its indexes and lookups, states; persistence behind its `Recorder` trait | core, maps |
 | `hbds-functors` | the functor engine (project 15): the catalogue on a.d.t. and its implementation on GTAD | core, gtad |
-| `hbds-journal` | GTAD's persistence, a `Recorder`: the journal below; SFSI and ZE would be another | core, gtad |
+| `hbds-journal` | GTAD's persistence, a `Recorder`: the journal below, in place of SFSI and ZE (architecture.md, decision 13) | core, gtad |
 | `hbds-simulation` | the discrete simulation (project 17): PROCESS, the sequencing set and figure 52's transitions; a language runs the bodies | core, gtad |
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `hbds-reflexes` | the reflex engine (project 18): REFLEX, what each change launches; a language runs the reactions | core, gtad |
