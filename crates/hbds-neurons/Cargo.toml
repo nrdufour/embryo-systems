@@ -1,0 +1,12 @@
+[package]
+name = "hbds-neurons"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The neural engine (project 18, pages 122 to 126), on the reflex engine.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-gtad = { path = "../hbds-gtad" }
+hbds-reflexes = { path = "../hbds-reflexes" }

@@ -260,8 +260,17 @@ impl fmt::Display for Error {
 
 pub type Stored<T> = Result<T, Error>;
 
-/// Of a change about to be made, the launches it makes: (reflex, object).
-pub type Watcher = fn(&Store, &Change, &mut Vec<(Id, Id)>);
+/// A reflex launched by a change: the reflex, the object concerned, and
+/// the value the change set, if it set one (a neuron's intensity).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Launch {
+    pub reflex: Id,
+    pub this: Id,
+    pub value: Option<Value>,
+}
+
+/// Of a change about to be made, the launches it makes.
+pub type Watcher = fn(&Store, &Change, &mut Vec<Launch>);
 
 /// What tells, of a change, the constraints it concerns (pages 157 to
 /// 160): their FORMULAs run at the end of the statement.
@@ -294,9 +303,9 @@ pub struct Store {
     /// What tells, of each change, the reflexes it launches: the reflex
     /// engine's, once REFLEX exists (project 18).
     watcher: Option<Watcher>,
-    /// The launches not yet run, (reflex, object), in order: in the
-    /// transaction's snapshot, so that a refused change launches nothing.
-    launched: Vec<(Id, Id)>,
+    /// The launches not yet run, in order: in the transaction's
+    /// snapshot, so that a refused change launches nothing.
+    launched: Vec<Launch>,
     /// What tells, of each change, the constraints it concerns: the
     /// constraint engine's, once CONSTRAINT exists.
     checker: Option<Checker>,
@@ -344,7 +353,7 @@ struct Snapshot {
     modules: Vec<(String, String)>,
     fibers: Option<String>,
     sequencing: Option<String>,
-    launched: Vec<(Id, Id)>,
+    launched: Vec<Launch>,
     touched: BTreeSet<Id>,
     ix: Indexes,
 }
@@ -713,7 +722,7 @@ impl Store {
     }
 
     /// The launches not yet run, taken, in order.
-    pub fn take_launched(&mut self) -> Vec<(Id, Id)> {
+    pub fn take_launched(&mut self) -> Vec<Launch> {
         std::mem::take(&mut self.launched)
     }
 

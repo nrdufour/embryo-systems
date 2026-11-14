@@ -2026,12 +2026,22 @@ impl Machine {
         let reflexes = hbds_reflexes::is_system(name);
         let constraints = hbds_constraints::is_system(name);
         let dialog = hbds_dialog::is_system(name);
-        if !rules && !reflexes && !constraints && !dialog && !hbds_simulation::is_system(name) {
+        let neurons = hbds_neurons::is_system(name);
+        if !rules
+            && !reflexes
+            && !constraints
+            && !dialog
+            && !neurons
+            && !hbds_simulation::is_system(name)
+        {
             return Ok(());
         }
         let mut store = self.store.lock().unwrap();
         if store.find_class(name).is_some() {
             return Ok(());
+        }
+        if neurons {
+            return stored(hbds_neurons::install(&mut store), span);
         }
         match (rules, reflexes, constraints, dialog) {
             (true, ..) => stored(hbds_rules::install(&mut store), span),
@@ -2057,7 +2067,12 @@ impl Machine {
             if launched.is_empty() {
                 return Ok(());
             }
-            for (r, o) in launched {
+            for hbds_gtad::Launch {
+                reflex: r,
+                this: o,
+                value,
+            } in launched
+            {
                 done += 1;
                 if done > hbds_reflexes::LIMIT {
                     return Err(error(
@@ -2071,8 +2086,26 @@ impl Machine {
                 let Some(code) = self.property(AdtRef::Object(r), hbds_reflexes::REACTION) else {
                     continue;
                 };
+                // A neuron stores its stimulus, or ignores it (figure 58).
+                let neuron = hbds_neurons::is_neuron(&self.store.lock().unwrap(), r);
+                if neuron {
+                    let mut heard = false;
+                    self.atomic(span, |m| {
+                        let mut store = m.store.lock().unwrap();
+                        heard =
+                            stored(hbds_neurons::stimulate(&mut store, r, value.as_ref()), span)?;
+                        Ok(())
+                    })?;
+                    if !heard {
+                        continue;
+                    }
+                }
                 // A DELAY puts it in time, in the sequencing set (page 126).
-                let delay = hbds_reflexes::delay(&self.store.lock().unwrap(), r);
+                let delay = if neuron {
+                    hbds_neurons::delay(&self.store.lock().unwrap(), r)
+                } else {
+                    hbds_reflexes::delay(&self.store.lock().unwrap(), r)
+                };
                 if delay != 0.0 {
                     self.sim_op(span, |sim, _| sim.launch(r, o, delay).map(|_| ()))?;
                     continue;
@@ -2082,13 +2115,18 @@ impl Machine {
                 let fragment = lower::parse_fragment(&code.text).map_err(|e| {
                     error(span, format!("the REACTION of {what} does not parse: {e}"))
                 })?;
+                let learning = self.learning(r, span)?;
                 let mut f = Frame {
                     this: Some(AdtRef::Object(o)),
                     ..Frame::default()
                 };
                 self.reacting.store(true, Ordering::Relaxed);
                 let ran = self.atomic(span, |m| {
-                    m.called_back(|| m.run_fragment(&fragment, &mut f))
+                    if neuron && !m.discharge(r, span)? {
+                        return Ok(());
+                    }
+                    m.called_back(|| m.run_fragment(&fragment, &mut f))?;
+                    m.learn(r, learning.as_ref(), span)
                 });
                 self.reacting.store(false, Ordering::Relaxed);
                 ran.map_err(|flow| within(flow, "REACTION", &what, span))?;
@@ -2238,6 +2276,42 @@ impl Machine {
         }
     }
 
+    /// A neuron's LEARNING, parsed, if it is a neuron that has one.
+    fn learning(&self, r: Id, span: Span) -> Exec<Option<Fragment>> {
+        if !hbds_neurons::is_neuron(&self.store.lock().unwrap(), r) {
+            return Ok(None);
+        }
+        let Some(code) = self.property(AdtRef::Object(r), hbds_neurons::LEARNING) else {
+            return Ok(None);
+        };
+        let what = self.describe(AdtRef::Object(r));
+        self.ours(&code, "LEARNING", &what, span)?;
+        let fragment = lower::parse_fragment(&code.text)
+            .map_err(|e| error(span, format!("the LEARNING of {what} does not parse: {e}")))?;
+        Ok(Some(fragment))
+    }
+
+    /// A neuron's firing: INPUT taken from what it stored (figure 58);
+    /// false if nothing was.
+    fn discharge(&self, r: Id, span: Span) -> Exec<bool> {
+        let mut store = self.store.lock().unwrap();
+        stored(hbds_neurons::discharge(&mut store, r), span)
+    }
+
+    /// After a neuron's REACTION, its LEARNING, THIS the neuron.
+    fn learn(&self, r: Id, learning: Option<&Fragment>, span: Span) -> Exec<()> {
+        let Some(fragment) = learning else {
+            return Ok(());
+        };
+        let mut f = Frame {
+            this: Some(AdtRef::Object(r)),
+            ..Frame::default()
+        };
+        let what = self.describe(AdtRef::Object(r));
+        self.called_back(|| self.run_fragment(fragment, &mut f))
+            .map_err(|flow| within(flow, "LEARNING", &what, span))
+    }
+
     /// A reflex in time, its reaction run from where it stopped, until it
     /// holds, passivates or ends; ended, it is forgotten.
     fn run_reflex(&self, n: u64, span: Span) -> Exec<()> {
@@ -2263,6 +2337,19 @@ impl Machine {
             self.ours(&code, "REACTION", &what, span)?;
             let fragment = lower::parse_fragment(&code.text)
                 .map_err(|e| error(span, format!("the REACTION of {what} does not parse: {e}")))?;
+            let learning = self.learning(r, span)?;
+            // A neuron fires with what it stored; nothing left, it does not.
+            if hbds_neurons::is_neuron(&self.store.lock().unwrap(), r) {
+                let mut fires = false;
+                self.atomic(span, |m| {
+                    fires = m.discharge(r, span)?;
+                    Ok(())
+                })?;
+                if !fires {
+                    self.sim.lock().unwrap().forget(agent);
+                    return Ok(());
+                }
+            }
             let (go, go_rx) = channel();
             let (back_tx, back) = channel();
             let back = Arc::new(Mutex::new(back));
@@ -2289,7 +2376,8 @@ impl Machine {
                     ..Frame::default()
                 };
                 // In time, as a process's body: its errors are its own.
-                let ended = machine.run_fragment(&fragment, &mut f);
+                let ended = (machine.run_fragment(&fragment, &mut f))
+                    .and_then(|()| machine.atomic(span, |m| m.learn(r, learning.as_ref(), span)));
                 let _ = link.back.send(Event::Ended(ended));
             });
             spawned.map_err(|e| error(span, format!("no thread for the reflex: {e}")))?;

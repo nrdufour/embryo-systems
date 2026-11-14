@@ -12,7 +12,7 @@
 
 use hbds_core::value::{Scalar, Value};
 use hbds_core::{AdtRef, Id, same};
-use hbds_gtad::{Change, ClassKind, State, Store, Stored};
+use hbds_gtad::{Change, ClassKind, Launch, State, Store, Stored};
 
 /// The system hyperclass of reflex classes, its attributes, its code.
 pub const REFLEX: &str = "REFLEX";
@@ -60,35 +60,50 @@ pub fn installed(store: &Store) -> bool {
 }
 
 /// What a change is to the reflexes: its event, the launchers it may
-/// wake, the object concerned. Read before the change is made.
-fn event(store: &Store, change: &Change) -> Option<(&'static str, Vec<AdtRef>, Id)> {
+/// wake, the object concerned, the value set. Read before the change is
+/// made.
+type Event = (&'static str, Vec<AdtRef>, Id, Option<Value>);
+
+fn event(store: &Store, change: &Change) -> Option<Event> {
     let classes = |c: Id| store.lineage(c).into_iter().map(AdtRef::Class).collect();
     match change {
-        Change::Object { id, class, .. } => Some(("create", classes(*class), *id)),
+        Change::Object { id, class, .. } => Some(("create", classes(*class), *id, None)),
         Change::State {
             target: AdtRef::Object(o),
             state: State::Destroyed,
-        } => Some(("destroy", classes(store.objects().get(o)?.class), *o)),
+        } => Some(("destroy", classes(store.objects().get(o)?.class), *o, None)),
         Change::Set {
-            object, attribute, ..
-        } => Some(("set", vec![AdtRef::ClassAttribute(*attribute)], *object)),
+            object,
+            attribute,
+            value,
+        } => Some((
+            "set",
+            vec![AdtRef::ClassAttribute(*attribute)],
+            *object,
+            Some(value.clone()),
+        )),
         Change::ObjectLink {
             class_link, from, ..
-        } => Some(("assert", vec![AdtRef::ClassLink(*class_link)], *from)),
+        } => Some(("assert", vec![AdtRef::ClassLink(*class_link)], *from, None)),
         Change::Unlink { id } => {
             let l = store.object_links().get(id)?;
-            Some(("retract", vec![AdtRef::ClassLink(l.class_link)], l.from))
+            Some((
+                "retract",
+                vec![AdtRef::ClassLink(l.class_link)],
+                l.from,
+                None,
+            ))
         }
         _ => None,
     }
 }
 
 /// The store's watcher: the reflexes `change` launches, oldest first,
-/// each with the object it concerns. A reflex launches if it is active,
+/// each with the object it concerns and the value set. A reflex launches if it is active,
 /// its EVENT is the change's, one of its launchers is an a.d.t. the
 /// change wakes, and it has a REACTION.
-pub fn launches(store: &Store, change: &Change, out: &mut Vec<(Id, Id)>) {
-    let Some((event, launchers, this)) = event(store, change) else {
+pub fn launches(store: &Store, change: &Change, out: &mut Vec<Launch>) {
+    let Some((event, launchers, this, value)) = event(store, change) else {
         return;
     };
     let Some(reflex) = store.find_class(REFLEX) else {
@@ -129,7 +144,11 @@ pub fn launches(store: &Store, change: &Change, out: &mut Vec<(Id, Id)>) {
     }
     found.sort();
     found.dedup();
-    out.extend(found.into_iter().map(|r| (r, this)));
+    out.extend(found.into_iter().map(|reflex| Launch {
+        reflex,
+        this,
+        value: value.clone(),
+    }));
 }
 
 /// A reflex's DELAY: 0 if it has none.

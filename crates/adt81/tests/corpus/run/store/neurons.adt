@@ -1,0 +1,52 @@
+-- Figure 58's neurons (pages 122 to 126): a pressure on the skin below --
+-- the detection minimum is ignored; above it, stored up to the maximum --
+-- storage and passed on capped at the saturation; each firing raises --
+-- the threshold, the LEARNING written here, until the same pressure is --
+-- no longer felt (habituation). A second neuron, in time, sums two --
+-- stimuli of one instant into one firing after its three delays. --
+-- Written for the neural engine (docs/hbds.md, "Neurons"). --
+
+program neurons ;
+begin
+        create "skin", "muscle" ;
+        create "skin" . "pressure", "skin" . "heat", "muscle" . "tension" ;
+        create "s1" [ "skin" ], "m1" [ "muscle" ] ;
+
+        create "nerve" ; include "nerve" into "neuron" ;
+        create "touch" [ "nerve" ], "warmth" [ "nerve" ] ;
+        let "touch" [ "nerve" ] . "event" := "set" ;
+        let "touch" [ "nerve" ] . "detection" := 3 ;
+        let "touch" [ "nerve" ] . "storage" := 6 ;
+        let "touch" [ "nerve" ] . "saturation" := 5 ;
+        assoc "skin" . "pressure" with "touch" [ "nerve" ] ;
+        let "touch" [ "nerve" ] ' reaction :=
+            "print ""touch fires"", ""touch"" [ ""nerve"" ] . ""input"", ""touch"" [ ""nerve"" ] . ""level"" ; " &
+            "let ""m1"" [ ""muscle"" ] . ""tension"" := ""touch"" [ ""nerve"" ] . ""input""" ;
+        let "touch" [ "nerve" ] ' learning :=
+            "let this . ""detection"" := this . ""detection"" + 2 ; " &
+            "print ""threshold now"", this . ""detection""" ;
+
+        let "s1" [ "skin" ] . "pressure" := 2 ;
+        print "2 not felt" ;
+        let "s1" [ "skin" ] . "pressure" := 8 ;
+        print "tension", "m1" [ "muscle" ] . "tension" ;
+        let "s1" [ "skin" ] . "pressure" := 4 ;
+        print "4 not felt" ;
+        let "s1" [ "skin" ] . "pressure" := 6 ;
+        let "s1" [ "skin" ] . "pressure" := 0 ;
+        let "s1" [ "skin" ] . "pressure" := 6 ;
+        print "6 no longer felt: habituated" ;
+
+        let "warmth" [ "nerve" ] . "event" := "set" ;
+        let "warmth" [ "nerve" ] . "acquisition" := 1 ;
+        let "warmth" [ "nerve" ] . "processing" := 1 ;
+        let "warmth" [ "nerve" ] . "transmission" := 1 ;
+        assoc "skin" . "heat" with "warmth" [ "nerve" ] ;
+        let "warmth" [ "nerve" ] ' reaction :=
+            "print ""warmth fires at"", time, ""warmth"" [ ""nerve"" ] . ""input""" ;
+        let "s1" [ "skin" ] . "heat" := 2 ;
+        let "s1" [ "skin" ] . "heat" := 3 ;
+        print "heated at", time ;
+        hold for 10 ;
+        print "at the end", time, "warmth" [ "nerve" ] . "level"
+end ;

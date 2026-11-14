@@ -58,6 +58,7 @@ has one; `just bench-record` writes both.
 - **Discrete simulation:** processes, objects of classes in the hyperclass PROCESS, run their bodies as coroutines, ordered by a sequencing set as in SIMULA 67; the main program's HOLD lets them run, and ACTIVATE, REACTIVATE, CANCEL, DELAY, KILL, PASSIVATE and TERMINATE move them as figure 52 has it.
 - **Expert systems:** rules are objects of classes in the hyperclass RULE, their premises and consequents code compiled when written; CHAV chains them forward, HYPOCHAV from hypotheses, with the print's ten parameters (priority, reliabilities, askability, activation and inhibition among them), and INRULE, OUTRULE, INFACT and OUTFACT walk them.
 - **Reflexes:** objects of classes in the hyperclass REFLEX react to their launchers' events, breadth first after the launching statement, or later in simulated time when they have a DELAY.
+- **Neurons:** objects of classes in the hyperclass NEURON, itself in REFLEX, are reflexes with figure 58's intensities: a stimulus below the detection minimum is ignored, stored up to the maximum storage, passed on capped at the saturation, after the three delays; their LEARNING, written in ADT'81, runs after each firing.
 - **Constraints:** MAY, MUST and CANNOT hold pairs of objects to a link; objects of classes in the hyperclass CONSTRAINT run their FORMULA at the end of each statement that concerned their components, and may refuse it.
 - **Dialogs:** a Q-Graph of simple and multiple-choice questions, objects of figure 71's classes, walked by `CALL DIAL`: typed answers, blank ones where allowed, PROLOG, EPILOG and tasks, a choice whose branch is delayed to a later question, going back, the answers memorized as objects; on the terminal, and in a daemon's sessions.
 - **The polycopié's own code runs:** pages 127-128's computed attributes ARC.LENGTH and AREA.PERIMETER give the right answers on a test schema, once three print errors are corrected.
@@ -79,6 +80,7 @@ flowchart LR
     interp --> rules["expert systems"]
     interp --> sim["simulation"]
     interp --> reflexes["reflexes"]
+    interp --> neurons["neurons"]
     interp --> constraints["constraints"]
     interp --> dialog["dialog"]
     gtad -- "each change, through Recorder" --> journal[(journal)]
@@ -102,6 +104,9 @@ flowchart BT
     sim --> core
     reflexes["hbds-reflexes<br/>reflexes, project 18"] --> gtad
     reflexes --> core
+    neurons["hbds-neurons<br/>neurons, project 18"] --> reflexes
+    neurons --> gtad
+    neurons --> core
     constraints["hbds-constraints<br/>constraints, pages 157 to 160"] --> gtad
     constraints --> core
     dialog["hbds-dialog<br/>dialog, project 19"] --> gtad
@@ -109,6 +114,7 @@ flowchart BT
     adt81["adt81<br/>the language"] --> lists
     adt81 --> sim
     adt81 --> reflexes
+    adt81 --> neurons
     adt81 --> constraints
     adt81 --> dialog
     adt81 --> rules
@@ -130,6 +136,7 @@ flowchart BT
 | `crates/hbds-rules` | the expert systems: rules and facts, SES's four functors, CHAV and HYPOCHAV |
 | `crates/hbds-simulation` | the discrete simulation: PROCESS, the sequencing set, figure 52's primitives |
 | `crates/hbds-reflexes` | the reflex engine: REFLEX, its events, launchers and delays |
+| `crates/hbds-neurons` | the neural engine: NEURON, figure 58's intensities and delays, LEARNING |
 | `crates/hbds-constraints` | the constraint engine: CONSTRAINT, its FORMULA and components |
 | `crates/hbds-dialog` | the dialog engine: figure 71's Q-Graph, walked by CALL DIAL |
 | `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
@@ -147,7 +154,6 @@ The system's own steps (A-code and a VM, standalone builds, a daemon with a web 
 
 | engine | print |
 |---|---|
-| neurons (reflexes are built, in time too: docs/hbds.md, "Reflexes") | project 18, pages 116 to 131 |
 | SFSI and ZE, the print's own file system and exchange zone, as another persistence | project 13, pages 86 to 105 |
 | NINJAS, protection against object-oriented viruses | project 20, page 150 |
 | ADTmin, precompilers to C, Ada, Pascal and Fortran | page 161 |
@@ -163,7 +169,7 @@ services.embryo-systems = {
 
 ## Develop
 
-The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs, on Forgejo where the project lives and on its GitHub mirror alike:
+The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs, on Forgejo where the project lives:
 
 - formatting and clippy
 - every test

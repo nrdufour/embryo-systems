@@ -16,7 +16,7 @@ ALLOWED = {
     "hbds-maps": set(),
     "hbds-values": {"hbds-core"},
     "hbds-acode": {"hbds-core", "hbds-values"},
-    "hbds-vm": {"hbds-core", "hbds-values", "hbds-lists", "hbds-acode", "hbds-gtad", "hbds-functors", "hbds-rules", "hbds-simulation", "hbds-reflexes", "hbds-constraints", "hbds-dialog"},
+    "hbds-vm": {"hbds-core", "hbds-values", "hbds-lists", "hbds-acode", "hbds-gtad", "hbds-functors", "hbds-rules", "hbds-simulation", "hbds-reflexes", "hbds-constraints", "hbds-dialog", "hbds-neurons"},
     "hbds-lists": {"hbds-core", "hbds-values"},
     "hbds-http": {"hbds-core"},
     "hbds-daemon": {"hbds-core", "hbds-acode", "hbds-gtad", "hbds-http", "hbds-journal", "hbds-vm"},
@@ -28,7 +28,8 @@ ALLOWED = {
     "hbds-reflexes": {"hbds-core", "hbds-gtad"},
     "hbds-constraints": {"hbds-core", "hbds-gtad"},
     "hbds-dialog": {"hbds-core", "hbds-gtad"},
-    "adt81": {"hbds-core", "hbds-values", "hbds-acode", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules", "hbds-simulation", "hbds-reflexes", "hbds-constraints", "hbds-dialog"},
+    "hbds-neurons": {"hbds-core", "hbds-gtad", "hbds-reflexes"},
+    "adt81": {"hbds-core", "hbds-values", "hbds-acode", "hbds-lists", "hbds-gtad", "hbds-functors", "hbds-journal", "hbds-rules", "hbds-simulation", "hbds-reflexes", "hbds-constraints", "hbds-dialog", "hbds-neurons"},
     "embryo-systems": {"adt81", "hbds-gtad", "hbds-journal", "hbds-acode", "hbds-vm", "hbds-daemon", "hbds-http"},
     "embryo-systems-bench": {"adt81", "hbds-gtad", "hbds-vm"},
 }
