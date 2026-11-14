@@ -12,14 +12,27 @@ const BIN: &str = env!("CARGO_BIN_EXE_embryo-systems");
 
 /// What `program args` prints given `input`, and its errors; whether it
 /// succeeded.
+/// A program just written can be busy a moment: another test's fork may
+/// still hold the writer's descriptor until its exec. Then try again.
 fn launch(program: &str, args: &[&str], input: &str) -> (bool, String, String) {
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let spawn = || {
+        Command::new(program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    };
+    let mut tries = 0;
+    let mut child = loop {
+        match spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            r => break r.unwrap(),
+        }
+    };
     child
         .stdin
         .take()
