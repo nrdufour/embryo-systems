@@ -550,6 +550,34 @@ impl hbds_rules::Host for Engine<'_> {
     }
 }
 
+impl hbds_dialog::Host for Engine<'_> {
+    fn store(&mut self) -> Box<dyn DerefMut<Target = Store> + '_> {
+        Box::new(self.m.store.lock().unwrap())
+    }
+
+    fn run(&mut self, part: &str, owner: Id, code: &Code, run: Id) -> Result<(), String> {
+        let what = self.m.describe(AdtRef::Object(owner));
+        let Part::Stmts(fragment) = self.m.part(part, code, &what)? else {
+            unreachable!("{part} is statements")
+        };
+        let mut f = Frame {
+            this: Some(AdtRef::Object(run)),
+            ..Frame::default()
+        };
+        (self.m)
+            .called_back(|| self.m.run_fragment(&fragment, &mut f))
+            .map_err(|flow| told(flow, part, Some(&what)))
+    }
+
+    fn read(&mut self, line: &str) -> Result<Value, String> {
+        input(line, &Ty::Unknown)
+    }
+
+    fn write(&mut self, text: &str) {
+        self.m.io.lock().unwrap().write(text);
+    }
+}
+
 /// One iteration's outcome, for the loop that runs it.
 enum Step {
     Go,
@@ -1406,6 +1434,9 @@ impl Machine {
                 Err(Flow::Stop)
             }
             StmtKind::Chain(n) => Err(Flow::Chain(n.clone())),
+            StmtKind::Call(c) if self.module(&c.name).is_none() && c.name.key == "DIAL" => {
+                self.dial(c, f, s.span)
+            }
             StmtKind::Call(c)
                 if self.module(&c.name).is_none() && builtins::is_subroutine(&c.name.key) =>
             {
@@ -1994,17 +2025,19 @@ impl Machine {
         let rules = hbds_rules::is_system(name);
         let reflexes = hbds_reflexes::is_system(name);
         let constraints = hbds_constraints::is_system(name);
-        if !rules && !reflexes && !constraints && !hbds_simulation::is_system(name) {
+        let dialog = hbds_dialog::is_system(name);
+        if !rules && !reflexes && !constraints && !dialog && !hbds_simulation::is_system(name) {
             return Ok(());
         }
         let mut store = self.store.lock().unwrap();
         if store.find_class(name).is_some() {
             return Ok(());
         }
-        match (rules, reflexes, constraints) {
-            (true, _, _) => stored(hbds_rules::install(&mut store), span),
-            (_, true, _) => stored(hbds_reflexes::install(&mut store), span),
-            (_, _, true) => stored(hbds_constraints::install(&mut store), span),
+        match (rules, reflexes, constraints, dialog) {
+            (true, ..) => stored(hbds_rules::install(&mut store), span),
+            (_, true, ..) => stored(hbds_reflexes::install(&mut store), span),
+            (_, _, true, _) => stored(hbds_constraints::install(&mut store), span),
+            (.., true) => stored(hbds_dialog::install(&mut store), span),
             _ => stored(hbds_simulation::install(&mut store), span),
         }
     }
@@ -2390,6 +2423,55 @@ impl Machine {
             None => hbds_rules::chav(&mut engine, &scope),
         };
         run.map(|_| ()).map_err(|e| error(span, e))
+    }
+
+    /// CALL DIAL(dialog): the dialog engine walks it (figure 72), each
+    /// step a transaction of its own, a line read for each answer.
+    fn dial(&self, c: &Call, f: &mut Frame, span: Span) -> Exec<()> {
+        let [arg] = c.args.as_slice() else {
+            return Err(error(span, "DIAL takes one dialog"));
+        };
+        let v = self.eval(arg, f)?;
+        let mut run = 0;
+        self.atomic(span, |m| {
+            let mut store = m.store.lock().unwrap();
+            stored(hbds_dialog::install(&mut store), span)?;
+            let dialog = match v {
+                Value::Adt(AdtRef::Object(o)) => o,
+                v => match v.scalar() {
+                    Some(Scalar::String(_) | Scalar::Character(_)) => {
+                        let name = store.show(&v);
+                        let class = stored(store.class(hbds_dialog::DIALOG), span)?;
+                        stored(store.object(class, &name), span)?
+                    }
+                    _ => {
+                        return Err(error(
+                            span,
+                            format!("DIAL takes a dialog, or its name; not {v}"),
+                        ));
+                    }
+                },
+            };
+            run = hbds_dialog::start(&mut store, dialog).map_err(|e| error(span, e))?;
+            Ok(())
+        })?;
+        loop {
+            let line = if hbds_dialog::wants(&self.store.lock().unwrap(), run) {
+                let line = self.io.lock().unwrap().read_line();
+                Some(line.ok_or_else(|| error(span, "DIAL finds no more input"))?)
+            } else {
+                None
+            };
+            let mut done = false;
+            self.atomic(span, |m| {
+                let step = hbds_dialog::step(&mut Engine { m }, run, line.as_deref());
+                done = step.map_err(|e| error(span, e))?;
+                Ok(())
+            })?;
+            if done {
+                return Ok(());
+            }
+        }
     }
 
     /// Runs `body` as one transaction of the store: its changes, and those

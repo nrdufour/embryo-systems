@@ -20,10 +20,12 @@ pub fn is_property(key: &str) -> bool {
         || hbds_rules::is_property(key)
         || hbds_reflexes::is_property(key)
         || hbds_constraints::is_property(key)
+        || hbds_dialog::is_property(key)
 }
 
-/// The expert-system engines, CALLed as subroutines (page 106).
-pub const SUBROUTINES: &[&str] = &["CHAV", "HYPOCHAV"];
+/// The expert-system engines (page 106) and the dialog engine (figure
+/// 72), CALLed as subroutines.
+pub const SUBROUTINES: &[&str] = &["CHAV", "HYPOCHAV", "DIAL"];
 
 pub fn is_subroutine(key: &str) -> bool {
     SUBROUTINES.contains(&key)

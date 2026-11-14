@@ -1,0 +1,8 @@
+-- A dialog with no "initial" place has nothing to ask: CALL DIAL --
+-- refuses it. Written for the dialog engine (docs/hbds.md, "Dialog"). --
+
+program nowhere ;
+begin
+        create "d" [ "dialog" ] ;
+        call dial ( "d" )
+end ;

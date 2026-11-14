@@ -1,0 +1,60 @@
+-- The dialog engine (project 19, figures 66 to 71) on a small river --
+-- survey: simple questions with their TYPE, a facultative comment, a --
+-- multiple-choice question whose choice branches only two questions --
+-- later (page 139's delayed branching), going back, a PROLOG and an --
+-- EPILOG, and the answers memorized, read back with the functors. --
+-- Written for the dialog engine (docs/hbds.md, "Dialog"). --
+
+program survey ;
+local
+        l : list of object ;
+        a : object ;
+begin
+        create "river" [ "sq" ], "comment" [ "sq" ], "x" [ "sq" ], "y" [ "sq" ],
+               "ph" [ "sq" ], "count" [ "sq" ] ;
+        create "theme" [ "mcq" ] ;
+        create "water" [ "pa" ], "fish" [ "pa" ] ;
+        create "survey" [ "dialog" ] ;
+
+        let "river" [ "sq" ] . "text" := "River" ;
+        let "river" [ "sq" ] . "memorize" := true ;
+        let "river" [ "sq" ] ' prolog := "print ""-- survey --""" ;
+        let "river" [ "sq" ] ' epilog := "print ""noted"", this . ""last""" ;
+        let "comment" [ "sq" ] . "text" := "Comment" ;
+        let "comment" [ "sq" ] . "facultative" := true ;
+        let "comment" [ "sq" ] ' blank := "print ""no comment""" ;
+        let "theme" [ "mcq" ] . "text" := "Theme" ;
+        let "theme" [ "mcq" ] . "memorize" := true ;
+        let "water" [ "pa" ] . "text" := "water quality" ;
+        let "fish" [ "pa" ] . "text" := "fish" ;
+        let "x" [ "sq" ] . "text" := "Station x" ;
+        let "x" [ "sq" ] . "type" := "FLOAT" ;
+        let "y" [ "sq" ] . "text" := "Station y" ;
+        let "y" [ "sq" ] . "type" := "FLOAT" ;
+        let "ph" [ "sq" ] . "text" := "pH" ;
+        let "ph" [ "sq" ] . "type" := "FLOAT" ;
+        let "ph" [ "sq" ] . "memorize" := true ;
+        let "count" [ "sq" ] . "text" := "Fish counted" ;
+        let "count" [ "sq" ] . "type" := "INTEGER" ;
+        let "count" [ "sq" ] . "memorize" := true ;
+
+        assert "survey" [ "dialog" ] "initial" "river" [ "sq" ] ;
+        assert "river" [ "sq" ] "next" "comment" [ "sq" ] ;
+        assert "comment" [ "sq" ] "next" "theme" [ "mcq" ] ;
+        assert "theme" [ "mcq" ] "proposes" "water" [ "pa" ] ;
+        assert "theme" [ "mcq" ] "proposes" "fish" [ "pa" ] ;
+        -- One exit for both choices: theirs is taken after y (figure 68). --
+        assert "theme" [ "mcq" ] "next" "x" [ "sq" ] ;
+        assert "x" [ "sq" ] "next" "y" [ "sq" ] ;
+        assert "y" [ "sq" ] "controlled by" "theme" [ "mcq" ] ;
+        assert "water" [ "pa" ] "delayed" "ph" [ "sq" ] ;
+        assert "fish" [ "pa" ] "delayed" "count" [ "sq" ] ;
+
+        call dial ( "survey" ) ;
+        print "" ;
+        print "phase", "1" [ "run" ] . "phase" ;
+        l := "1" [ "run" ] ' opscrc ( "gave", "answer" ) ' ofin ;
+        each a of l do
+                print a, a . "text"
+        endeach
+end ;

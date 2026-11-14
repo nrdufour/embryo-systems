@@ -37,11 +37,12 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `hbds-reflexes` | the reflex engine (project 18): REFLEX, what each change launches; a language runs the reactions | core, gtad |
 | `hbds-constraints` | the constraint engine (pages 157 to 160): CONSTRAINT, the constraints each change concerns; a language runs the FORMULAs | core, gtad |
+| `hbds-dialog` | the dialog engine (project 19): figure 71's Q-Graph, a run's steps; a language runs the tasks behind its `Host` trait | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (its operators mapped onto HBDS's operations, math functions, what an unknown name means); it wires the engines together | the engines |
 | `hbds-acode` | A-code, HBDS's machine code: the format, its version, its text form, and what a unit asks of its language | core, values |
-| `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation, reflexes |
-| `hbds-http` | the daemon's wire: HTTP/1.1, WebSocket, JSON | none |
-| `hbds-daemon` | the daemon: the executor owning the store, clients' sessions in turns over a Unix socket, and the client side; no language of its own | acode, gtad, http, vm |
+| `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation, reflexes, constraints, dialog |
+| `hbds-http` | the daemon's wire: HTTP/1.1, WebSocket, JSON | core |
+| `hbds-daemon` | the daemon: the executor owning the store, clients' sessions in turns over a Unix socket, and the client side; no language of its own | core, acode, gtad, http, journal, vm |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal, acode, vm, daemon |
 | `embryo-systems-bench` | the benchmarks, `just bench`: the programs of `bench/scenarios` on a ladder of sizes, by the reference and the VM, against `bench/work.txt` and `bench/<host>.txt` | adt81, gtad, vm |
 
@@ -388,6 +389,73 @@ statements, no syntax for the rest, and no algorithm. Decided on
 solves page 159's P, V and T, `store/networks.adt` is figure 80 in the
 plane; `store/errors/formula.adt` and `networks.adt` are refused.
 
+## Dialog
+
+The dialog engine (project 19, pages 133 to 149, figures 63 to 72): a
+dialog is data, a graph of questions and the answers they propose,
+walked by a small engine; changing its sequence or its texts changes no
+program (page 143). The print gives the model (figure 71) and the
+engine's parts (figure 72), not its algorithm, which "has only 15 lines"
+but is the course's. Ours, decided on 2026-11-14:
+
+- **Figure 71's classes, created the first time a program names one**:
+  DIALOG, its places SQ (simple question) and MCQ (multiple choice), both
+  in QPLACE, our name for the figure's unnamed hyperclass, and PA, the
+  answers an MCQ proposes. A place carries TEXT (the question),
+  FACULTATIVE and MEMORIZE (figure 71's Zone_for_storing_answer, read as
+  a flag); an SQ its TYPE, STRING, INTEGER, FLOAT or BOOLEAN; an MCQ
+  DISPLAY (true unless set) and LEARNING; a PA its TEXT and MEMORIZE
+  (true unless set). The code is properties, statements as an ACTION's:
+  a place's PROLOG, EPILOG and BLANK (Task_empty_answer: EMPTY is a
+  keyword), a PA's TASK. The links: DIALOG "initial", a place's "next"
+  and "if blank", an MCQ "proposes" PA, a PA's "next".
+- **A run is an object, of RUN, ours**: "of" its dialog, "at" its place,
+  its PHASE, its PATH (the places behind it, figure 72's PILE) and LAST,
+  the last answer as a string, which the tasks read, THIS being the run.
+  Its state is the store's, journalled as the rest, so that a run
+  waiting for a line holds nothing but its place.
+- **`CALL DIAL("survey")`** runs a dialog, named or held in a variable,
+  as CHAV is called. A step is a transaction of its own: the PROLOG, then
+  the question; or, once a line is read, the answer, its tasks, and the
+  way on. So a task a COND or FORMULA refuses refuses its step and ends
+  the program, and in the daemon a session waiting for an answer holds
+  no transaction ([architecture.md](architecture.md), decision 7).
+- **A question** is its TEXT followed by ` ? `; an MCQ's has its PAs
+  numbered on lines of their own, unless it does not DISPLAY them. An SQ
+  takes a line that reads as its TYPE, as READ reads; an MCQ a PA's
+  number or TEXT. Anything else says why and asks again. A blank line is
+  taken only if FACULTATIVE (page 137): BLANK runs, and the run goes "if
+  blank", or on as it would have, without the EPILOG (figure 66).
+- **An answer** sets LAST; if MEMORIZE (the place's, and for an MCQ the
+  PA's too, page 138's selective memorization), it becomes an object of
+  ANSWER, ours, its TEXT the answer "converted as a string" (page 137),
+  "at" its place, linked from the run by "gave". Then the PA's TASK, the
+  place's EPILOG, and the way on: a PA's "next", else the place's (a
+  single exit, figure 68), else the run is done.
+- **Delayed branching** (pages 139 to 141): a place "controlled by" an
+  MCQ goes where the "delayed" link of the PA chosen there leads, an SQ
+  (figure 69) as an MCQ, whose own answer is kept (figure 70). The run
+  links what it chose with "chose", the last choice at each MCQ. Reached
+  before its MCQ was answered, a place cannot tell where to go: an
+  error; and an MCQ controls one place, so that its PAs' "delayed" links
+  say where.
+- **Commands** (figure 72's COMMANDES, page 143: going backwards): a line
+  `/back` goes back a place, asked again from its PROLOG, the answers
+  memorized kept as history; `/quit` ends the run; `//` begins an answer
+  with a slash. A LEARNING MCQ takes a line that is no PA's as a new one
+  (page 138's "new answers which may enrich the list"), without a way on
+  until a designer gives it one.
+- **Not yet**: PERIPHERAL_DEVICE, INPUT and OUTPUT (figure 71), the
+  terminal being the only device; macro-Q-places (page 143); a dialog
+  opening another; texts in several languages, one at a time or side by
+  side (page 146); the daemon's page answering questions; the
+  bootstrap, a dialog that builds dialogs (pages 145 and 146).
+
+`store/dialog.adt` is a river survey: typed answers, a blank comment, a
+choice delayed past two questions, going back, the answers read back
+with the functors. `store/errors/delayed.adt` reaches a delayed branch
+too early, `initial.adt` has no place to start.
+
 ## The model
 
 The six basic a.d.t. (page 46, figure 6), as the store keeps them: a
@@ -491,6 +559,8 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `crates/hbds-simulation` | the simulation: PROCESS, the sequencing set |
 | `crates/hbds-reflexes` | the reflexes: REFLEX, launches |
 | `crates/hbds-constraints` | the constraints: CONSTRAINT, the constraints a change concerns |
+| `crates/hbds-dialog` | the dialog: figure 71's classes, a run's steps |
+| `crates/hbds-dialog/tests/engine.rs` | the walk, place by place, on a fake language |
 | `crates/hbds-simulation/tests/sequencing.rs` | every transition of figure 52, legal and not |
 | `crates/hbds-rules/tests/engine.rs` | the chaining rule by rule, on a fake language |
 | `tools/check_engines.py` | what each crate may depend on |

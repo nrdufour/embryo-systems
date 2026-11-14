@@ -243,7 +243,8 @@ fragments are excerpts, with no module to declare their names.
   call in an expression a function, `'` a functor. The wrong kind is an
   error; an unknown subroutine, coroutine or program too. CHAV and
   HYPOCHAV are subroutines without a module: the expert-system engines
-  ([hbds.md](hbds.md), "Expert systems").
+  ([hbds.md](hbds.md), "Expert systems"); so is DIAL, the dialog engine
+  ([hbds.md](hbds.md), "Dialog").
 - An unknown function, functor or property (`LET ... ' COND`) is only a
   warning (decided 2026-10-15): the engines catalogue the functors of
   pages 76 to 80 (`crates/hbds-functors`, `crates/hbds-lists`,

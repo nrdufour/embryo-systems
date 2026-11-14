@@ -379,6 +379,12 @@ pub enum Instr {
     /// Pops n rule classes, and the hypotheses if HYPOCHAV: runs CHAV or
     /// HYPOCHAV over them.
     Chav(bool, usize),
+    /// Pops a dialog or its name: installs the dialog engine's classes,
+    /// starts a run of it, and pushes the run (figure 72).
+    Dial,
+    /// Takes the run on top one step, in a transaction of its own,
+    /// reading a line if it waits for one: pushes whether it is done.
+    DialStep,
     /// RESUME of coroutine m once started: refused with arguments, ended
     /// or running; else it goes on, and then the code at `t`.
     ResumeStarted(usize, bool, usize),
@@ -667,6 +673,8 @@ fn instr(i: &Instr) -> Vec<Term> {
         Instr::InstallRules => vec![word("install.rules")],
         Instr::RuleClass(e) => vec![word("rule.class"), text(e)],
         Instr::Chav(hypotheses, k) => vec![word("chav"), word(hypotheses), n(k)],
+        Instr::Dial => vec![word("dial")],
+        Instr::DialStep => vec![word("dial.step")],
         Instr::ResumeStarted(m, args, t) => vec![word("resume.started"), n(m), word(args), n(t)],
         Instr::ResumeFirst(m, k) => vec![word("resume.first"), n(m), n(k)],
         Instr::Process => vec![word("process")],
@@ -796,6 +804,8 @@ fn read_instr(r: &mut Reader) -> Result<Instr, String> {
         "install.rules" => Instr::InstallRules,
         "rule.class" => Instr::RuleClass(r.text()?),
         "chav" => Instr::Chav(r.parse()?, n(r)?),
+        "dial" => Instr::Dial,
+        "dial.step" => Instr::DialStep,
         "resume.started" => Instr::ResumeStarted(n(r)?, r.parse()?, n(r)?),
         "resume.first" => Instr::ResumeFirst(n(r)?, n(r)?),
         "process" => Instr::Process,

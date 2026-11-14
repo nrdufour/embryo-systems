@@ -1,0 +1,12 @@
+-- A place branching as an earlier MCQ is answered (page 140), reached --
+-- before that MCQ was: the dialog cannot tell where to go, a runtime --
+-- error. Written for the dialog engine (docs/hbds.md, "Dialog"). --
+
+program undecided ;
+begin
+        create "theme" [ "mcq" ], "x" [ "sq" ], "d" [ "dialog" ] ;
+        let "x" [ "sq" ] . "text" := "Station x" ;
+        assert "d" [ "dialog" ] "initial" "x" [ "sq" ] ;
+        assert "x" [ "sq" ] "controlled by" "theme" [ "mcq" ] ;
+        call dial ( "d" )
+end ;
