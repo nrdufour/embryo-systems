@@ -1,0 +1,13 @@
+-- A neuron's LEARNING fails: an attribute neurons do not have. --
+
+program e ;
+begin
+        create "skin" ; create "skin" . "pressure" ; create "s1" [ "skin" ] ;
+        create "nerve" ; include "nerve" into "neuron" ; create "touch" [ "nerve" ] ;
+        let "touch" [ "nerve" ] . "event" := "set" ;
+        assoc "skin" . "pressure" with "touch" [ "nerve" ] ;
+        let "touch" [ "nerve" ] ' reaction := "print ""fires""" ;
+        let "touch" [ "nerve" ] ' learning := "let this . ""patience"" := 1" ;
+        print "before" ;
+        let "s1" [ "skin" ] . "pressure" := 2
+end ;

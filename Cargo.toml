@@ -16,6 +16,7 @@ members = [
     "crates/hbds-reflexes",
     "crates/hbds-constraints",
     "crates/hbds-dialog",
+    "crates/hbds-neurons",
     "crates/adt81",
     "crates/bench",
 ]

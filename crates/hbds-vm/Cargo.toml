@@ -18,3 +18,4 @@ hbds-simulation = { path = "../hbds-simulation" }
 hbds-reflexes = { path = "../hbds-reflexes" }
 hbds-constraints = { path = "../hbds-constraints" }
 hbds-dialog = { path = "../hbds-dialog" }
+hbds-neurons = { path = "../hbds-neurons" }

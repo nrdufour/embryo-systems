@@ -21,6 +21,7 @@ pub fn is_property(key: &str) -> bool {
         || hbds_reflexes::is_property(key)
         || hbds_constraints::is_property(key)
         || hbds_dialog::is_property(key)
+        || hbds_neurons::is_property(key)
 }
 
 /// The expert-system engines (page 106) and the dialog engine (figure

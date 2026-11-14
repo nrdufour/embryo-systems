@@ -990,11 +990,32 @@ impl<'r> Vm<'r> {
                     .map_err(|f| f.at(at))?;
                 self.dispatch()
             }
-            // A reflex in time, its reaction done: forgotten.
+            // A reflex in time, its reaction done: a neuron learns, then
+            // it is forgotten.
             Role::Reflex(n) => {
+                let at = self.o.held_at;
+                if let Some((r, _)) = self.sim.reflex(n)
+                    && let Some(l) = self.learning(r).map_err(|f| f.at(at))?
+                {
+                    self.store.begin();
+                    self.o.open += 1;
+                    let learnt = self.learn(r, l);
+                    let learnt = match learnt {
+                        Ok(Exit::Returned(_)) => self.settle(),
+                        Ok(_) => Ok(Next::Go),
+                        Err(e) => Err(e),
+                    };
+                    self.o.open -= 1;
+                    match learnt {
+                        Ok(_) => stored(self.store.end(true)).map_err(|f| f.at(at))?,
+                        Err(e) => {
+                            let _ = self.store.end(false);
+                            return Err(e.at(at));
+                        }
+                    }
+                }
                 self.o.activations.remove(&n);
                 self.o.running = None;
-                let at = self.o.held_at;
                 self.sim_op(|sim, _| sim.terminate())
                     .map_err(|f| f.at(at))?;
                 self.sim.forget(Agent::Reflex(n));
@@ -1097,7 +1118,12 @@ impl<'r> Vm<'r> {
             if launched.is_empty() {
                 return Ok(Next::Go);
             }
-            for (r, o) in launched {
+            for hbds_gtad::Launch {
+                reflex: r,
+                this: o,
+                value,
+            } in launched
+            {
                 done += 1;
                 if done > hbds_reflexes::LIMIT {
                     return Err(format!(
@@ -1109,8 +1135,21 @@ impl<'r> Vm<'r> {
                 let Some(code) = self.property(AdtRef::Object(r), hbds_reflexes::REACTION) else {
                     continue;
                 };
+                // A neuron stores its stimulus, or ignores it (figure 58).
+                let neuron = hbds_neurons::is_neuron(self.store, r);
+                if neuron {
+                    match self.neural(|s| hbds_neurons::stimulate(s, r, value.as_ref()))? {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(end) => return Ok(Next::End(end)),
+                    }
+                }
                 let what = self.store.describe(AdtRef::Object(r));
-                let delay = hbds_reflexes::delay(self.store, r);
+                let delay = if neuron {
+                    hbds_neurons::delay(self.store, r)
+                } else {
+                    hbds_reflexes::delay(self.store, r)
+                };
                 let this = self.store.describe(AdtRef::Object(o));
                 self.io.reflex(&what, &this, delay);
                 // A DELAY puts it in time, in the sequencing set (page 126).
@@ -1120,10 +1159,27 @@ impl<'r> Vm<'r> {
                     continue;
                 }
                 let m = self.compiled("REACTION", &code.language, &code.text, &what)?;
+                let learning = self.learning(r)?;
                 self.store.begin();
                 self.o.open += 1;
+                if neuron && !stored(hbds_neurons::discharge(self.store, r))? {
+                    self.o.open -= 1;
+                    stored(self.store.end(true))?;
+                    continue;
+                }
                 self.o.reacting = true;
-                let exit = self.nested(m, Some(AdtRef::Object(o)), 0);
+                let mut exit = self.nested(m, Some(AdtRef::Object(o)), 0);
+                if let (Ok(Exit::Returned(_)), Some(l)) = (&exit, learning) {
+                    match self.learn(r, l) {
+                        Ok(learnt) => exit = Ok(learnt),
+                        Err(e) => {
+                            self.o.reacting = false;
+                            self.o.open -= 1;
+                            let _ = self.store.end(false);
+                            return Err(e);
+                        }
+                    }
+                }
                 self.o.reacting = false;
                 match exit {
                     Ok(Exit::Returned(_)) => {
@@ -1222,6 +1278,15 @@ impl<'r> Vm<'r> {
                 let what = self.store.describe(AdtRef::Object(r));
                 let m = (self.compiled("REACTION", &code.language, &code.text, &what))
                     .map_err(|f| f.at(at))?;
+                self.learning(r).map_err(|f| f.at(at))?;
+                // A neuron fires with what it stored; nothing left, it does not.
+                if hbds_neurons::is_neuron(self.store, r) {
+                    let fires = self.neural(|s| hbds_neurons::discharge(s, r));
+                    if !matches!(fires.map_err(|f| f.at(at))?, Ok(true)) {
+                        self.sim.forget(agent);
+                        return self.dispatch();
+                    }
+                }
                 self.o.running = Some(agent);
                 self.kernel_holds(agent);
                 let f = self.o.fibers.len();
@@ -1273,6 +1338,52 @@ impl<'r> Vm<'r> {
 
     /// In the kernel, an agent about to run: what it prints goes to its
     /// owner, and its writes wait for its pause (decision 5).
+    /// A neuron's own change, in a transaction of its own: a stimulus
+    /// stored, or a firing; what `change` tells, or the run's end.
+    fn neural(
+        &mut self,
+        change: impl FnOnce(&mut Store) -> Stored<bool>,
+    ) -> Run<Result<bool, End>> {
+        self.store.begin();
+        self.o.open += 1;
+        let done = match stored(change(self.store)) {
+            Ok(done) => done,
+            Err(e) => {
+                self.o.open -= 1;
+                let _ = self.store.end(false);
+                return Err(e);
+            }
+        };
+        if let Next::End(end) = self.settle()? {
+            return Ok(Err(end));
+        }
+        self.o.open -= 1;
+        stored(self.store.end(true))?;
+        Ok(Ok(done))
+    }
+
+    /// A neuron's LEARNING, compiled, if it is a neuron that has one.
+    fn learning(&mut self, r: Id) -> Run<Option<usize>> {
+        if !hbds_neurons::is_neuron(self.store, r) {
+            return Ok(None);
+        }
+        let Some(code) = self.property(AdtRef::Object(r), hbds_neurons::LEARNING) else {
+            return Ok(None);
+        };
+        let what = self.store.describe(AdtRef::Object(r));
+        self.compiled("LEARNING", &code.language, &code.text, &what)
+            .map(Some)
+    }
+
+    /// After a neuron's REACTION, its LEARNING, THIS the neuron.
+    fn learn(&mut self, r: Id, m: usize) -> Run<Exit> {
+        let exit = self.callback(m, Some(AdtRef::Object(r)));
+        exit.map_err(|e| {
+            let what = self.store.describe(AdtRef::Object(r));
+            within(e.into(), "LEARNING", &what)
+        })
+    }
+
     fn kernel_holds(&mut self, agent: Agent) {
         if self.o.mode == Mode::Kernel {
             let owner = self.sim.owner(agent);
@@ -1727,6 +1838,12 @@ impl<'r> Vm<'r> {
     /// FACT, RULE and PROCESS, created the first time a program names them.
     fn system(&mut self, name: &str) -> Run<()> {
         let rules = hbds_rules::is_system(name);
+        if hbds_neurons::is_system(name) {
+            if self.store.find_class(name).is_none() {
+                stored(hbds_neurons::install(self.store))?;
+            }
+            return Ok(());
+        }
         if hbds_reflexes::is_system(name) {
             if self.store.find_class(name).is_none() {
                 stored(hbds_reflexes::install(self.store))?;
@@ -2453,6 +2570,7 @@ impl<'r> Vm<'r> {
                     || hbds_reflexes::is_property(key)
                     || hbds_constraints::is_property(key)
                     || hbds_dialog::is_property(key)
+                    || hbds_neurons::is_property(key)
                 {
                     self.language
                         .check(key, &text)

@@ -36,11 +36,12 @@ language is a crate that uses them. Decided on 2026-10-15.
 | `hbds-simulation` | the discrete simulation (project 17): PROCESS, the sequencing set and figure 52's transitions; a language runs the bodies | core, gtad |
 | `hbds-rules` | the expert systems (project 16): rules and facts, SES's functors, CHAV and HYPOCHAV; a language runs the rules' code behind its `Host` trait | core, gtad |
 | `hbds-reflexes` | the reflex engine (project 18): REFLEX, what each change launches; a language runs the reactions | core, gtad |
+| `hbds-neurons` | the neural engine (project 18): NEURON, a stimulus stored or ignored, a firing's input; a language runs the reactions and LEARNING | core, gtad, reflexes |
 | `hbds-constraints` | the constraint engine (pages 157 to 160): CONSTRAINT, the constraints each change concerns; a language runs the FORMULAs | core, gtad |
 | `hbds-dialog` | the dialog engine (project 19): figure 71's Q-Graph, a run's steps; a language runs the tasks behind its `Host` trait | core, gtad |
 | `adt81` | the first language: grammar, parser, checker, interpreter, and what is the language's own (its operators mapped onto HBDS's operations, math functions, what an unknown name means); it wires the engines together | the engines |
 | `hbds-acode` | A-code, HBDS's machine code: the format, its version, its text form, and what a unit asks of its language | core, values |
-| `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation, reflexes, constraints, dialog |
+| `hbds-vm` | the VM that runs A-code: fibers, their frames and operand stacks as data, the store's operations, code the store keeps compiled when it runs | core, values, lists, acode, gtad, functors, rules, simulation, reflexes, constraints, dialog, neurons |
 | `hbds-http` | the daemon's wire: HTTP/1.1, WebSocket, JSON | core |
 | `hbds-daemon` | the daemon: the executor owning the store, clients' sessions in turns over a Unix socket, and the client side; no language of its own | core, acode, gtad, http, journal, vm |
 | `embryo-systems` | the command; picks the language by the file's extension, `.adt` for ADT'81 | adt81, gtad, journal, acode, vm, daemon |
@@ -341,12 +342,47 @@ syntax and no algorithm; ours, decided on 2026-10-16:
   statements run what they launch, and it is forgotten once done. In the
   daemon the kernel runs it, it reports to the client behind the chain,
   and it persists with the kernel's fibers.
-- **Not yet**: NEURON (page 122, figure 58), once its learning is
-  decided; a reflex DELAYed or CANCELed by another (page 125), which
+- **Not yet**: a reflex DELAYed or CANCELed by another (page 125), which
   would need a launch one can designate.
 
 `store/reflexes.adt` is figures 55 to 57 on a small graph,
 `store/network.adt` figure 59's water network, in time.
+
+## Neurons
+
+The neural engine (project 18, pages 122 to 126, figure 58): "an object
+of a neuron class which has a behavior and is abble to modify its
+environment and to make an adapatation by a mechanism of automated
+learning" (page 122), whose engine is "essentialy an extension" of the
+reflex engine (page 126). Figure 58 gives a neuron's attributes, the
+print no algorithm and no word on how it learns; ours, decided on
+2026-11-14:
+
+- **A neuron is a reflex**: an object of a class INCLUDEd INTO the system
+  hyperclass NEURON, itself INCLUDEd INTO REFLEX, both created the first
+  time a program names NEURON. It launches as any reflex does, on its
+  EVENT, by its launchers, its REACTION run with THIS the object
+  concerned; it reads its own attributes by name.
+- **Its attributes are figure 58's**: DETECTION, SATURATION and STORAGE,
+  the three intensities; ACQUISITION, PROCESSING and TRANSMISSION, the
+  three delays; and ours, LEVEL, what it stores, and INPUT, what its last
+  firing passed on. Unset, a threshold does not apply and a delay is 0.
+- **A stimulus has an intensity**: the launcher's new value, for a `set`
+  that gives a number; 1 otherwise. When the launch is drained, an
+  intensity below DETECTION is ignored, and nothing fires; else LEVEL
+  grows by it, capped at STORAGE.
+- **It fires after its delays**, DELAY and the three summed, in the
+  sequencing set as a reflex's DELAY: INPUT is then LEVEL capped at
+  SATURATION, taken from LEVEL, and REACTION runs. A firing that finds
+  nothing stored does not run: two stimuli within the delays fire once,
+  with their sum.
+- **LEARNING, a code property, is how it learns**: statements run after
+  each REACTION, in its transaction, THIS the neuron, free to change its
+  own thresholds and delays. `store/neurons.adt` habituates so: each
+  firing raises DETECTION, until the same pressure is no longer felt.
+- **Not yet**: the three delays act only as their sum (acquisition apart
+  from transmission would need a launch carried through time); a neuron
+  DELAYed or CANCELed by another; weights on its launchers.
 
 ## Constraints
 
@@ -558,6 +594,8 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
 | `crates/hbds-rules` | the expert systems: the model, the functors, the chaining |
 | `crates/hbds-simulation` | the simulation: PROCESS, the sequencing set |
 | `crates/hbds-reflexes` | the reflexes: REFLEX, launches |
+| `crates/hbds-neurons` | the neurons: NEURON, stimuli and firings |
+| `crates/hbds-neurons/tests/engine.rs` | figure 58's intensities on a bare store |
 | `crates/hbds-constraints` | the constraints: CONSTRAINT, the constraints a change concerns |
 | `crates/hbds-dialog` | the dialog: figure 71's classes, a run's steps |
 | `crates/hbds-dialog/tests/engine.rs` | the walk, place by place, on a fake language |
