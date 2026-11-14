@@ -67,6 +67,7 @@ async function schema() {
     const from = r.launchers.length ? r.launchers.join(", ") : "no launcher";
     behavior.append(el("li", null, `${r.name}: ${when} of ${from}${delay}`));
   }
+  dialogs(s.dialogs);
   // The constraints, each with its components (figure 79).
   const constraints = $("constraints");
   constraints.replaceChildren();
@@ -179,13 +180,42 @@ $("pace").addEventListener("submit", async (e) => {
 });
 
 // The REPL: an entry, statements, compiled by the daemon's language and
-// run as a session of its own; what it prints, and how it ends.
+// run as a session of its own; what it prints, what it reads, and how it
+// ends. A line asked for (READ, a dialog's question) is typed under the
+// entry; "end input" ends its input, as end of file does on a terminal.
 
-function run(source) {
+function run(source, commands = []) {
   const li = el("li");
   li.append(el("div", "source", source));
   const out = el("div", "output");
   li.append(out);
+  const answer = el("form", "answer");
+  const line = el("input");
+  line.spellcheck = false;
+  line.placeholder = "an answer; Enter sends it";
+  answer.append(line);
+  const send = (frame, echo) => {
+    out.textContent += echo;
+    answer.hidden = true;
+    ws.send(JSON.stringify(frame));
+  };
+  for (const c of commands) {
+    const b = el("button", null, c);
+    b.type = "button";
+    b.addEventListener("click", () => send({ input: c }, c + "\n"));
+    answer.append(b);
+  }
+  const eof = el("button", null, "end input");
+  eof.type = "button";
+  eof.addEventListener("click", () => send({ eof: true }, "\n"));
+  answer.append(eof);
+  answer.hidden = true;
+  answer.addEventListener("submit", (e) => {
+    e.preventDefault();
+    send({ input: line.value }, line.value + "\n");
+    line.value = "";
+  });
+  li.append(answer);
   $("entries").prepend(li);
   const scheme = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${scheme}://${location.host}/session`);
@@ -193,13 +223,33 @@ function run(source) {
   ws.addEventListener("message", (m) => {
     const f = JSON.parse(m.data);
     if ("output" in f) out.textContent += f.output;
-    // An entry has nothing to read from: its input ends at once.
-    if ("input?" in f) ws.send(JSON.stringify({ eof: true }));
+    if ("input?" in f) {
+      answer.hidden = false;
+      line.focus();
+    }
     if ("end" in f) {
+      answer.remove();
       if (f.end !== null) li.append(el("div", "error", f.end));
       ws.close();
     }
   });
+}
+
+// The dialogs (figure 71): each started as an entry, CALL DIAL, with the
+// commands of figure 72 at hand.
+
+function dialogs(names) {
+  const ul = $("dialogs");
+  ul.replaceChildren();
+  if (!names.length) ul.append(el("li", "none", "no dialog in DIALOG"));
+  for (const name of names) {
+    const li = el("li");
+    const start = el("button", null, "start");
+    const quoted = `"${name.replaceAll('"', '""')}"`;
+    start.addEventListener("click", () => run(`call dial (${quoted})`, ["/back", "/quit"]));
+    li.append(start, el("span", null, ` ${name}`));
+    ul.append(li);
+  }
 }
 
 $("repl").addEventListener("submit", (e) => {

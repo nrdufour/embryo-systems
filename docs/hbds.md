@@ -496,8 +496,14 @@ but is the course's. Ours, decided on 2026-11-14:
 - **Not yet**: PERIPHERAL_DEVICE, INPUT and OUTPUT (figure 71), the
   terminal being the only device; macro-Q-places (page 143); a dialog
   opening another; texts in several languages, one at a time or side by
-  side (page 146); the daemon's page answering questions; the
-  bootstrap, a dialog that builds dialogs (pages 145 and 146).
+  side (page 146); the bootstrap, a dialog that builds dialogs (pages
+  145 and 146).
+- **On the daemon's page** (decided 2026-11-14): the REPL lists the
+  dialogs of DIALOG, from `GET /schema`, each started as an entry, `CALL
+  DIAL`; a line asked for is typed under the entry, with `/back` and
+  `/quit` at hand, and "end input" ends its input. A question is shown
+  as the terminal shows it: the page knows the dialog as text, not as
+  places.
 
 `store/dialog.adt` is a river survey: typed answers, a blank comment, a
 choice delayed past two questions, going back, the answers read back

@@ -768,7 +768,21 @@ fn schema_json(store: &Store) -> Json {
             "constraints".to_string(),
             Json::Array(constraints_json(store)),
         ),
+        ("dialogs".to_string(), Json::Array(dialogs_json(store))),
     ]))
+}
+
+/// The dialogs (figure 71), by name: what `CALL DIAL` finds in DIALOG.
+fn dialogs_json(store: &Store) -> Vec<Json> {
+    let Some((&dialog, _)) =
+        (store.classes().iter()).find(|(_, c)| hbds_core::same(&c.name, "DIALOG"))
+    else {
+        return Vec::new();
+    };
+    (store.objects().iter())
+        .filter(|(_, o)| o.class == dialog)
+        .map(|(_, o)| Json::String(o.name.clone()))
+        .collect()
 }
 
 /// The constraints (figure 79): name, the components associated with it.

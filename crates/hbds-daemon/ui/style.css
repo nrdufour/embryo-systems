@@ -237,6 +237,35 @@ main {
   color: var(--bad);
 }
 
+.entries .answer {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.entries .answer[hidden] {
+  display: none;
+}
+
+.entries .answer input {
+  flex: 1;
+  font-family: var(--mono);
+}
+
+.dialogs {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.dialogs li {
+  padding: 2px 0;
+}
+
+.dialogs .none {
+  color: var(--muted);
+}
+
 .rules .fired {
   color: var(--good);
 }

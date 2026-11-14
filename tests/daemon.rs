@@ -828,14 +828,23 @@ fn the_ui_forwards_to_the_socket() {
     let _ = ui.wait();
     assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
     assert!(
-        answer.ends_with("{\"classes\":[],\"constraints\":[],\"links\":[],\"reflexes\":[]}\n"),
+        answer.ends_with(
+            "{\"classes\":[],\"constraints\":[],\"dialogs\":[],\"links\":[],\"reflexes\":[]}\n"
+        ),
         "{answer}"
     );
 }
 
 /// A REPL's entry, sent as the page sends it: its output and its end.
 fn entry(daemon: &Daemon, source: &str) -> (String, hbds_http::json::Json) {
+    answering(daemon, source, &[])
+}
+
+/// An entry whose input is typed under it, as the page has it: each line
+/// asked for the next of `lines`, then end of input.
+fn answering(daemon: &Daemon, source: &str, lines: &[&str]) -> (String, hbds_http::json::Json) {
     use hbds_http::json::Json;
+    let mut lines = lines.iter();
     let stream = UnixStream::connect(&daemon.socket).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(20)))
@@ -861,10 +870,48 @@ fn entry(daemon: &Daemon, source: &str) -> (String, hbds_http::json::Json) {
         let f = Json::parse(&t).unwrap();
         if let Some(o) = f.get("output").and_then(Json::as_str) {
             out += o;
+        } else if f.get("input?").is_some() {
+            let answer = match lines.next() {
+                Some(l) => Json::one("input", Json::String(l.to_string())),
+                None => Json::one("eof", Json::Bool(true)),
+            };
+            hbds_http::write_message(
+                &mut writer,
+                &hbds_http::Message::Text(answer.to_string()),
+                true,
+            )
+            .unwrap();
         } else if let Some(end) = f.get("end") {
             return (out, end.clone());
         }
     }
+}
+
+#[test]
+fn a_dialog_runs_from_the_page() {
+    use hbds_http::json::Json;
+    let daemon = Daemon::start("dialog");
+    let made = "create \"river\" [ \"sq\" ], \"depth\" [ \"sq\" ] ; create \"survey\" [ \"dialog\" ] ; \
+        let \"river\" [ \"sq\" ] . \"text\" := \"River\" ; \
+        let \"depth\" [ \"sq\" ] . \"text\" := \"Depth\" ; \
+        let \"depth\" [ \"sq\" ] . \"type\" := \"INTEGER\" ; \
+        assert \"river\" [ \"sq\" ] \"next\" \"depth\" [ \"sq\" ] ; \
+        assert \"survey\" [ \"dialog\" ] \"initial\" \"river\" [ \"sq\" ]";
+    assert_eq!(entry(&daemon, made), (String::new(), Json::Null));
+    let schema = daemon.get("/schema");
+    assert!(schema.contains("\"dialogs\":[\"survey\"]"), "{schema}");
+    // What the page's start button sends, answered line by line.
+    let (out, end) = answering(
+        &daemon,
+        "call dial (\"survey\")",
+        &["Loire", "deep", "/back"],
+    );
+    assert_eq!(out, "River ? Depth ? INTEGER expected\nDepth ? River ? ");
+    assert!(
+        end.as_str()
+            .is_some_and(|e| e.contains("DIAL finds no more input")),
+        "{end}"
+    );
 }
 
 #[test]

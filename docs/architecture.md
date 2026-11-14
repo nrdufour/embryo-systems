@@ -428,6 +428,11 @@ report the rules they tried and those that fired (`Io::rules`), which
 the feed carries as `{"rules": ...}`, said of the session or the process
 that ran them, and the page shows. Step 7 is done.
 
+Since (2026-11-14): an entry that asks for a line (READ, a dialog's
+question) gets a field under it, its line sent as `{"input": LINE}`,
+"end input" as `{"eof": true}`; it had its input ended at once. The
+page's dialogs start that way (docs/hbds.md, "Dialog").
+
 ### 9. Standalone builds carry what they need
 
 - **Two products:** an `.acode` file, portable compiled modules (for
