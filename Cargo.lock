@@ -9,6 +9,7 @@ dependencies = [
  "hbds-acode",
  "hbds-constraints",
  "hbds-core",
+ "hbds-dialog",
  "hbds-functors",
  "hbds-gtad",
  "hbds-journal",
@@ -71,6 +72,14 @@ dependencies = [
  "hbds-http",
  "hbds-journal",
  "hbds-vm",
+]
+
+[[package]]
+name = "hbds-dialog"
+version = "0.1.0"
+dependencies = [
+ "hbds-core",
+ "hbds-gtad",
 ]
 
 [[package]]
@@ -154,6 +163,7 @@ dependencies = [
  "hbds-acode",
  "hbds-constraints",
  "hbds-core",
+ "hbds-dialog",
  "hbds-functors",
  "hbds-gtad",
  "hbds-lists",

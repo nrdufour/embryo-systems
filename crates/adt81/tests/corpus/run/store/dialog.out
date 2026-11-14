@@ -1,0 +1,20 @@
+-- survey --
+River ? noted Loire
+Comment ? -- survey --
+River ? noted Loire
+Comment ? no comment
+Theme
+1. water quality
+2. fish
+? choose 1 to 2
+Theme
+1. water quality
+2. fish
+? Station x ? Station y ? FLOAT expected
+Station y ? Fish counted ? INTEGER expected
+Fish counted ? 
+phase done
+1[ANSWER] Loire
+2[ANSWER] Loire
+3[ANSWER] fish
+4[ANSWER] 12

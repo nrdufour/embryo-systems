@@ -800,6 +800,7 @@ impl<'p> Compiler<'p> {
                 ),
             },
             StmtKind::Call(c) => match self.module_named(&c.name) {
+                None if c.name.key == "DIAL" => self.dial(c, s.span),
                 None if builtins::is_subroutine(&c.name.key) => {
                     self.emit(Instr::Begin, s.span);
                     self.engine(c, s.span);
@@ -1391,6 +1392,23 @@ impl<'p> Compiler<'p> {
             n += 1;
         }
         self.emit(Instr::Chav(hypothetical, n), span);
+    }
+
+    /// CALL DIAL(dialog), as the reference's `dial`: the run started in
+    /// the statement's transaction, then stepped until done, each step a
+    /// transaction of its own, so that waiting for a line holds none.
+    fn dial(&mut self, c: &Call, span: Span) {
+        let [arg] = c.args.as_slice() else {
+            self.fail(span, "DIAL takes one dialog");
+            return;
+        };
+        self.expr(arg);
+        self.emit(Instr::Begin, span);
+        self.emit(Instr::Dial, span);
+        self.emit(Instr::Commit, span);
+        let step = self.emit(Instr::DialStep, span);
+        self.emit(Instr::JumpFalse(step), span);
+        self.emit(Instr::Pop, span);
     }
 
     /// A list or an a.d.t. on the stack is the prefix; anything else

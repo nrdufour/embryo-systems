@@ -1,0 +1,11 @@
+[package]
+name = "hbds-dialog"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+
+# The dialog engine (project 19, pages 133 to 149), on GTAD.
+[dependencies]
+hbds-core = { path = "../hbds-core" }
+hbds-gtad = { path = "../hbds-gtad" }

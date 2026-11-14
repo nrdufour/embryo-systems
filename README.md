@@ -59,6 +59,7 @@ has one; `just bench-record` writes both.
 - **Expert systems:** rules are objects of classes in the hyperclass RULE, their premises and consequents code compiled when written; CHAV chains them forward, HYPOCHAV from hypotheses, with the print's ten parameters (priority, reliabilities, askability, activation and inhibition among them), and INRULE, OUTRULE, INFACT and OUTFACT walk them.
 - **Reflexes:** objects of classes in the hyperclass REFLEX react to their launchers' events, breadth first after the launching statement, or later in simulated time when they have a DELAY.
 - **Constraints:** MAY, MUST and CANNOT hold pairs of objects to a link; objects of classes in the hyperclass CONSTRAINT run their FORMULA at the end of each statement that concerned their components, and may refuse it.
+- **Dialogs:** a Q-Graph of simple and multiple-choice questions, objects of figure 71's classes, walked by `CALL DIAL`: typed answers, blank ones where allowed, PROLOG, EPILOG and tasks, a choice whose branch is delayed to a later question, going back, the answers memorized as objects; on the terminal, and in a daemon's sessions.
 - **The polycopié's own code runs:** pages 127-128's computed attributes ARC.LENGTH and AREA.PERIMETER give the right answers on a test schema, once three print errors are corrected.
 
 Every departure from the print, and every decision the print left open, is recorded with its page in [docs/adt81.md](docs/adt81.md) and [docs/hbds.md](docs/hbds.md).
@@ -77,6 +78,9 @@ flowchart LR
     interp --> functors["functor engine"]
     interp --> rules["expert systems"]
     interp --> sim["simulation"]
+    interp --> reflexes["reflexes"]
+    interp --> constraints["constraints"]
+    interp --> dialog["dialog"]
     gtad -- "each change, through Recorder" --> journal[(journal)]
     grammar["grammar.lark"] -. "the parser builds Lark's tree" .-> parser
 ```
@@ -96,8 +100,17 @@ flowchart BT
     rules --> core
     sim["hbds-simulation<br/>simulation, project 17"] --> gtad
     sim --> core
+    reflexes["hbds-reflexes<br/>reflexes, project 18"] --> gtad
+    reflexes --> core
+    constraints["hbds-constraints<br/>constraints, pages 157 to 160"] --> gtad
+    constraints --> core
+    dialog["hbds-dialog<br/>dialog, project 19"] --> gtad
+    dialog --> core
     adt81["adt81<br/>the language"] --> lists
     adt81 --> sim
+    adt81 --> reflexes
+    adt81 --> constraints
+    adt81 --> dialog
     adt81 --> rules
     adt81 --> functors
     adt81 --> gtad
@@ -118,6 +131,7 @@ flowchart BT
 | `crates/hbds-simulation` | the discrete simulation: PROCESS, the sequencing set, figure 52's primitives |
 | `crates/hbds-reflexes` | the reflex engine: REFLEX, its events, launchers and delays |
 | `crates/hbds-constraints` | the constraint engine: CONSTRAINT, its FORMULA and components |
+| `crates/hbds-dialog` | the dialog engine: figure 71's Q-Graph, walked by CALL DIAL |
 | `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
 | `src/main.rs` | the `embryo-systems` command |
 
@@ -134,7 +148,6 @@ The system's own steps (A-code and a VM, standalone builds, a daemon with a web 
 | engine | print |
 |---|---|
 | neurons (reflexes are built, in time too: docs/hbds.md, "Reflexes") | project 18, pages 116 to 131 |
-| dialog, the Q-Graph | project 19, pages 133 to 149 |
 | SFSI and ZE, the print's own file system and exchange zone, as another persistence | project 13, pages 86 to 105 |
 | NINJAS, protection against object-oriented viruses | project 20, page 150 |
 | ADTmin, precompilers to C, Ada, Pascal and Fortran | page 161 |

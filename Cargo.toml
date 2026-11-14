@@ -15,6 +15,7 @@ members = [
     "crates/hbds-simulation",
     "crates/hbds-reflexes",
     "crates/hbds-constraints",
+    "crates/hbds-dialog",
     "crates/adt81",
     "crates/bench",
 ]

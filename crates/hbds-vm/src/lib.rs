@@ -842,6 +842,34 @@ impl hbds_rules::Host for Engine<'_, '_> {
     }
 }
 
+impl hbds_dialog::Host for Engine<'_, '_> {
+    fn store(&mut self) -> Box<dyn DerefMut<Target = Store> + '_> {
+        Box::new(&mut *self.vm.store)
+    }
+
+    fn run(&mut self, part: &str, owner: Id, code: &Code, run: Id) -> Result<(), String> {
+        let what = self.vm.store.describe(AdtRef::Object(owner));
+        let m =
+            (self.vm.compiled(part, &code.language, &code.text, &what)).map_err(|f| f.message)?;
+        match self.vm.callback(m, Some(AdtRef::Object(run))) {
+            Ok(Exit::Returned(_)) => Ok(()),
+            Ok(Exit::End(_)) => Err(told(None, part, Some(&what))),
+            Ok(Exit::Yield | Exit::Input | Exit::Stop(_)) => {
+                unreachable!("code the store calls back runs to completion")
+            }
+            Err(e) => Err(told(Some(e.message), part, Some(&what))),
+        }
+    }
+
+    fn read(&mut self, line: &str) -> Result<Value, String> {
+        self.vm.language.read(line)
+    }
+
+    fn write(&mut self, text: &str) {
+        self.vm.io.write(text);
+    }
+}
+
 impl<'r> Vm<'r> {
     fn enter(
         &mut self,
@@ -1711,6 +1739,12 @@ impl<'r> Vm<'r> {
             }
             return Ok(());
         }
+        if hbds_dialog::is_system(name) {
+            if self.store.find_class(name).is_none() {
+                stored(hbds_dialog::install(self.store))?;
+            }
+            return Ok(());
+        }
         if !rules && !hbds_simulation::is_system(name) {
             return Ok(());
         }
@@ -2418,6 +2452,7 @@ impl<'r> Vm<'r> {
                     || hbds_rules::is_property(key)
                     || hbds_reflexes::is_property(key)
                     || hbds_constraints::is_property(key)
+                    || hbds_dialog::is_property(key)
                 {
                     self.language
                         .check(key, &text)
@@ -2725,6 +2760,56 @@ impl<'r> Vm<'r> {
                     }
                     _ => return Ok(Next::End(End::Done)),
                 }
+            }
+            Instr::Dial => {
+                let v = self.pop();
+                stored(hbds_dialog::install(self.store))?;
+                let dialog = match v {
+                    Value::Adt(AdtRef::Object(o)) => o,
+                    v => match v.scalar() {
+                        Some(Scalar::String(_) | Scalar::Character(_)) => {
+                            let name = self.store.show(&v);
+                            let class = stored(self.store.class(hbds_dialog::DIALOG))?;
+                            stored(self.store.object(class, &name))?
+                        }
+                        _ => {
+                            return Err(format!("DIAL takes a dialog, or its name; not {v}").into());
+                        }
+                    },
+                };
+                let run = hbds_dialog::start(self.store, dialog)?;
+                self.push(Value::Adt(AdtRef::Object(run)));
+            }
+            Instr::DialStep => {
+                let Some(Item::Value(Value::Adt(AdtRef::Object(run)))) = self.o.stack.last() else {
+                    unreachable!("a run under DialStep")
+                };
+                let run = *run;
+                let line = if hbds_dialog::wants(self.store, run) {
+                    if self.o.nesting == 0 && !self.io.ready() {
+                        return Ok(Next::Wait);
+                    }
+                    Some(self.io.read_line().ok_or("DIAL finds no more input")?)
+                } else {
+                    None
+                };
+                self.store.begin();
+                self.o.open += 1;
+                let step = hbds_dialog::step(&mut Engine { vm: self }, run, line.as_deref());
+                let done = match step {
+                    Ok(done) => done,
+                    Err(e) => {
+                        self.o.open -= 1;
+                        let _ = self.store.end(false);
+                        return Err(e.into());
+                    }
+                };
+                if let Next::End(end) = self.settle()? {
+                    return Ok(Next::End(end));
+                }
+                self.o.open -= 1;
+                stored(self.store.end(true))?;
+                self.push(Value::exact(Scalar::Boolean(done)));
             }
             Instr::Chav(hypothetical, n) => {
                 let mut scope: Vec<Id> = (0..*n).map(|_| self.pop_class()).collect();
