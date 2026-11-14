@@ -342,11 +342,21 @@ syntax and no algorithm; ours, decided on 2026-10-16:
   statements run what they launch, and it is forgotten once done. In the
   daemon the kernel runs it, it reports to the client behind the chain,
   and it persists with the kernel's fibers.
-- **Not yet**: a reflex DELAYed or CANCELed by another (page 125), which
-  would need a launch one can designate.
+- **A reflex in time is moved as a process is** (page 126: "it can be
+  delayed by another reflex, even passivated"; decided 2026-11-14): a
+  launch has no name of its own, so CANCEL, DELAY, REACTIVATE (and
+  ACTIVATE) and KILL designate the reflex, and act on each of its
+  launches in time that the statement applies to, in the order
+  launched: CANCEL and DELAY the due ones, REACTIVATE the passive ones,
+  KILL both; a reflex with none is left as it is. BEFORE and AFTER a
+  reflex mean its launch due first, and are an error if none is. Any
+  code may do it, another reflex's REACTION or the main program; a
+  launch already running (its reaction holding) is moved too.
 
 `store/reflexes.adt` is figures 55 to 57 on a small graph,
-`store/network.adt` figure 59's water network, in time.
+`store/network.adt` figure 59's water network, in time,
+`store/launches.adt` an alarm delayed by another reflex, canceled,
+reactivated and killed.
 
 ## Neurons
 
@@ -380,9 +390,11 @@ print no algorithm and no word on how it learns; ours, decided on
   each REACTION, in its transaction, THIS the neuron, free to change its
   own thresholds and delays. `store/neurons.adt` habituates so: each
   firing raises DETECTION, until the same pressure is no longer felt.
+- **A neuron in time is moved as a reflex is** ("Reflexes"): CANCEL,
+  DELAY, REACTIVATE and KILL of a neuron act on its firings due.
 - **Not yet**: the three delays act only as their sum (acquisition apart
-  from transmission would need a launch carried through time); a neuron
-  DELAYed or CANCELed by another; weights on its launchers.
+  from transmission would need a launch carried through time); weights
+  on its launchers.
 
 ## Constraints
 

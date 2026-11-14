@@ -1392,17 +1392,25 @@ impl Machine {
                 self.reactivate(object, when.as_ref(), f, s.span)
             }
             StmtKind::Cancel(o) => {
-                let p = self.process(o, f, s.span)?;
-                self.sim_op(s.span, |sim, d| sim.cancel(p, d))
+                for p in self.agents(o, &[Lifecycle::Hold], f, s.span)? {
+                    self.sim_op(s.span, |sim, d| sim.cancel(p, d))?;
+                }
+                Ok(())
             }
             StmtKind::Kill(o) => {
-                let p = self.process(o, f, s.span)?;
-                self.sim_op(s.span, |sim, d| sim.kill(p, d))
+                let states = [Lifecycle::Hold, Lifecycle::Passive];
+                for p in self.agents(o, &states, f, s.span)? {
+                    self.sim_op(s.span, |sim, d| sim.kill(p, d))?;
+                }
+                Ok(())
             }
             StmtKind::Delay { object, duration } => {
-                let p = self.process(object, f, s.span)?;
+                let ps = self.agents(object, &[Lifecycle::Hold], f, s.span)?;
                 let dt = self.time(duration, f)?;
-                self.sim_op(s.span, |sim, d| sim.delay(p, dt, d))
+                for p in ps {
+                    self.sim_op(s.span, |sim, d| sim.delay(p, dt, d))?;
+                }
+                Ok(())
             }
             StmtKind::Hold { object, duration } => {
                 self.gives_way("HOLD", s.span)?;
@@ -2183,6 +2191,10 @@ impl Machine {
     /// A process a designation names.
     fn process(&self, d: &Designation, f: &mut Frame, span: Span) -> Exec<Agent> {
         let o = self.object(d, f, span)?;
+        self.as_process(o, span)
+    }
+
+    fn as_process(&self, o: Id, span: Span) -> Exec<Agent> {
         if hbds_simulation::is_process(&self.store.lock().unwrap(), o) {
             return Ok(Agent::Process(o));
         }
@@ -2191,6 +2203,47 @@ impl Machine {
             span,
             format!("{what} is not a process: its class is not in PROCESS"),
         ))
+    }
+
+    /// A reflex, not a process, that a designation names, if it does.
+    fn reflex(&self, o: Id) -> bool {
+        let store = self.store.lock().unwrap();
+        // Read first without a lookup counted: the benchmarks' work stays
+        // the same where there are no reflexes.
+        hbds_reflexes::installed(&store)
+            && !hbds_simulation::is_process(&store, o)
+            && hbds_reflexes::is_reflex(&store, o)
+    }
+
+    /// What CANCEL, DELAY and KILL act on: a process; or a reflex's
+    /// launches in time that are in one of `states`, none if it has none
+    /// (page 126: a reflex "delayed by another reflex, even passivated").
+    fn agents(
+        &self,
+        d: &Designation,
+        states: &[Lifecycle],
+        f: &mut Frame,
+        span: Span,
+    ) -> Exec<Vec<Agent>> {
+        let o = self.object(d, f, span)?;
+        if self.reflex(o) {
+            return Ok(self.sim.lock().unwrap().launches(o, states));
+        }
+        Ok(vec![self.as_process(o, span)?])
+    }
+
+    /// What BEFORE and AFTER name: a process, or a reflex's launch due
+    /// first.
+    fn reference(&self, d: &Designation, f: &mut Frame, span: Span) -> Exec<Agent> {
+        let o = self.object(d, f, span)?;
+        if !self.reflex(o) {
+            return self.as_process(o, span);
+        }
+        let first = self.sim.lock().unwrap().first_due(o);
+        first.ok_or_else(|| {
+            let what = self.describe(AdtRef::Object(o));
+            error(span, format!("{what} has no launch due"))
+        })
     }
 
     /// Who runs here: the main program or a process; a coroutine does not
@@ -2243,21 +2296,31 @@ impl Machine {
         f: &mut Frame,
         span: Span,
     ) -> Exec<()> {
-        let p = self.process(o, f, span)?;
-        let Agent::Process(id) = p else {
-            unreachable!("a process")
-        };
-        let i = self.body(id, span)?;
-        if !self.program.modules[i].parameters.is_empty() {
-            return Err(error(span, "a process's body takes no parameters"));
+        let id = self.object(o, f, span)?;
+        let reflex = self.reflex(id);
+        if !reflex {
+            self.as_process(id, span)?;
+            let i = self.body(id, span)?;
+            if !self.program.modules[i].parameters.is_empty() {
+                return Err(error(span, "a process's body takes no parameters"));
+            }
         }
         let due = match when {
             None => Due::Now,
             Some(When::At(e)) => Due::At(self.time(e, f)?),
-            Some(When::Before(q)) => Due::Before(self.process(q, f, span)?),
-            Some(When::After(q)) => Due::After(self.process(q, f, span)?),
+            Some(When::Before(q)) => Due::Before(self.reference(q, f, span)?),
+            Some(When::After(q)) => Due::After(self.reference(q, f, span)?),
         };
-        self.sim_op(span, |sim, d| sim.reactivate(p, due, d))
+        // A reflex's passive launches, back in time (page 126).
+        let ps = if reflex {
+            (self.sim.lock().unwrap()).launches(id, &[Lifecycle::Passive])
+        } else {
+            vec![Agent::Process(id)]
+        };
+        for p in ps {
+            self.sim_op(span, |sim, d| sim.reactivate(p, due, d))?;
+        }
+        Ok(())
     }
 
     /// After HOLD or PASSIVATE: a body gives control back to the

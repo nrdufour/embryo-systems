@@ -1,0 +1,16 @@
+-- REACTIVATE BEFORE a reflex that has no launch due. --
+
+program e ;
+begin
+        create "watch" ; include "watch" into "reflex" ; create "alarm" [ "watch" ] ;
+        create "machine" ; include "machine" into "process" ; create "m1" [ "machine" ] ;
+        print "before" ;
+        reactivate "alarm" [ "watch" ] ;
+        print "a reflex with nothing passive: nothing to do" ;
+        reactivate "m1" [ "machine" ] before "alarm" [ "watch" ]
+end ;
+
+coroutine "machine" ;
+begin
+        print "runs"
+end ;

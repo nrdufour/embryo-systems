@@ -191,6 +191,25 @@ impl Sequencing {
         self.reflexes.get(&n).copied()
     }
 
+    /// A reflex's launches in time that are in one of `states`, in the
+    /// order launched: what CANCEL, DELAY, REACTIVATE and KILL of a reflex
+    /// act on (page 126).
+    pub fn launches(&self, reflex: Id, states: &[State]) -> Vec<Agent> {
+        (self.reflexes.iter())
+            .filter(|(_, (r, _))| *r == reflex)
+            .map(|(n, _)| Agent::Reflex(*n))
+            .filter(|a| states.contains(&self.state(*a)))
+            .collect()
+    }
+
+    /// A reflex's launch due first: what BEFORE and AFTER a reflex mean.
+    pub fn first_due(&self, reflex: Id) -> Option<Agent> {
+        (self.set.iter()).find_map(|(_, a)| match a {
+            Agent::Reflex(n) if self.reflexes.get(n).is_some_and(|(r, _)| *r == reflex) => Some(*a),
+            _ => None,
+        })
+    }
+
     /// Who what the running agent starts reports to: its own owner, if it
     /// has one, so that a chain reports to the client behind it.
     fn owner_of_current(&self) -> Agent {

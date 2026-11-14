@@ -1,0 +1,8 @@
+alarm put back
+not rung at 6.0 due at 8 now
+canceled at 6.0
+silent until 16.0
+alarm rings at 20.0
+killed at 21.0
+silent until 31.0
+nothing left to cancel

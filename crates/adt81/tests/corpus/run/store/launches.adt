@@ -1,0 +1,41 @@
+-- Page 126: a reflex in time "can be delayed by another reflex, even --
+-- passivated". A valve opened launches the alarm, due 5 later; its --
+-- pressure risen launches a reflex that delays the alarm 3 more; the --
+-- main program cancels it before 8, and nothing rings; reactivated at 20, it --
+-- rings then; launched again, then killed, it never rings. CANCEL, --
+-- DELAY, REACTIVATE and KILL of a reflex act on its launches in time. --
+-- Written for the reflex engine (docs/hbds.md, "Reflexes"). --
+
+program launches ;
+begin
+        create "valve" ; create "valve" . "state", "valve" . "pressure" ;
+        create "v1" [ "valve" ] ;
+        create "watch" ; include "watch" into "reflex" ;
+        create "alarm" [ "watch" ], "slow" [ "watch" ] ;
+        let "alarm" [ "watch" ] . "event" := "set" ;
+        let "alarm" [ "watch" ] . "delay" := 5 ;
+        assoc "valve" . "state" with "alarm" [ "watch" ] ;
+        let "alarm" [ "watch" ] ' reaction := "print ""alarm rings at"", time" ;
+        let "slow" [ "watch" ] . "event" := "set" ;
+        assoc "valve" . "pressure" with "slow" [ "watch" ] ;
+        let "slow" [ "watch" ] ' reaction :=
+            "delay ""alarm"" [ ""watch"" ] for 3 ; print ""alarm put back""" ;
+
+        let "v1" [ "valve" ] . "state" := "open" ;
+        let "v1" [ "valve" ] . "pressure" := 2 ;
+        hold for 6 ;
+        print "not rung at", time, "due at 8 now" ;
+        cancel "alarm" [ "watch" ] ;
+        print "canceled at", time ;
+        hold for 10 ;
+        print "silent until", time ;
+        reactivate "alarm" [ "watch" ] at 20 ;
+        hold for 5 ;
+        let "v1" [ "valve" ] . "state" := "shut" ;
+        kill "alarm" [ "watch" ] ;
+        print "killed at", time ;
+        hold for 10 ;
+        print "silent until", time ;
+        cancel "alarm" [ "watch" ] ;
+        print "nothing left to cancel"
+end ;

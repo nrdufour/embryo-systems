@@ -18,9 +18,9 @@ use hbds_core::{AdtRef, Id, fold, same};
 use hbds_gtad::{ClassKind, Code, State as AdtState, Store, Stored};
 mod saved;
 
-use hbds_simulation::When;
 /// The sequencing set a turn is lent, and who runs in it.
 pub use hbds_simulation::{Agent, Sequencing, state_name};
+use hbds_simulation::{State as Lifecycle, When};
 use hbds_values::{Fault, Fz, List, Op, Scalar, Value};
 
 /// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
@@ -1442,6 +1442,38 @@ impl<'r> Vm<'r> {
         Agent::Process(self.pop_object())
     }
 
+    /// A reflex, not a process.
+    fn reflex(&self, o: Id) -> bool {
+        // Read first without a lookup counted: the benchmarks' work stays
+        // the same where there are no reflexes.
+        hbds_reflexes::installed(self.store)
+            && !hbds_simulation::is_process(self.store, o)
+            && hbds_reflexes::is_reflex(self.store, o)
+    }
+
+    /// What a process statement acts on: a process; or a reflex's
+    /// launches in time that are in one of `states` (page 126).
+    fn agents(&self, p: Agent, states: &[Lifecycle]) -> Vec<Agent> {
+        match p {
+            Agent::Process(o) if self.reflex(o) => self.sim.launches(o, states),
+            p => vec![p],
+        }
+    }
+
+    /// What BEFORE and AFTER name: a process, or a reflex's launch due
+    /// first.
+    fn reference(&mut self) -> Run<Agent> {
+        let p = self.pop_process();
+        let Agent::Process(o) = p else { return Ok(p) };
+        if !self.reflex(o) {
+            return Ok(p);
+        }
+        self.sim.first_due(o).ok_or_else(|| {
+            let what = self.store.describe(AdtRef::Object(o));
+            format!("{what} has no launch due").into()
+        })
+    }
+
     /// The first RESUME of coroutine `m`: its OUT and INOUT arguments
     /// become variables it shares with the caller.
     fn start(&mut self, m: usize, n: usize) {
@@ -2773,7 +2805,7 @@ impl<'r> Vm<'r> {
             Instr::ResumeFirst(c, n) => self.start(*c, *n),
             Instr::Process => {
                 let o = self.pop_object();
-                if !hbds_simulation::is_process(self.store, o) {
+                if !hbds_simulation::is_process(self.store, o) && !self.reflex(o) {
                     let what = self.store.describe(AdtRef::Object(o));
                     return Err(
                         format!("{what} is not a process: its class is not in PROCESS").into(),
@@ -2785,7 +2817,11 @@ impl<'r> Vm<'r> {
                 let Some(Item::Value(Value::Adt(AdtRef::Object(p)))) = self.o.stack.last() else {
                     unreachable!("a process")
                 };
-                let body = self.body(*p)?;
+                let p = *p;
+                if self.reflex(p) {
+                    return Ok(Next::Go);
+                }
+                let body = self.body(p)?;
                 if !self.o.modules[body].params.is_empty() {
                     return Err("a process's body takes no parameters".into());
                 }
@@ -2804,27 +2840,35 @@ impl<'r> Vm<'r> {
                 let when = match due {
                     Due::Now => When::Now,
                     Due::At => When::At(self.pop_time()),
-                    Due::Before => When::Before(self.pop_process()),
-                    Due::After => When::After(self.pop_process()),
+                    Due::Before => When::Before(self.reference()?),
+                    Due::After => When::After(self.reference()?),
                 };
                 let p = self.pop_process();
-                self.sim_op(|sim, d| sim.reactivate(p, when, d))?;
+                for p in self.agents(p, &[Lifecycle::Passive]) {
+                    self.sim_op(|sim, d| sim.reactivate(p, when, d))?;
+                }
                 self.keep_sequencing()?;
             }
             Instr::Cancel => {
                 let p = self.pop_process();
-                self.sim_op(|sim, d| sim.cancel(p, d))?;
+                for p in self.agents(p, &[Lifecycle::Hold]) {
+                    self.sim_op(|sim, d| sim.cancel(p, d))?;
+                }
                 self.keep_sequencing()?;
             }
             Instr::Kill => {
                 let p = self.pop_process();
-                self.sim_op(|sim, d| sim.kill(p, d))?;
+                for p in self.agents(p, &[Lifecycle::Hold, Lifecycle::Passive]) {
+                    self.sim_op(|sim, d| sim.kill(p, d))?;
+                }
                 self.keep_sequencing()?;
             }
             Instr::Delay => {
                 let dt = self.pop_time();
                 let p = self.pop_process();
-                self.sim_op(|sim, d| sim.delay(p, dt, d))?;
+                for p in self.agents(p, &[Lifecycle::Hold]) {
+                    self.sim_op(|sim, d| sim.delay(p, dt, d))?;
+                }
                 self.keep_sequencing()?;
             }
             Instr::Running(what) => {

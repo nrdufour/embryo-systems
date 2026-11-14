@@ -53,6 +53,14 @@ pub fn install(store: &mut Store) -> Stored<()> {
     Ok(())
 }
 
+/// Whether an object is a reflex: its class is in REFLEX's lineage.
+pub fn is_reflex(store: &Store, o: Id) -> bool {
+    let (Some(reflex), Some(object)) = (store.find_class(REFLEX), store.objects().get(&o)) else {
+        return false;
+    };
+    object.class != reflex && store.lineage(object.class).contains(&reflex)
+}
+
 /// Whether the store has REFLEX, read without a lookup counted (the
 /// benchmarks' work stays the same where there are no reflexes).
 pub fn installed(store: &Store) -> bool {
