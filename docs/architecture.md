@@ -588,6 +588,6 @@ Each step is a plan and a pull request of its own:
 7. The UI: the schema, the sequencing set as a timeline, rules firing,
    the journal's tail, a REPL.
 
-The print's engines (reflexes, constraints, dialog) are libraries, and
+The print's engines (reflexes, neurons, constraints, dialog) are libraries, and
 come between any two steps; reflexes read most naturally after the
 daemon, inside the kernel where page 126 puts them.

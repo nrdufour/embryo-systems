@@ -573,8 +573,9 @@ subj)`, `-` for what it lacks; `(many ...)`, `(list cursor circular
   the structure's classes are named, the print does not say. BUILD records
   the structure and its prototype.
 - **What associations are for.** ASSOC and DISSOC keep their pairs (page
-  24, figure 9's multi-layer system); we read one use, a reflex's
-  launchers ("Reflexes"), but no functor reads them yet.
+  24, figure 9's multi-layer system); we read two uses, a reflex's (and
+  so a neuron's) launchers ("Reflexes") and a constraint's components
+  ("Constraints"), but no functor reads them yet.
 - **Waiting lists.** PASSIVATE may first put a process in a waiting list
   (page 114, figure 52's INTO and OUTOF); bodies share no variables, so a
   list one fills and another empties needs a home the print does not
