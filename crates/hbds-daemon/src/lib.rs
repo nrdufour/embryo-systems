@@ -86,8 +86,8 @@ impl Clock {
             Some("step") => Ok(Clock::Step(number("steps", 1.0)?.max(1.0) as u64)),
             Some("fast") => Ok(Clock::Fast(number("horizon", f64::INFINITY)?)),
             Some("real") => match number("factor", 1.0)? {
-                f if f > 0.0 => Ok(Clock::Real(f)),
-                f => Err(format!("a factor of {f}: it is more than 0")),
+                f if f > 0.0 && f.is_finite() => Ok(Clock::Real(f)),
+                f => Err(format!("a factor of {f}: it is a number more than 0")),
             },
             _ => Err("a pace is paused, step, fast or real".into()),
         }
@@ -322,6 +322,25 @@ impl hbds_vm::Io for Router {
     }
 }
 
+/// Held by a thread the daemon cannot go on without: if it ends on a
+/// panic, so does the process (decision 3).
+struct Fatal(&'static str);
+
+impl Drop for Fatal {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            die(self.0);
+        }
+    }
+}
+
+/// After a panic the store in memory is suspect, the journal is not: the
+/// process ends with an error, for its supervisor to start it again.
+fn die(who: &str) -> ! {
+    eprintln!("{who} panicked: the daemon ends, to start again from its journal");
+    std::process::exit(1)
+}
+
 /// Serves `store` on `socket` until the process ends. `slice` is a turn's
 /// instructions.
 /// How the daemon runs: a turn's instructions, the journal's lines past
@@ -357,7 +376,16 @@ pub fn serve(
     std::thread::Builder::new()
         .name("executor".into())
         .stack_size(STACK)
-        .spawn(move || executor(store, journal, rx, language, pace))?;
+        .spawn(move || {
+            let _fatal = Fatal("the executor");
+            executor(store, journal, rx, language, pace)
+        })?;
+    if let Some(durable) = durable.clone() {
+        std::thread::spawn(move || {
+            durable.panicked();
+            die("the journal's thread");
+        });
+    }
     let mut next = 0;
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -934,8 +962,12 @@ fn executor(
             false => {
                 let mut wait = IDLE;
                 if let (Clock::Real(f), Some(t)) = (clock, sim.next_due()) {
+                    // Compared as numbers: a far hold or a slow pace is
+                    // more seconds than a Duration holds.
                     let secs = ((t - b.until) / f).max(0.0);
-                    wait = wait.min(Duration::from_secs_f64(secs));
+                    if secs < wait.as_secs_f64() {
+                        wait = Duration::from_secs_f64(secs);
+                    }
                 }
                 match rx.recv_timeout(wait) {
                     Ok(m) => Some(m),

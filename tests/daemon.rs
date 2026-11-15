@@ -1074,3 +1074,73 @@ fn a_constraint_refuses_a_session_and_the_store_keeps_its_law() {
     let dump = daemon.get("/store");
     assert!(dump.contains("    t = 6.0\n"), "{dump}");
 }
+
+/// A-code that reads well and runs badly: a slot its module does not have.
+const PANICS: &str =
+    "acode 1\nlanguage \"ADT'81\"\n\nmodule program \"BAD\" \"BAD\" 1:1\n   0 1:1      load 7\n";
+
+#[test]
+fn a_daemon_whose_executor_panics_ends_and_starts_again() {
+    let dir = store_dir("daemon-panic-store");
+    let start = write("daemon-panic", "start.adt", COUNTER);
+    let bad = write("daemon-panic", "bad.acode", PANICS);
+    {
+        let mut daemon = Daemon::with("panic", &["--store", &dir, "--pace", "paused"]);
+        assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+        let mut exec = Command::new(BIN);
+        exec.args(["exec", "--connect", daemon.socket(), &bad]);
+        assert!(!spawn(exec).wait_with_output().unwrap().status.success());
+        // Not left answering with nothing: gone, with an error.
+        let t = Instant::now();
+        let status = loop {
+            if let Some(status) = daemon.child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(20),
+                "the daemon outlives its executor"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(status.code(), Some(1));
+    }
+    // As systemd starts it again: the store is there, and its process.
+    let daemon = Daemon::with("panic", &["--store", &dir, "--pace", "paused"]);
+    let time = daemon.get("/time");
+    assert!(time.contains("\"agent\":\"w1[w]\""), "{time}");
+}
+
+#[test]
+fn a_slow_pace_and_a_far_hold_leave_the_daemon_up() {
+    let daemon = Daemon::with("far", &["--pace", "paused"]);
+    let holds = |name: &str, hold: &str| {
+        let source = format!("program holds ;\nbegin\n        hold for {hold}\nend ;\n");
+        spawn(daemon.client(&write("daemon-far", name, &source)))
+    };
+    let waits = |n: usize| {
+        let t = Instant::now();
+        while daemon.get("/time").matches("client").count() < n {
+            assert!(
+                t.elapsed() < Duration::from_secs(20),
+                "{}",
+                daemon.get("/time")
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    // More seconds of real time than a Duration holds, twice over.
+    let near = holds("near.adt", "5");
+    waits(1);
+    daemon.post("/pace", "{\"pace\": \"real\", \"factor\": 1e-30}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(daemon.get("/time").contains("client"), "the daemon is gone");
+    daemon.post("/pace", "{\"pace\": \"paused\"}");
+    let mut far = holds("far.adt", "10.0 ^ 300");
+    waits(2);
+    daemon.post("/pace", "{\"pace\": \"real\", \"factor\": 1000}");
+    assert_eq!(within(near, 20), "");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(daemon.get("/time").contains("client"), "the daemon is gone");
+    let _ = far.kill();
+    let _ = far.wait();
+}

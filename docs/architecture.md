@@ -195,6 +195,18 @@ coroutine and hold among processes. `simulation-vm` does the same work
 as the reference in a quarter of the time: a fiber switch, not a thread
 handing over by channel.
 
+A daemon whose executor dies, dies (2026-11-15): a panic on the
+executor's thread, or on the journal's, ends the process with an error,
+and its supervisor starts it again from the journal (the NixOS module's
+`Restart=on-failure`). Before, nothing watched either thread: the
+process stayed up and answered every request with nothing. Not chosen:
+catching the panic per turn and refusing the statement. After a panic in
+the middle of a statement the store in memory is suspect; the journal,
+which holds whole transactions only, is not. Those who wait on the
+journal hear that its thread is gone, rather than wait for good. A pace
+is no way to get there: its factor is a finite number, and a hold too
+far for the clock to count is simply not due yet.
+
 ### 4. Values compute as HBDS says, and A-code carries it
 
 What the front end compiles away does not reach the runtime: control flow
