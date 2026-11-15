@@ -1809,15 +1809,24 @@ impl<'r> Vm<'r> {
     }
 
     /// The CONDs and ACTIONs a change runs: the class's, class
-    /// attribute's or class link's, then the object's own, THIS being the
-    /// object (pages 156 to 158). A false COND refuses the change.
+    /// attribute's or class link's, then the object attribute's or object
+    /// link's own, then the object's, THIS being the object (pages 156 to
+    /// 158). A false COND refuses the change.
     fn trigger(&mut self, event: Invoked, depth: usize) -> Run<Next> {
-        let (adts, this) = match event {
-            Invoked::Created(o) => (AdtRef::Class(self.store.objects()[&o].class), o),
-            Invoked::Set(o, a) => (AdtRef::ClassAttribute(a), o),
+        let (adts, own, this) = match event {
+            Invoked::Created(o) => (AdtRef::Class(self.store.objects()[&o].class), None, o),
+            Invoked::Set(o, a) => (
+                AdtRef::ClassAttribute(a),
+                Some(AdtRef::ObjectAttribute(o, a)),
+                o,
+            ),
             Invoked::Linked(l) => {
                 let link = &self.store.object_links()[&l];
-                (AdtRef::ClassLink(link.class_link), link.from)
+                (
+                    AdtRef::ClassLink(link.class_link),
+                    Some(AdtRef::ObjectLink(l)),
+                    link.from,
+                )
             }
         };
         let object = AdtRef::Object(this);
@@ -1833,7 +1842,7 @@ impl<'r> Vm<'r> {
                 Err(end) => return Ok(Next::End(end)),
             }
         }
-        for r in [adts, object] {
+        for r in [Some(adts), own, Some(object)].into_iter().flatten() {
             let (cond, action) = (self.property(r, "COND"), self.property(r, "ACTION"));
             if cond.is_none() && action.is_none() {
                 continue;

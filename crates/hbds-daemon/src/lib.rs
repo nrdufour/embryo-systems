@@ -830,7 +830,7 @@ fn reflexes_json(store: &Store) -> Vec<Json> {
         }
         let value = |name: &str| {
             let a = store.find_attribute(o.class, name)?;
-            o.values.get(&a).map(|v| store.show(v))
+            store.get(id, a).map(|v| store.show(v))
         };
         let launchers = (store.associations().iter())
             .filter(|(_, b)| *b == AdtRef::Object(id))

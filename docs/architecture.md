@@ -480,6 +480,11 @@ Not chosen: the exact version only, with a converter; refusing to load a
 module in use; restarting its fibers in the new version, their place and
 locals lost.
 
+As built (2026-11-15): the journal's version 3 gives object attributes
+properties of their own (docs/hbds.md, The model). A version 2 journal
+set an object attribute's property on its class attribute: it is read
+so, then rewritten as 3.
+
 ### 11. Engine performance
 
 - **GTAD gets indexes, early**: name to class, class and name to object,

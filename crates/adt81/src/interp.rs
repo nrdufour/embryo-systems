@@ -2697,17 +2697,26 @@ impl Machine {
     }
 
     /// The CONDs and ACTIONs a change runs: the class's, class
-    /// attribute's or class link's, then the object's own, THIS being the
-    /// object (pages 156 to 158). A false COND refuses the change.
+    /// attribute's or class link's, then the object attribute's or object
+    /// link's own, then the object's, THIS being the object (pages 156 to
+    /// 158). A false COND refuses the change.
     fn trigger(&self, event: Invoked, f: &Frame, span: Span) -> Exec<()> {
-        let (adts, this) = {
+        let (adts, own, this) = {
             let store = self.store.lock().unwrap();
             match event {
-                Invoked::Created(o) => (vec![AdtRef::Class(store.objects()[&o].class)], o),
-                Invoked::Set(o, a) => (vec![AdtRef::ClassAttribute(a)], o),
+                Invoked::Created(o) => (vec![AdtRef::Class(store.objects()[&o].class)], None, o),
+                Invoked::Set(o, a) => (
+                    vec![AdtRef::ClassAttribute(a)],
+                    Some(AdtRef::ObjectAttribute(o, a)),
+                    o,
+                ),
                 Invoked::Linked(l) => {
                     let link = &store.object_links()[&l];
-                    (vec![AdtRef::ClassLink(link.class_link)], link.from)
+                    (
+                        vec![AdtRef::ClassLink(link.class_link)],
+                        Some(AdtRef::ObjectLink(l)),
+                        link.from,
+                    )
                 }
             }
         };
@@ -2724,7 +2733,7 @@ impl Machine {
                 }
             }
         }
-        let adts = adts.into_iter().chain([AdtRef::Object(this)]);
+        let adts = adts.into_iter().chain(own).chain([AdtRef::Object(this)]);
         for r in adts {
             let (cond, action, what) = {
                 let store = self.store.lock().unwrap();

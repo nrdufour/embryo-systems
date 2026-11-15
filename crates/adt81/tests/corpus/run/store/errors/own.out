@@ -1,0 +1,2 @@
+-5.0
+11:9: runtime error: the COND of a1[AREA].temp refuses this change: THIS . "temp" > 0.
