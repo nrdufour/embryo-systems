@@ -71,6 +71,37 @@ pub struct Props {
     pub properties: BTreeMap<String, Code>,
 }
 
+static NO_PROPS: Props = Props {
+    spec: None,
+    unit: None,
+    computed: false,
+    properties: BTreeMap::new(),
+};
+
+/// An a.d.t.'s `Props`, boxed: nearly all carry none, and then cost a
+/// pointer. Reads see an empty `Props`.
+#[derive(Debug, Clone, Default)]
+pub struct PropsBox(Option<Box<Props>>);
+
+impl PropsBox {
+    fn get_mut(&mut self) -> &mut Props {
+        self.0.get_or_insert_default()
+    }
+}
+
+impl std::ops::Deref for PropsBox {
+    type Target = Props;
+    fn deref(&self) -> &Props {
+        self.0.as_deref().unwrap_or(&NO_PROPS)
+    }
+}
+
+impl PartialEq for PropsBox {
+    fn eq(&self, other: &PropsBox) -> bool {
+        **self == **other
+    }
+}
+
 /// Code an a.d.t. carries, and the language it is written in: the store
 /// keeps it, a language runs it.
 #[derive(Debug, Clone, PartialEq)]
@@ -86,7 +117,7 @@ pub struct Class {
     pub state: State,
     /// The hyperclasses that include it.
     pub hyper: BTreeSet<Id>,
-    pub props: Props,
+    pub props: PropsBox,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,7 +125,7 @@ pub struct Attribute {
     pub class: Id,
     pub name: String,
     pub state: State,
-    pub props: Props,
+    pub props: PropsBox,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,7 +133,7 @@ pub struct Object {
     pub class: Id,
     pub name: String,
     pub state: State,
-    pub props: Props,
+    pub props: PropsBox,
 }
 
 /// An object's attribute (page 46, figure 6): its value, and what it
@@ -113,7 +144,7 @@ pub struct Object {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ObjectAttribute {
     pub value: Option<Value>,
-    pub props: Props,
+    pub props: PropsBox,
 }
 
 /// One direction of a link between classes; the other is `reverse`, which
@@ -125,7 +156,7 @@ pub struct ClassLink {
     pub to: Id,
     pub reverse: Id,
     pub state: State,
-    pub props: Props,
+    pub props: PropsBox,
 }
 
 /// One direction of a link between objects, realizing a class link.
@@ -137,7 +168,7 @@ pub struct ObjectLink {
     pub reverse: Id,
     pub probability: Option<f64>,
     pub state: State,
-    pub props: Props,
+    pub props: PropsBox,
 }
 
 /// What a pair of objects is held to, by a link of their classes (page
@@ -809,7 +840,7 @@ impl Store {
                         kind,
                         state: State::Active,
                         hyper: BTreeSet::new(),
-                        props: Props::default(),
+                        props: PropsBox::default(),
                     },
                 );
             }
@@ -820,7 +851,7 @@ impl Store {
                         class,
                         name,
                         state: State::Active,
-                        props: Props::default(),
+                        props: PropsBox::default(),
                     },
                 );
             }
@@ -831,7 +862,7 @@ impl Store {
                         class,
                         name,
                         state: State::Active,
-                        props: Props::default(),
+                        props: PropsBox::default(),
                     },
                 );
             }
@@ -849,7 +880,7 @@ impl Store {
                     to,
                     reverse,
                     state: State::Active,
-                    props: Props::default(),
+                    props: PropsBox::default(),
                 };
                 self.put_class_link(id, link(from, Some(relation), to, reverse));
                 if reverse != id {
@@ -875,7 +906,7 @@ impl Store {
                     reverse,
                     probability,
                     state: State::Active,
-                    props: Props::default(),
+                    props: PropsBox::default(),
                 };
                 self.put_object_link(id, link(class_link, from, to, reverse));
                 self.put_object_link(reverse, link(back, to, from, id));
@@ -977,30 +1008,30 @@ impl Store {
     /// What an a.d.t. carries: its specification, its COND and ACTION.
     pub fn props(&self, r: AdtRef) -> Option<&Props> {
         match r {
-            AdtRef::Class(id) => self.classes.get(&id).map(|c| &c.props),
-            AdtRef::Object(id) => self.objects.get(&id).map(|o| &o.props),
-            AdtRef::ClassAttribute(id) => self.attributes.get(&id).map(|a| &a.props),
+            AdtRef::Class(id) => self.classes.get(&id).map(|c| &*c.props),
+            AdtRef::Object(id) => self.objects.get(&id).map(|o| &*o.props),
+            AdtRef::ClassAttribute(id) => self.attributes.get(&id).map(|a| &*a.props),
             AdtRef::ObjectAttribute(o, a) => {
-                self.object_attributes.get(&(o, a)).map(|oa| &oa.props)
+                self.object_attributes.get(&(o, a)).map(|oa| &*oa.props)
             }
-            AdtRef::ClassLink(id) => self.class_links.get(&id).map(|l| &l.props),
-            AdtRef::ObjectLink(id) => self.object_links.get(&id).map(|l| &l.props),
+            AdtRef::ClassLink(id) => self.class_links.get(&id).map(|l| &*l.props),
+            AdtRef::ObjectLink(id) => self.object_links.get(&id).map(|l| &*l.props),
         }
     }
 
     fn props_mut(&mut self, r: AdtRef) -> Option<&mut Props> {
         match r {
-            AdtRef::Class(id) => self.classes.get_mut(&id).map(|c| &mut c.props),
-            AdtRef::Object(id) => self.objects.get_mut(&id).map(|o| &mut o.props),
-            AdtRef::ClassAttribute(id) => self.attributes.get_mut(&id).map(|a| &mut a.props),
+            AdtRef::Class(id) => self.classes.get_mut(&id).map(|c| c.props.get_mut()),
+            AdtRef::Object(id) => self.objects.get_mut(&id).map(|o| o.props.get_mut()),
+            AdtRef::ClassAttribute(id) => self.attributes.get_mut(&id).map(|a| a.props.get_mut()),
             AdtRef::ObjectAttribute(o, a) => {
                 if !self.objects.contains_key(&o) || !self.attributes.contains_key(&a) {
                     return None;
                 }
-                Some(&mut self.object_attribute_mut(o, a).props)
+                Some(self.object_attribute_mut(o, a).props.get_mut())
             }
-            AdtRef::ClassLink(id) => self.class_links.get_mut(&id).map(|l| &mut l.props),
-            AdtRef::ObjectLink(id) => self.object_links.get_mut(&id).map(|l| &mut l.props),
+            AdtRef::ClassLink(id) => self.class_links.get_mut(&id).map(|l| l.props.get_mut()),
+            AdtRef::ObjectLink(id) => self.object_links.get_mut(&id).map(|l| l.props.get_mut()),
         }
     }
 
