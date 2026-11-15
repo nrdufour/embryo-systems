@@ -118,9 +118,13 @@ impl Saver<'_> {
     fn module_term(&self, m: usize) -> Result<Term, String> {
         Ok(match &self.o.origin[m] {
             Origin::Unit(hash, i) => list(vec![word(hash), word(i)]),
-            Origin::Code(part, language, code) => {
-                list(vec![word("code"), text(part), text(language), text(code)])
-            }
+            Origin::Code(part, language, code) => list(vec![
+                word("code"),
+                text(part),
+                text(language),
+                text(code),
+                word(&self.o.hashes[self.o.home[m]]),
+            ]),
         })
     }
 }
@@ -138,8 +142,18 @@ impl Session {
         let first = m.word()?.to_string();
         if first == "code" {
             let (part, lang, code) = (m.text()?, m.text()?, m.text()?);
+            // The unit it was compiled against; fibers saved before it
+            // was said took the last.
+            let home = match m.more() {
+                true => {
+                    let hash = m.word()?;
+                    let home = self.o.hashes.iter().position(|h| h == hash);
+                    home.ok_or_else(|| format!("no unit {hash} is loaded"))?
+                }
+                false => self.units.len().saturating_sub(1),
+            };
             m.end()?;
-            return self.compile_code(&part, &lang, &code, language);
+            return self.compile_code(&part, &lang, &code, home, language);
         }
         let key = (first, m.parse()?);
         m.end()?;
@@ -149,13 +163,14 @@ impl Session {
             .ok_or_else(|| format!("no module {} of unit {} is loaded", key.1, key.0))
     }
 
-    /// Code the store keeps, compiled against the last unit, as a turn
-    /// compiles it.
+    /// Code the store keeps, compiled against the unit at `home`, as a
+    /// turn compiles it.
     fn compile_code(
         &mut self,
         part: &str,
         lang: &str,
         code: &str,
+        home: usize,
         language: &dyn Language,
     ) -> Result<usize, String> {
         if lang != language.name() {
@@ -164,17 +179,18 @@ impl Session {
                 language.name()
             ));
         }
-        let key = (part.to_string(), code.to_string());
+        let key = (home, part.to_string(), code.to_string());
         if let Some(&m) = self.o.compiled.get(&key) {
             return Ok(m);
         }
-        let (unit, offset) = self.units.last().ok_or("no unit loaded")?;
+        let (unit, offset) = self.units.get(home).ok_or("no unit loaded")?;
         let mut module = language.compile(part, code, "the store's code", unit)?;
         relocate(&mut module, *offset);
         self.o.modules.push(Rc::new(module));
         self.o
             .origin
             .push(Origin::Code(part.into(), lang.into(), code.into()));
+        self.o.home.push(home);
         let m = self.o.modules.len() - 1;
         self.o.compiled.insert(key, m);
         Ok(m)
@@ -269,6 +285,67 @@ impl Saver<'_> {
 }
 
 impl Session {
+    /// A fiber the journal gives, against the code it runs: taken as
+    /// written, a damaged one would index out of its module, its frames
+    /// or its stack later, in the kernel's loop. Its frames name
+    /// instructions and slots that are there, its references variables
+    /// that are, and its stack holds what the verifier counts before
+    /// each frame's instruction.
+    fn check_fiber(&self, f: &Fiber, shared: usize) -> Result<(), String> {
+        let modules = |c: usize| self.o.modules.get(c).map(|m| &**m);
+        let place = |frames: &[Frame], i: &Item| match *i {
+            Item::Value(_) => true,
+            Item::Ref(g, t) => frames.get(g).is_some_and(|fr| t < fr.cells.len()),
+            Item::Shared(i) => i < shared,
+        };
+        let mut depth = 0;
+        for (j, fr) in f.frames.iter().enumerate() {
+            let m = modules(fr.module).ok_or("a frame of no module")?;
+            let at = |e: &str| format!("frame {j}, in \"{}\" at {}: {e}", m.spelling, fr.pc);
+            if fr.cells.len() != m.slots.len() {
+                return Err(at("as many variables as the module's are expected"));
+            }
+            let below = &f.frames[..j];
+            let cells = fr.cells.iter().all(|c| match *c {
+                Cell::Own(_) => true,
+                Cell::Ref(g, t) => below.get(g).is_some_and(|fr| t < fr.cells.len()),
+                Cell::Shared(i) => i < shared,
+            });
+            if !cells || !fr.args.iter().all(|i| place(below, i)) {
+                return Err(at("a reference to a variable that is not there"));
+            }
+            let before = hbds_acode::depth_at(m, fr.pc, &modules)
+                .ok_or_else(|| at("no path leads to this instruction"))?;
+            // A frame that called waits for its callee's result, which
+            // the count before its next instruction includes.
+            let awaited = match (j + 1 < f.frames.len(), fr.pc.checked_sub(1)) {
+                (true, Some(pc)) => match m.code[pc] {
+                    hbds_acode::Instr::Call(c, _) => modules(c).is_some_and(|callee| {
+                        matches!(
+                            callee.kind,
+                            hbds_acode::Kind::Function | hbds_acode::Kind::Functor
+                        )
+                    }),
+                    _ => false,
+                },
+                _ => false,
+            };
+            depth += before
+                .checked_sub(awaited as usize)
+                .ok_or_else(|| at("a result is awaited and no operand is"))?;
+        }
+        if !f.stack.iter().all(|i| place(&f.frames, i)) {
+            return Err("an operand refers to a variable that is not there".into());
+        }
+        match f.stack.len() == depth {
+            true => Ok(()),
+            false => Err(format!(
+                "{} operand(s), and its frames hold {depth}",
+                f.stack.len()
+            )),
+        }
+    }
+
     /// The kernel's fibers as `save_fibers` wrote them, its units loaded
     /// first. The kernel starts idle: the next process due runs on.
     pub fn restore_fibers(&mut self, text: &str, language: &dyn Language) -> Result<(), String> {
@@ -358,6 +435,22 @@ impl Session {
         r.end()?;
         if fibers.is_empty() {
             return Err("no fibers".into());
+        }
+        let count = fibers.len();
+        let known = |what: &str, f: usize| match f < count {
+            true => Ok(()),
+            false => Err(format!("{what} is fiber {f}, of {count}")),
+        };
+        for (n, f) in fibers.iter().enumerate() {
+            self.check_fiber(f, shared.len())
+                .map_err(|e| format!("fiber {n}: {e}"))?;
+            f.resumer.map_or(Ok(()), |r| known("a resumer", r))?;
+        }
+        for &f in (coroutines.values())
+            .chain(processes.values())
+            .chain(activations.values())
+        {
+            known("a coroutine's, a process's or a reflex's", f)?;
         }
         self.o.fibers = fibers;
         // Idle: the main fiber is the kernel's own, with no frames.

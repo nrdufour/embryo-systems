@@ -350,6 +350,9 @@ pub struct Pace {
     pub slice: u64,
     pub compact_at: u64,
     pub clock: Clock,
+    /// The executor panics once the store's time reaches this: for the
+    /// test of what a panic there does, which no session can cause.
+    pub crash_at: Option<f64>,
 }
 
 pub fn serve(
@@ -946,6 +949,9 @@ fn executor(
     loop {
         // A statement refused took what it did to the set with it.
         sim.follow(&mut store);
+        if pace.crash_at.is_some_and(|t| sim.now() >= t) {
+            panic!("asked to, by --crash-at");
+        }
         let b = bound(clock, real_from);
         let in_time = |clients: &BTreeMap<u64, Client>, sim: &Sequencing| {
             (clients.iter()).any(|(&id, c)| !c.held && sim.is_engaged(Agent::Client(id)))

@@ -65,6 +65,23 @@ as the target (no standard way yet to save a suspended stack, HBDS's
 values rebuilt inside it, a large dependency). WebAssembly stays possible
 as an *output* of A-code, as page 161 translates A-code to C.
 
+A-code is verified when it is read (2026-11-15). `exec` and the daemon
+take it from files and from clients, and the machine ran it as written:
+a slot its module does not have, a jump out of the code, a call to a
+module that is not there or an empty stack popped were panics. The
+verifier (`crates/hbds-acode/src/verify.rs`) runs in `Unit::read`, the
+one way in for A-code the compiler did not just write: every slot, jump
+and call within bounds, a call's arguments as many as its callee takes,
+the operand stack (values and references told apart) and the open
+transactions the same along every path to an instruction, nothing left
+at a return, and no path off a module's end. What an operand *is*, a
+name or a class or a list, the machine checks as it takes it, and says
+`malformed A-code` where it panicked. Not chosen: types in the verifier,
+as the JVM's has, which the machine would then not check: A-code's
+values are dynamic, and a check where a value is taken costs what the
+match on it already did. `tests/acode.rs` mutates the corpus's units a
+few thousand times: each mutant is refused or runs, none panics.
+
 ### 2. A reference and a fast path; A-code is stack bytecode
 
 The aim is twofold: show that Bouillé's design works, and that it is
@@ -532,6 +549,23 @@ next a.d.t. takes, which compaction writes: without it a journal
 compacted after a PURGE gave the purged ids again, and what still
 pointed at them pointed at something new. A version 3 journal reads as
 it is; one already compacted has lost the ids it purged.
+
+Code the store keeps binds to the program that runs it (2026-11-15). A
+COND or an ACTION that calls a module was compiled against the last unit
+loaded and kept by its text alone: in a daemon, a process of one program
+ran another program's subroutine of the same name, loaded since. It is
+now compiled against the unit of the code that triggers it, and kept by
+that unit too; a saved fiber names such code with its unit's hash, and
+one saved before takes the last unit, as it did. A reflex in time, which
+the kernel starts with nothing running, still takes the last unit
+loaded.
+
+Saved fibers are checked when they are restored (2026-11-15): each
+frame's instruction and variables are its module's, each reference is to
+a variable that is there, and the stack holds what the verifier counts
+before each frame's instruction. A journal line that fails is refused
+whole, with the reason; it was taken as written, and panicked later, in
+the kernel's loop.
 
 ### 11. Engine performance
 

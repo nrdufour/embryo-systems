@@ -169,8 +169,13 @@ struct Owned {
     /// Where each module comes from: what a saved fiber names its modules
     /// by.
     origin: Vec<Origin>,
-    /// Code the store keeps, compiled: by part and text.
-    compiled: HashMap<(String, String), usize>,
+    /// The unit each module is of, or was compiled against, by its place
+    /// among the units loaded; and each unit's hash.
+    home: Vec<usize>,
+    hashes: Vec<String>,
+    /// Code the store keeps, compiled: by the unit it is compiled
+    /// against, its part and its text.
+    compiled: HashMap<(usize, String, String), usize>,
     /// The functions that compute attributes, by class and attribute.
     computed: HashMap<(String, String), usize>,
     /// The bodies of process classes, by class (page 112).
@@ -215,6 +220,8 @@ struct Owned {
     nesting: usize,
     /// The instructions this turn may still execute, if it has a slice.
     slice: Option<u64>,
+    /// The instructions the run may still execute, if they are counted.
+    fuel: Option<u64>,
 }
 
 impl Session {
@@ -222,6 +229,13 @@ impl Session {
         let mut session = Session::empty(budget, Mode::Standalone);
         session.load(unit);
         session
+    }
+
+    /// From now on the run fails once it has executed so many
+    /// instructions. For tests of A-code no compiler wrote: the statement
+    /// budget stops a loop only if it passes a statement.
+    pub fn fuel(&mut self, instructions: u64) {
+        self.o.fuel = Some(instructions);
     }
 
     /// A daemon's client's session: `id` is its agent's.
@@ -241,6 +255,8 @@ impl Session {
         let o = Owned {
             modules: Vec::new(),
             origin: Vec::new(),
+            home: Vec::new(),
+            hashes: Vec::new(),
             compiled: HashMap::new(),
             computed: HashMap::new(),
             bodies: HashMap::new(),
@@ -270,6 +286,7 @@ impl Session {
             started: false,
             nesting: 0,
             slice: None,
+            fuel: None,
         };
         Session {
             units: Vec::new(),
@@ -284,8 +301,10 @@ impl Session {
     pub fn load(&mut self, unit: Unit) -> usize {
         let offset = self.o.modules.len();
         let hash = hbds_core::sha1::hex(unit.text().as_bytes());
+        self.o.hashes.push(hash.clone());
         for (i, m) in unit.modules.iter().enumerate() {
             self.o.origin.push(Origin::Unit(hash.clone(), i));
+            self.o.home.push(self.units.len());
             let mut m = m.clone();
             relocate(&mut m, offset);
             if let Some(key) = &m.computes {
@@ -315,10 +334,8 @@ impl Session {
         language: &dyn Language,
         slice: Option<u64>,
     ) -> Turn {
-        let (unit, offset) = self.units.last().expect("a unit");
         let mut vm = Vm {
-            unit,
-            offset: *offset,
+            units: &self.units,
             o: &mut self.o,
             store,
             sim,
@@ -349,12 +366,11 @@ impl Session {
         slice: Option<u64>,
         bound: Bound,
     ) -> Turn {
-        let Some((unit, offset)) = self.units.last() else {
+        if self.units.is_empty() {
             return Turn::Idle;
-        };
+        }
         let mut vm = Vm {
-            unit,
-            offset: *offset,
+            units: &self.units,
             o: &mut self.o,
             store,
             sim,
@@ -664,10 +680,9 @@ enum Next {
 }
 
 struct Vm<'r> {
-    /// The last unit loaded, and where its modules start: what code the
-    /// store keeps is compiled against.
-    unit: &'r Unit,
-    offset: usize,
+    /// The units loaded, and where each one's modules start: code the
+    /// store keeps is compiled against the one that runs it.
+    units: &'r [(Unit, usize)],
     o: &'r mut Owned,
     store: &'r mut Store,
     sim: &'r mut Sequencing,
@@ -722,11 +737,17 @@ fn fault(f: Fault) -> Failure {
 }
 
 /// The string a name is, as Named left it.
-fn text_of(v: &Value) -> String {
+fn text_of(v: &Value) -> Run<String> {
     match v.scalar() {
-        Some(Scalar::String(s)) => s.to_string(),
-        v => unreachable!("a name expected, not {v:?}"),
+        Some(Scalar::String(s)) => Ok(s.to_string()),
+        _ => Err(malformed(format!("a name is expected, not {v}"))),
     }
+}
+
+/// What code the compiler never writes ran into: the verifier lets
+/// through whatever keeps its operands in bounds.
+fn malformed(what: impl Into<String>) -> Failure {
+    format!("malformed A-code: {}", what.into()).into()
 }
 
 /// A store's refusal.
@@ -1438,10 +1459,10 @@ impl<'r> Vm<'r> {
         op(self.sim, &name).map_err(Failure::from)
     }
 
-    fn pop_time(&mut self) -> f64 {
+    fn pop_time(&mut self) -> Run<f64> {
         match self.pop().scalar() {
-            Some(Scalar::Float(t)) => *t,
-            v => unreachable!("AsTime comes first, not {v:?}"),
+            Some(Scalar::Float(t)) => Ok(*t),
+            _ => Err(malformed("a time is expected: AsTime comes first")),
         }
     }
 
@@ -1455,8 +1476,8 @@ impl<'r> Vm<'r> {
         self.dispatch()
     }
 
-    fn pop_process(&mut self) -> Agent {
-        Agent::Process(self.pop_object())
+    fn pop_process(&mut self) -> Run<Agent> {
+        Ok(Agent::Process(self.pop_object()?))
     }
 
     /// A reflex, not a process.
@@ -1480,7 +1501,7 @@ impl<'r> Vm<'r> {
     /// What BEFORE and AFTER name: a process, or a reflex's launch due
     /// first.
     fn reference(&mut self) -> Run<Agent> {
-        let p = self.pop_process();
+        let p = self.pop_process()?;
         let Agent::Process(o) = p else { return Ok(p) };
         if !self.reflex(o) {
             return Ok(p);
@@ -1561,10 +1582,10 @@ impl<'r> Vm<'r> {
         }
     }
 
-    fn list_of(&mut self, s: usize) -> &mut List {
+    fn list_of(&mut self, s: usize) -> Run<&mut List> {
         match &mut self.var_mut(s).value {
-            Some(Value::List(l)) => l,
-            _ => unreachable!("CheckList comes first"),
+            Some(Value::List(l)) => Ok(l),
+            _ => Err(malformed("a list is expected: CheckList comes first")),
         }
     }
 
@@ -1606,6 +1627,15 @@ impl<'r> Vm<'r> {
             }
             self.o.frames.last_mut().expect("a frame").pc += 1;
             let span = m.spans[pc];
+            if let Some(fuel) = &mut self.o.fuel {
+                if *fuel == 0 {
+                    return Err(RuntimeError {
+                        span,
+                        message: "the instruction budget is spent".into(),
+                    });
+                }
+                *fuel -= 1;
+            }
             let placed = |f: Failure| RuntimeError {
                 span: f.at.unwrap_or(span),
                 message: f.message,
@@ -1780,16 +1810,25 @@ impl<'r> Vm<'r> {
             )
             .into());
         }
-        let key = (part.to_string(), text.to_string());
+        // Against the unit of the code that runs it: a call it makes is
+        // to that program's module, whatever other units are loaded. With
+        // nothing running (a reflex in time the kernel starts), the last.
+        let home = match self.o.frames.last() {
+            Some(f) => self.o.home[f.module],
+            None => self.units.len() - 1,
+        };
+        let key = (home, part.to_string(), text.to_string());
         if let Some(&m) = self.o.compiled.get(&key) {
             return Ok(m);
         }
-        let mut module = self.language.compile(part, text, what, self.unit)?;
-        relocate(&mut module, self.offset);
+        let (unit, offset) = &self.units[home];
+        let mut module = self.language.compile(part, text, what, unit)?;
+        relocate(&mut module, *offset);
         self.o.modules.push(Rc::new(module));
         self.o
             .origin
             .push(Origin::Code(part.into(), language.into(), text.into()));
+        self.o.home.push(home);
         let m = self.o.modules.len() - 1;
         self.o.compiled.insert(key, m);
         Ok(m)
@@ -1933,31 +1972,43 @@ impl<'r> Vm<'r> {
         }
     }
 
-    fn pop_adt(&mut self) -> AdtRef {
+    // What the compiler's code always finds on the stack, a verified
+    // unit need not: the verifier counts operands, and what they are is
+    // checked here, as they are taken.
+
+    /// An a.d.t. that is in the store.
+    fn pop_adt(&mut self) -> Run<AdtRef> {
         match self.pop() {
-            Value::Adt(r) => r,
-            v => unreachable!("an a.d.t. expected, not {v}"),
+            Value::Adt(r) => stored(self.store.follow(r)),
+            v => Err(malformed(format!("an a.d.t. is expected, not {v}"))),
         }
     }
 
-    fn pop_text(&mut self) -> String {
-        match self.pop().scalar() {
-            Some(Scalar::String(s)) => s.to_string(),
-            v => unreachable!("a name expected, not {v:?}"),
+    fn pop_text(&mut self) -> Run<String> {
+        let v = self.pop();
+        match v.scalar() {
+            Some(Scalar::String(s)) => Ok(s.to_string()),
+            _ => Err(malformed(format!("a name is expected, not {v}"))),
         }
     }
 
-    fn pop_class(&mut self) -> Id {
-        match self.pop_adt() {
-            AdtRef::Class(c) => c,
-            r => unreachable!("a class expected, not {r:?}"),
+    fn pop_class(&mut self) -> Run<Id> {
+        match self.pop_adt()? {
+            AdtRef::Class(c) => Ok(c),
+            r => Err(malformed(format!(
+                "a class is expected, not {}",
+                self.store.describe(r)
+            ))),
         }
     }
 
-    fn pop_object(&mut self) -> Id {
-        match self.pop_adt() {
-            AdtRef::Object(o) => o,
-            r => unreachable!("an object expected, not {r:?}"),
+    fn pop_object(&mut self) -> Run<Id> {
+        match self.pop_adt()? {
+            AdtRef::Object(o) => Ok(o),
+            r => Err(malformed(format!(
+                "an object is expected, not {}",
+                self.store.describe(r)
+            ))),
         }
     }
 
@@ -2132,7 +2183,11 @@ impl<'r> Vm<'r> {
             }
             Instr::Bind(a, s) => {
                 let f = self.o.frames.len() - 1;
-                let arg = self.o.frames[f].args[*a].clone();
+                // A module entered without what it binds: a body, or
+                // code the store calls, that takes parameters.
+                let Some(arg) = self.o.frames[f].args.get(*a).cloned() else {
+                    return Err(malformed(format!("argument {a} is not given")));
+                };
                 self.o.frames[f].cells[*s] = match arg {
                     Item::Value(v) => {
                         let v = Self::convert(v, m.slots[*s].ty)?;
@@ -2264,7 +2319,7 @@ impl<'r> Vm<'r> {
             }
             Instr::Native(name) => {
                 let Value::One(x) = self.pop() else {
-                    unreachable!("ExpectOne comes first")
+                    return Err(malformed("one value is expected: ExpectOne comes first"));
                 };
                 let y: Fz = self.language.native(name, &x).map_err(fault)?;
                 self.push(Value::One(y));
@@ -2321,19 +2376,19 @@ impl<'r> Vm<'r> {
                     }
                 };
                 let Value::List(items) = self.pop() else {
-                    unreachable!("Gather comes first")
+                    return Err(malformed("a list is expected: Gather comes first"));
                 };
                 let items = (*items.items).clone();
-                hbds_lists::insert(self.list_of(*s), items, at)?;
+                hbds_lists::insert(self.list_of(*s)?, items, at)?;
             }
             Instr::Extract(s) => {
                 let Value::List(items) = self.pop() else {
-                    unreachable!("Gather comes first")
+                    return Err(malformed("a list is expected: Gather comes first"));
                 };
-                hbds_lists::extract(self.list_of(*s), &items.items);
+                hbds_lists::extract(self.list_of(*s)?, &items.items);
             }
-            Instr::Empty(s) => hbds_lists::empty(self.list_of(*s)),
-            Instr::Organize(s, circular) => self.list_of(*s).circular = *circular,
+            Instr::Empty(s) => hbds_lists::empty(self.list_of(*s)?),
+            Instr::Organize(s, circular) => self.list_of(*s)?.circular = *circular,
             Instr::Functor(key, spelling, n, held) => {
                 let args: Vec<Value> = (self.o.stack.split_off(self.o.stack.len() - n))
                     .into_iter()
@@ -2421,7 +2476,7 @@ impl<'r> Vm<'r> {
                         return Err(format!("{} is not a class", self.store.describe(r)).into());
                     }
                     v => {
-                        let name = text_of(&v);
+                        let name = text_of(&v)?;
                         stored(self.store.class(&name))?
                     }
                 };
@@ -2430,13 +2485,13 @@ impl<'r> Vm<'r> {
             Instr::Designate(any) => {
                 let r = match self.pop() {
                     Value::Adt(r) => stored(self.store.follow(r))?,
-                    v => AdtRef::Class(self.class_named(&text_of(&v), *any)?),
+                    v => AdtRef::Class(self.class_named(&text_of(&v)?, *any)?),
                 };
                 self.push(Value::Adt(r));
             }
             Instr::ObjectNamed(any) => {
-                let class = self.pop_text();
-                let name = self.pop_text();
+                let class = self.pop_text()?;
+                let name = self.pop_text()?;
                 let c = self.class_named(&class, *any)?;
                 let o = match (any, self.store.find_object(c, &name)) {
                     (true, Some(o)) => o,
@@ -2445,15 +2500,15 @@ impl<'r> Vm<'r> {
                 self.push(Value::Adt(AdtRef::Object(o)));
             }
             Instr::IsObject => {
-                let r = self.pop_adt();
+                let r = self.pop_adt()?;
                 if !matches!(r, AdtRef::Object(_)) {
                     return Err(format!("{} is not an object", self.store.describe(r)).into());
                 }
                 self.push(Value::Adt(r));
             }
             Instr::AttrOf => {
-                let name = self.pop_text();
-                let r = match self.pop_adt() {
+                let name = self.pop_text()?;
+                let r = match self.pop_adt()? {
                     AdtRef::Class(c) => {
                         AdtRef::ClassAttribute(stored(self.store.attribute(c, &name))?)
                     }
@@ -2468,8 +2523,8 @@ impl<'r> Vm<'r> {
                 self.push(Value::Adt(r));
             }
             Instr::LinkOf(relation) => {
-                let to = self.pop_adt();
-                let from = self.pop_adt();
+                let to = self.pop_adt()?;
+                let from = self.pop_adt()?;
                 let r = match (from, to) {
                     (AdtRef::Class(a), AdtRef::Class(b)) => {
                         AdtRef::ClassLink(stored(self.store.class_link(a, relation, b))?)
@@ -2484,21 +2539,21 @@ impl<'r> Vm<'r> {
                 self.push(Value::Adt(r));
             }
             Instr::ClassAttr => {
-                let name = self.pop_text();
-                let c = self.pop_class();
+                let name = self.pop_text()?;
+                let c = self.pop_class()?;
                 let a = stored(self.store.attribute(c, &name))?;
                 self.push(Value::Adt(AdtRef::ClassAttribute(a)));
             }
             Instr::FindAttribute => {
-                let name = self.pop_text();
-                let c = self.pop_class();
+                let name = self.pop_text()?;
+                let c = self.pop_class()?;
                 let a = self.store.find_attribute(c, &name);
                 let a = a.ok_or_else(|| Failure::from(format!("no attribute \"{name}\"")))?;
                 self.push(Value::Adt(AdtRef::ClassAttribute(a)));
             }
             Instr::FindLink(relation) => {
-                let to = self.pop_class();
-                let from = self.pop_class();
+                let to = self.pop_class()?;
+                let from = self.pop_class()?;
                 let l = self.store.find_class_link(from, relation, to);
                 let l = l.ok_or("no such link")?;
                 self.push(Value::Adt(AdtRef::ClassLink(l)));
@@ -2522,7 +2577,7 @@ impl<'r> Vm<'r> {
                 stored(self.store.end(true))?;
             }
             Instr::CreateClass(embryo) => {
-                let name = self.pop_text();
+                let name = self.pop_text()?;
                 let kind = if *embryo {
                     ClassKind::Embryo
                 } else {
@@ -2531,20 +2586,20 @@ impl<'r> Vm<'r> {
                 stored(self.store.create_class(&name, kind))?;
             }
             Instr::CreateObject => {
-                let name = self.pop_text();
-                let c = self.pop_class();
+                let name = self.pop_text()?;
+                let c = self.pop_class()?;
                 let o = stored(self.store.create_object(c, &name))?;
                 return self.trigger(Invoked::Created(o), self.frame().depth);
             }
             Instr::CreateAttribute => {
-                let name = self.pop_text();
-                let c = self.pop_class();
+                let name = self.pop_text()?;
+                let c = self.pop_class()?;
                 stored(self.store.create_attribute(c, &name))?;
             }
             Instr::CreateLink(relation, named, reflexive) => {
-                let reverse = named.then(|| self.pop_text());
-                let to = self.pop_class();
-                let from = self.pop_class();
+                let reverse = named.then(|| self.pop_text()).transpose()?;
+                let to = self.pop_class()?;
+                let from = self.pop_class()?;
                 let r = self.store.create_class_link(
                     from,
                     relation,
@@ -2564,7 +2619,7 @@ impl<'r> Vm<'r> {
                     .collect();
                 for t in targets {
                     let Value::Adt(t) = t else {
-                        unreachable!("an a.d.t.")
+                        return Err(malformed(format!("an a.d.t. is expected, not {t}")));
                     };
                     let r = match op {
                         StateOp::Hibern => {
@@ -2589,8 +2644,8 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::SetAttribute => {
-                let name = self.pop_text();
-                let o = self.pop_object();
+                let name = self.pop_text()?;
+                let o = self.pop_object()?;
                 let v = self.pop();
                 let v = self.stamped(v);
                 let c = self.store.objects()[&o].class;
@@ -2618,7 +2673,7 @@ impl<'r> Vm<'r> {
                     .map_err(elsewhere);
             }
             Instr::SetProperty(key, at) => {
-                let target = self.pop_adt();
+                let target = self.pop_adt()?;
                 let v = self.pop();
                 let text = match v.scalar() {
                     Some(Scalar::String(s)) => s.to_string(),
@@ -2645,8 +2700,8 @@ impl<'r> Vm<'r> {
                 })?;
             }
             Instr::Modality(relation, modal) => {
-                let b = self.pop_object();
-                let a = self.pop_object();
+                let b = self.pop_object()?;
+                let a = self.pop_object()?;
                 let r = relation.as_str();
                 match modal {
                     hbds_acode::Modal::May => stored(self.store.hold_to(a, r, b, None))?,
@@ -2667,8 +2722,8 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::Assert(relation, probability, negated) => {
-                let b = self.pop_object();
-                let a = self.pop_object();
+                let b = self.pop_object()?;
+                let a = self.pop_object()?;
                 if *negated {
                     stored(self.store.retract_link(a, relation, b))?;
                 } else {
@@ -2678,15 +2733,19 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::Specify(spec, unit, computed) => {
-                let target = self.pop_adt();
+                let target = self.pop_adt()?;
                 stored(
                     self.store
                         .specify(target, Some(*spec), unit.clone(), *computed),
                 )?;
             }
             Instr::Include(n, m, include) => {
-                let hypers: Vec<Id> = (0..*m).map(|_| self.pop_class()).collect::<Vec<_>>();
-                let classes: Vec<Id> = (0..*n).map(|_| self.pop_class()).collect::<Vec<_>>();
+                let hypers = (0..*m)
+                    .map(|_| self.pop_class())
+                    .collect::<Run<Vec<Id>>>()?;
+                let classes = (0..*n)
+                    .map(|_| self.pop_class())
+                    .collect::<Run<Vec<Id>>>()?;
                 for c in classes.iter().rev() {
                     for h in hypers.iter().rev() {
                         let r = match include {
@@ -2698,26 +2757,30 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::Assoc(assoc) => {
-                let b = self.pop_adt();
-                let a = self.pop_adt();
+                let b = self.pop_adt()?;
+                let a = self.pop_adt()?;
                 stored(match assoc {
                     true => self.store.assoc(a, b),
                     false => self.store.dissoc(a, b),
                 })?;
             }
             Instr::Compose(n) => {
-                let mut embryos: Vec<Id> = (0..*n).map(|_| self.pop_class()).collect();
+                let mut embryos = (0..*n)
+                    .map(|_| self.pop_class())
+                    .collect::<Run<Vec<Id>>>()?;
                 embryos.reverse();
-                let name = self.pop_text();
+                let name = self.pop_text()?;
                 stored(
                     self.store
                         .create_class(&name, ClassKind::Prototype(embryos)),
                 )?;
             }
             Instr::Build(n) => {
-                let mut names: Vec<String> = (0..*n).map(|_| self.pop_text()).collect();
+                let mut names = (0..*n)
+                    .map(|_| self.pop_text())
+                    .collect::<Run<Vec<String>>>()?;
                 names.reverse();
-                let prototype = self.pop_class();
+                let prototype = self.pop_class()?;
                 if !matches!(
                     self.store.classes()[&prototype].kind,
                     ClassKind::Prototype(_)
@@ -2732,13 +2795,13 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::AttrValue => {
-                let name = self.pop_text();
-                let o = self.pop_object();
+                let name = self.pop_text()?;
+                let o = self.pop_object()?;
                 return self.attribute_value(o, &name);
             }
             Instr::Linked(relation) => {
-                let b = self.pop_object();
-                let a = self.pop_object();
+                let b = self.pop_object()?;
+                let a = self.pop_object()?;
                 let linked = self.store.object_link(a, relation, b).is_some();
                 self.push(Value::boolean(linked));
             }
@@ -2832,7 +2895,7 @@ impl<'r> Vm<'r> {
             }
             Instr::ResumeFirst(c, n) => self.start(*c, *n),
             Instr::Process => {
-                let o = self.pop_object();
+                let o = self.pop_object()?;
                 if !hbds_simulation::is_process(self.store, o) && !self.reflex(o) {
                     let what = self.store.describe(AdtRef::Object(o));
                     return Err(
@@ -2843,7 +2906,7 @@ impl<'r> Vm<'r> {
             }
             Instr::HasBody => {
                 let Some(Item::Value(Value::Adt(AdtRef::Object(p)))) = self.o.stack.last() else {
-                    unreachable!("a process")
+                    return Err(malformed("a process is expected: Process comes first"));
                 };
                 let p = *p;
                 if self.reflex(p) {
@@ -2867,33 +2930,33 @@ impl<'r> Vm<'r> {
             Instr::Activate(due) => {
                 let when = match due {
                     Due::Now => When::Now,
-                    Due::At => When::At(self.pop_time()),
+                    Due::At => When::At(self.pop_time()?),
                     Due::Before => When::Before(self.reference()?),
                     Due::After => When::After(self.reference()?),
                 };
-                let p = self.pop_process();
+                let p = self.pop_process()?;
                 for p in self.agents(p, &[Lifecycle::Passive]) {
                     self.sim_op(|sim, d| sim.reactivate(p, when, d))?;
                 }
                 self.keep_sequencing()?;
             }
             Instr::Cancel => {
-                let p = self.pop_process();
+                let p = self.pop_process()?;
                 for p in self.agents(p, &[Lifecycle::Hold]) {
                     self.sim_op(|sim, d| sim.cancel(p, d))?;
                 }
                 self.keep_sequencing()?;
             }
             Instr::Kill => {
-                let p = self.pop_process();
+                let p = self.pop_process()?;
                 for p in self.agents(p, &[Lifecycle::Hold, Lifecycle::Passive]) {
                     self.sim_op(|sim, d| sim.kill(p, d))?;
                 }
                 self.keep_sequencing()?;
             }
             Instr::Delay => {
-                let dt = self.pop_time();
-                let p = self.pop_process();
+                let dt = self.pop_time()?;
+                let p = self.pop_process()?;
                 for p in self.agents(p, &[Lifecycle::Hold]) {
                     self.sim_op(|sim, d| sim.delay(p, dt, d))?;
                 }
@@ -2903,7 +2966,7 @@ impl<'r> Vm<'r> {
                 self.running(what)?;
             }
             Instr::IsRunning => {
-                let p = self.pop_process();
+                let p = self.pop_process()?;
                 if p != self.running("HOLD")? {
                     let Agent::Process(o) = p else {
                         unreachable!("a process")
@@ -2913,7 +2976,7 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::Hold => {
-                let dt = self.pop_time();
+                let dt = self.pop_time()?;
                 self.sim_op(|sim, _| sim.hold(dt))?;
                 self.keep_sequencing()?;
                 if let Some(stop) = self.give_way(span)? {
@@ -2972,7 +3035,7 @@ impl<'r> Vm<'r> {
             }
             Instr::DialStep => {
                 let Some(Item::Value(Value::Adt(AdtRef::Object(run)))) = self.o.stack.last() else {
-                    unreachable!("a run under DialStep")
+                    return Err(malformed("a dialog's run is expected: Dial comes first"));
                 };
                 let run = *run;
                 let line = if hbds_dialog::wants(self.store, run) {
@@ -3002,11 +3065,14 @@ impl<'r> Vm<'r> {
                 self.push(Value::exact(Scalar::Boolean(done)));
             }
             Instr::Chav(hypothetical, n) => {
-                let mut scope: Vec<Id> = (0..*n).map(|_| self.pop_class()).collect();
+                let mut scope = (0..*n)
+                    .map(|_| self.pop_class())
+                    .collect::<Run<Vec<Id>>>()?;
                 scope.reverse();
-                let hypotheses = hypothetical.then(|| Code {
+                let text = hypothetical.then(|| self.pop_text()).transpose()?;
+                let hypotheses = text.map(|text| Code {
                     language: self.language.name().into(),
-                    text: self.pop_text(),
+                    text,
                 });
                 let mut engine = Engine { vm: self };
                 let (name, run) = match &hypotheses {
