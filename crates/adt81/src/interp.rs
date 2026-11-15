@@ -1793,7 +1793,7 @@ impl Machine {
                 )
             }),
             Designation::Named(n) => match self.named(n, f, span)? {
-                Err(r) => Ok(r),
+                Err(r) => stored(self.store.lock().unwrap().follow(r), span),
                 Ok(name) => {
                     let store = self.store.lock().unwrap();
                     match (any, store.find_class(&name)) {
@@ -2470,6 +2470,13 @@ impl Machine {
     /// Runs a process's body from where it stopped, its LSC, until it
     /// holds, passivates or ends.
     fn run_process(&self, p: Id, span: Span) -> Exec<()> {
+        if !self.store.lock().unwrap().exists(AdtRef::Object(p)) {
+            // Purged since it was put in the set, or undone with its
+            // statement: nothing to run, and its thread ends.
+            self.sim.lock().unwrap().forget(Agent::Process(p));
+            self.processes.lock().unwrap().remove(&p);
+            return Ok(());
+        }
         let started = self.processes.lock().unwrap().contains_key(&p);
         let back = if started {
             let map = self.processes.lock().unwrap();

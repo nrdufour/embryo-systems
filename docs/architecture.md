@@ -521,7 +521,11 @@ locals lost.
 As built (2026-11-15): the journal's version 3 gives object attributes
 properties of their own (docs/hbds.md, The model). A version 2 journal
 set an object attribute's property on its class attribute: it is read
-so, then rewritten as 3.
+so, then rewritten as 3. Version 4 (2026-11-15) adds `next`, the id the
+next a.d.t. takes, which compaction writes: without it a journal
+compacted after a PURGE gave the purged ids again, and what still
+pointed at them pointed at something new. A version 3 journal reads as
+it is; one already compacted has lost the ids it purged.
 
 ### 11. Engine performance
 

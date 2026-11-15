@@ -559,6 +559,24 @@ flowchart LR
   destroyed a.d.t. is invisible to the functors and to lookup by name, and
   so is what depends on it: an object of a hibernating class, a link to a
   destroyed object.
+- **What PURGE takes** (2026-11-15; the print says "for good" and no
+  more). With a class: its objects, its attributes and the values they
+  have, in its own objects and in those of the classes it included, its
+  links and theirs. The classes it included stay, in it no more; a
+  prototype made of it loses it, and a structure built as it is a class
+  like another. With any a.d.t.: the associations and the MUST and CANNOT
+  that held it. Its id is never given again, so that nothing left
+  pointing at it points at something new.
+- **A reference to what is gone.** A value that refers to a purged
+  a.d.t., in a variable or in an attribute, stays as it was written:
+  PURGE is not refused for it, and rewrites no value. It prints as `#`
+  and the id; it equals no a.d.t. that is; a functor passes over it, as
+  over a destroyed one; and designating it, to read it, change it or act
+  on it, is a runtime error that names it. The engines that hold ids of
+  their own do the same: a rule purged while it waits on CHAV's agenda is
+  not tried, a process purged while it waits in the sequencing set does
+  not run. An a.d.t. made in a statement that was refused is gone the
+  same way, but its id is given again: only PURGE retires one.
 - **Hyperclasses**: INCLUDE puts classes in a hyperclass, EXCLUDE takes
   them out; CONT and CONTOF go down and up.
 - **Associations** (ASSOC, DISSOC, page 24, figure 9) are kept as pairs;

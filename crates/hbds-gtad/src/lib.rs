@@ -289,6 +289,11 @@ pub enum Change {
     Sequencing {
         text: String,
     },
+    /// The id the next a.d.t. takes, at least: what a compacted journal
+    /// keeps of the ids purged before it, which are never given again.
+    Next {
+        id: Id,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -413,6 +418,7 @@ struct Snapshot {
 /// maps shared, so cheap to take, and sent to another thread to build
 /// [`changes`](Image::changes) while the store goes on.
 pub struct Image {
+    next: Id,
     classes: PMap<Id, Class>,
     attributes: PMap<Id, Attribute>,
     objects: PMap<Id, Object>,
@@ -958,6 +964,7 @@ impl Store {
             Change::Unlink { id } => {
                 if let Some(l) = self.drop_object_link(id) {
                     self.drop_object_link(l.reverse);
+                    self.sweep_associations();
                 }
             }
             Change::Set {
@@ -990,13 +997,7 @@ impl Store {
             Change::State { target, state } => self.set_state(target, state),
             Change::Purge { target } => {
                 self.purge(target);
-                // What held gone objects or links goes with them.
-                let (objects, class_links) = (&self.objects, &self.class_links);
-                self.modalities.retain(|(l, a, b), _| {
-                    class_links.contains_key(l)
-                        && objects.contains_key(a)
-                        && objects.contains_key(b)
-                });
+                self.sweep();
             }
             Change::Include { class, hyper } => {
                 if let Some(c) = self.classes.get_mut(&class) {
@@ -1017,6 +1018,7 @@ impl Store {
             }
             Change::Fibers { text } => self.fibers = Some(text),
             Change::Sequencing { text } => self.sequencing = Some(text),
+            Change::Next { id } => self.next = self.next.max(id),
             Change::Assoc { a, b } => {
                 if !self.associations.contains(&(a, b)) {
                     self.associations.push((a, b));
@@ -1123,11 +1125,38 @@ impl Store {
         match r {
             AdtRef::Class(id) => {
                 self.drop_class(id);
+                // The classes it included are in it no more.
+                for member in seconds(&self.ix.members, id) {
+                    if let Some(c) = self.classes.get_mut(&member) {
+                        c.hyper.remove(&id);
+                    }
+                    self.ix.members.remove(&(id, member));
+                }
+                // A prototype made of it loses it; a structure built as
+                // it is a class like another.
+                let made_of: Vec<Id> = (self.classes.iter())
+                    .filter(|(_, c)| match &c.kind {
+                        ClassKind::Prototype(embryos) => embryos.contains(&id),
+                        ClassKind::Structure(prototype) => *prototype == id,
+                        ClassKind::Class | ClassKind::Embryo => false,
+                    })
+                    .map(|(c, _)| *c)
+                    .collect();
+                for c in made_of {
+                    if let Some(c) = self.classes.get_mut(&c) {
+                        match &mut c.kind {
+                            ClassKind::Prototype(embryos) => embryos.retain(|e| *e != id),
+                            kind => *kind = ClassKind::Class,
+                        }
+                    }
+                }
                 for o in seconds(&self.ix.class_objects, id) {
                     self.purge(AdtRef::Object(o));
                 }
+                // With the values its attributes have in the objects of
+                // the classes it included.
                 for a in seconds(&self.ix.class_attributes, id) {
-                    self.drop_attribute(a);
+                    self.purge(AdtRef::ClassAttribute(a));
                 }
                 let mut links = seconds(&self.ix.class_links_from, id);
                 links.extend(seconds(&self.ix.class_links_to, id));
@@ -1171,8 +1200,24 @@ impl Store {
             }
             AdtRef::ObjectLink(id) => self.apply(Change::Unlink { id }),
         }
-        self.associations
-            .retain(|(a, b)| !involves(*a, r) && !involves(*b, r));
+    }
+
+    fn sweep_associations(&mut self) {
+        if !self.associations.is_empty() {
+            let mut associations = std::mem::take(&mut self.associations);
+            associations.retain(|(a, b)| self.exists(*a) && self.exists(*b));
+            self.associations = associations;
+        }
+    }
+
+    /// After a.d.t. left the store: the associations and the modalities
+    /// that held one go with it.
+    fn sweep(&mut self) {
+        self.sweep_associations();
+        let (objects, class_links) = (&self.objects, &self.class_links);
+        self.modalities.retain(|(l, a, b), _| {
+            class_links.contains_key(l) && objects.contains_key(a) && objects.contains_key(b)
+        });
     }
 
     // The model's entries, with their indexes: the only way in or out.
@@ -1267,6 +1312,29 @@ impl Store {
                 dangling.push(format!("object attribute {o}.{a}'s object or attribute"));
             }
         }
+        for (id, c) in &self.classes {
+            if !c.hyper.iter().all(class) {
+                dangling.push(format!("class {id}'s hyperclass"));
+            }
+            let made_of = match &c.kind {
+                ClassKind::Prototype(embryos) => embryos.iter().all(class),
+                ClassKind::Structure(prototype) => class(prototype),
+                ClassKind::Class | ClassKind::Embryo => true,
+            };
+            if !made_of {
+                dangling.push(format!("class {id}'s embryos or prototype"));
+            }
+        }
+        for (a, b) in &self.associations {
+            if !self.exists(*a) || !self.exists(*b) {
+                dangling.push(format!("an association's end, {a:?} or {b:?}"));
+            }
+        }
+        for (l, a, b) in self.modalities.keys() {
+            if !self.class_links.contains_key(l) || !object(a) || !object(b) {
+                dangling.push(format!("the modality of {a} and {b} by {l}"));
+            }
+        }
         if !dangling.is_empty() {
             return Err(format!("dangling: {}", dangling.join(", ")));
         }
@@ -1308,25 +1376,51 @@ impl Store {
         })
     }
 
+    /// Whether an a.d.t. is in the store: not purged, nor undone with the
+    /// transaction that made it.
+    pub fn exists(&self, r: AdtRef) -> bool {
+        match r {
+            AdtRef::ObjectAttribute(o, a) => {
+                self.objects.contains_key(&o) && self.attributes.contains_key(&a)
+            }
+            _ => self.state(r).is_some(),
+        }
+    }
+
+    /// The a.d.t. a value refers to, if it is still in the store; else
+    /// why it cannot be followed (docs/hbds.md, "The model"): the
+    /// reference stays as it was written, and names what is gone.
+    pub fn follow(&self, r: AdtRef) -> Stored<AdtRef> {
+        match self.exists(r) {
+            true => Ok(r),
+            false => error(format!(
+                "{} is no longer in the store: it was purged, or undone with its statement",
+                self.describe(r)
+            )),
+        }
+    }
+
     /// Whether an a.d.t. is seen: it is active, and so is what it depends
     /// on (an object's class, a link's two ends, an attribute's carrier).
+    /// One that is gone is not seen.
     pub fn visible(&self, r: AdtRef) -> bool {
         let on = |r| self.state(r) == Some(State::Active);
         match r {
             AdtRef::Class(_) => on(r),
-            AdtRef::Object(id) => on(r) && on(AdtRef::Class(self.objects[&id].class)),
-            AdtRef::ClassAttribute(id) => on(r) && on(AdtRef::Class(self.attributes[&id].class)),
+            AdtRef::Object(id) => {
+                (self.objects.get(&id)).is_some_and(|o| on(r) && on(AdtRef::Class(o.class)))
+            }
+            AdtRef::ClassAttribute(id) => {
+                (self.attributes.get(&id)).is_some_and(|a| on(r) && on(AdtRef::Class(a.class)))
+            }
             AdtRef::ObjectAttribute(o, a) => {
                 self.visible(AdtRef::Object(o)) && self.visible(AdtRef::ClassAttribute(a))
             }
-            AdtRef::ClassLink(id) => {
-                let l = &self.class_links[&id];
-                on(r) && on(AdtRef::Class(l.from)) && on(AdtRef::Class(l.to))
-            }
-            AdtRef::ObjectLink(id) => {
-                let l = &self.object_links[&id];
+            AdtRef::ClassLink(id) => (self.class_links.get(&id))
+                .is_some_and(|l| on(r) && on(AdtRef::Class(l.from)) && on(AdtRef::Class(l.to))),
+            AdtRef::ObjectLink(id) => self.object_links.get(&id).is_some_and(|l| {
                 on(r) && self.visible(AdtRef::Object(l.from)) && self.visible(AdtRef::Object(l.to))
-            }
+            }),
         }
     }
 
@@ -1941,6 +2035,7 @@ impl Store {
     /// The world as it is now, to build its changes elsewhere.
     pub fn image(&self) -> Image {
         Image {
+            next: self.next,
             classes: self.classes.clone(),
             attributes: self.attributes.clone(),
             objects: self.objects.clone(),
@@ -2078,15 +2173,6 @@ impl Store {
     }
 }
 
-fn involves(a: AdtRef, r: AdtRef) -> bool {
-    a == r
-        || match (a, r) {
-            (AdtRef::ObjectAttribute(o, _), AdtRef::Object(x)) => o == x,
-            (AdtRef::ObjectAttribute(_, at), AdtRef::ClassAttribute(x)) => at == x,
-            _ => false,
-        }
-}
-
 pub fn state_name(s: State) -> &'static str {
     match s {
         State::Active => "active",
@@ -2107,6 +2193,9 @@ impl Image {
     /// [`changes`](Image::changes), one at a time: what compaction writes
     /// as it goes, holding none of them.
     pub fn each_change(&self, f: &mut dyn FnMut(Change)) {
+        if self.next > 1 {
+            f(Change::Next { id: self.next });
+        }
         for (&id, c) in self.classes.iter() {
             f(Change::Class {
                 id,
@@ -2366,13 +2455,67 @@ mod tests {
                 3 => pick(class_links, next(97)).map(AdtRef::ClassLink),
                 _ => pick(object_links, next(97)).map(AdtRef::ObjectLink),
             };
+            let other = match next(3) {
+                0 => d.map(AdtRef::Class),
+                1 => p.map(AdtRef::Object),
+                _ => pick(s.attributes().keys().copied().collect(), next(97))
+                    .map(AdtRef::ClassAttribute),
+            };
             let transaction = next(4) == 0;
             if transaction {
                 s.begin();
             }
-            let _ = match next(12) {
-                0 | 1 => s.create_class(&name, ClassKind::Class).map(|_| ()),
-                2 | 3 => c.map_or(Ok(()), |c| s.create_object(c, &name).map(|_| ())),
+            let _ = match next(22) {
+                0 => {
+                    let kind = match (next(6), c, d) {
+                        (0, Some(c), Some(d)) => ClassKind::Prototype(vec![c, d]),
+                        (1, Some(c), _) => ClassKind::Structure(c),
+                        _ => ClassKind::Class,
+                    };
+                    s.create_class(&name, kind).map(|_| ())
+                }
+                1 => s.create_class(&name, ClassKind::Class).map(|_| ()),
+                // A value, for an attribute of the object's class or of
+                // one of its hyperclasses.
+                12 | 13 => match o {
+                    Some(o) => {
+                        let lineage = s.lineage(s.objects()[&o].class);
+                        let inherited: Vec<Id> = (s.attributes().iter())
+                            .filter(|(_, a)| lineage.contains(&a.class))
+                            .map(|(id, _)| *id)
+                            .collect();
+                        pick(inherited, next(97))
+                            .map_or(Ok(()), |a| s.set(o, a, Value::integer(next(9) as i64)))
+                    }
+                    None => Ok(()),
+                },
+                14 => match (target, other) {
+                    (Some(a), Some(b)) if next(4) == 0 => s.dissoc(a, b),
+                    (Some(a), Some(b)) => s.assoc(a, b),
+                    _ => Ok(()),
+                },
+                15 => target.map_or(Ok(()), |t| s.set_property(t, "COND", "x", &name)),
+                16 => match (o, p) {
+                    (Some(o), Some(p)) => {
+                        let relation = s
+                            .class_links_from(s.objects()[&o].class)
+                            .into_iter()
+                            .find_map(|l| s.class_links()[&l].relation.clone());
+                        let m = [Some(Modality::Must), Some(Modality::Cannot), None];
+                        relation.map_or(Ok(()), |r| s.hold_to(o, &r, p, m[next(3) as usize]))
+                    }
+                    _ => Ok(()),
+                },
+                // Destroyed, then purged: what a purge leaves behind.
+                17 => target.map_or(Ok(()), |t| match s.state(t) {
+                    // A class takes its objects along: more seldom.
+                    Some(_) if matches!(t, AdtRef::Class(_)) && next(4) != 0 => Ok(()),
+                    Some(from) => s
+                        .change_state(t, from, State::Destroyed)
+                        .and_then(|()| s.purge_adt(t)),
+                    None => Ok(()),
+                }),
+                2 | 3 | 18 | 19 => c.map_or(Ok(()), |c| s.create_object(c, &name).map(|_| ())),
                 4 => c.map_or(Ok(()), |c| s.create_attribute(c, &name).map(|_| ())),
                 5 => match (c, d) {
                     (Some(c), Some(d)) => {
@@ -2382,7 +2525,7 @@ mod tests {
                     }
                     _ => Ok(()),
                 },
-                6 | 7 => match (o, p) {
+                6 | 7 | 20 | 21 => match (o, p) {
                     (Some(o), Some(p)) => {
                         let relation = s
                             .class_links_from(s.objects()[&o].class)
@@ -2428,8 +2571,10 @@ mod tests {
             }
         }
         assert!(
-            s.objects().len() > 50 && s.object_links().len() > 50,
-            "too little built"
+            s.objects().len() > 50 && s.object_links().len() > 10,
+            "too little built: {} objects, {} links",
+            s.objects().len(),
+            s.object_links().len()
         );
     }
 

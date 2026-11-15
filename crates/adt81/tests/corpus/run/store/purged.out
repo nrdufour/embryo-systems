@@ -1,0 +1,8 @@
+[PLACE] 7
+[] [Lyon[TOWN], Arles[TOWN]]
+[] []
+[#4, Arles[TOWN]] [TOWN]
+first
+w2[w] runs 0.0
+w2[w] runs 1.0
+after 4.0

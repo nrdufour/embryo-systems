@@ -142,11 +142,11 @@ fn versions_older_read_newer_refused() {
     let dump = reopened(&dir);
     assert!(dump.contains("object Lyon"), "{dump}");
     let text = fs::read_to_string(dir.join("journal")).unwrap();
-    assert!(text.starts_with("journal 3\n"), "{text}");
+    assert!(text.starts_with("journal 4\n"), "{text}");
     assert_eq!(reopened(&dir), dump);
-    fs::write(dir.join("journal"), "journal 4\n").unwrap();
+    fs::write(dir.join("journal"), "journal 5\n").unwrap();
     let e = journal::open(&dir).err().expect("a newer journal").0;
-    assert_eq!(e, "the journal's version 4 is newer than this reader's, 3");
+    assert_eq!(e, "the journal's version 5 is newer than this reader's, 4");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -170,7 +170,7 @@ fn before_version_3_an_object_attributes_property_was_its_class_attributes() {
     let text = fs::read_to_string(dir.join("journal")).unwrap();
     fs::write(
         dir.join("journal"),
-        text.replacen("journal 3", "journal 2", 1),
+        text.replacen("journal 4", "journal 2", 1),
     )
     .unwrap();
     let older = reopened(&dir);
@@ -216,5 +216,36 @@ fn modalities_are_journalled_and_refused_with_their_transaction() {
     assert_eq!(reopened(&dir), dump);
     journal::compact(&dir).unwrap();
     assert_eq!(reopened(&dir), dump);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// The review of 2026-11-15's case: a hyperclass purged, the journal
+/// compacted and reopened, and the next class took its id, and with it
+/// the classes it had included.
+#[test]
+fn a_purged_id_is_not_given_again() {
+    let dir = directory("purged-id");
+    let (mut store, _) = journal::open(&dir).unwrap();
+    let town = store.create_class("TOWN", ClassKind::Class).unwrap();
+    let place = store.create_class("PLACE", ClassKind::Class).unwrap();
+    let size = store.create_attribute(place, "size").unwrap();
+    let paris = store.create_object(town, "Paris").unwrap();
+    store.include(town, place).unwrap();
+    store.set(paris, size, Value::integer(7)).unwrap();
+    store
+        .change_state(AdtRef::Class(place), State::Active, State::Destroyed)
+        .unwrap();
+    store.purge_adt(AdtRef::Class(place)).unwrap();
+    // Nothing of it is left: not its members' tie, not their values.
+    store.verify().unwrap();
+    assert!(store.classes()[&town].hyper.is_empty());
+    assert_eq!(store.get(paris, size), None);
+    drop(store);
+    journal::compact(&dir).unwrap();
+    let (mut store, _) = journal::open(&dir).unwrap();
+    let river = store.create_class("RIVER", ClassKind::Class).unwrap();
+    assert!(river > size, "{river} was given before, up to {size}");
+    assert!(store.classes()[&town].hyper.is_empty());
+    store.verify().unwrap();
     let _ = fs::remove_dir_all(&dir);
 }

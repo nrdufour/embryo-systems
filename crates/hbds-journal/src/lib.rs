@@ -39,7 +39,7 @@ use hbds_gtad::{Change, ClassKind, Error, Image, Modality, Recorder, State, Stor
 /// The journal's format, decision 10: older ones read, newer refused.
 /// Version 3 gives object attributes properties of their own; before it,
 /// a property set on one was its class attribute's.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 const COMMIT: &str = "commit";
 /// The changes a compacted journal commits together.
@@ -625,6 +625,7 @@ fn encode(change: &Change) -> String {
             optional(probability.map(float)),
         ],
         Change::Unlink { id } => vec![word("unlink"), word(id)],
+        Change::Next { id } => vec![word("next"), word(id)],
         Change::Set {
             object,
             attribute,
@@ -751,6 +752,7 @@ fn decode(line: &str) -> Result<Change, String> {
             probability: r.optional(|r| r.parse())?,
         },
         "unlink" => Change::Unlink { id: r.id()? },
+        "next" => Change::Next { id: r.id()? },
         "set" => Change::Set {
             object: r.id()?,
             attribute: r.id()?,
