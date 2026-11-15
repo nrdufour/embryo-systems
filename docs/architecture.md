@@ -274,7 +274,13 @@ its commit, so opening or compacting a million objects peaked at twice
 the store (2026-11-15: 546 MB, now 311 MB, the store 241 MB);
 `embryo-systems compact DIR` does it for a store no daemon holds. A write
 that fails stops the journal: what follows is refused, and waiting
-clients hear why. Not built: a benchmark of the journal, whose syncs
+clients hear why. In both modes since 2026-11-15: the synchronous
+journal, a standalone run's, went on writing, and its next commit
+landed after the bytes of the failed one, in a file that no longer
+opened. The failed write is cut back to the last whole transaction, so
+that the file opens whatever comes after. A transaction that changed
+nothing writes nothing, where it wrote a bare `commit` and synced. Not
+built: a benchmark of the journal, whose syncs
 depend on the disk and on timing, which the work and time gates cannot
 hold steady; the journal's tests count syncs instead.
 

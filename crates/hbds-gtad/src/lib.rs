@@ -664,6 +664,13 @@ impl Store {
     /// Records `change` in the journal, if there is one, then applies it.
     fn commit(&mut self, change: Change) -> Stored<()> {
         add(&self.counted.changes, 1);
+        // Recorded first: a change the recorder refuses launches nothing
+        // and concerns no constraint.
+        if self.transaction.is_none()
+            && let Some(recorder) = &mut self.recorder
+        {
+            recorder.record(&change).map_err(Error)?;
+        }
         if let Some(watcher) = self.watcher {
             let mut launches = Vec::new();
             watcher(self, &change, &mut launches);
@@ -676,13 +683,8 @@ impl Store {
         }
         if let Some(t) = &mut self.transaction {
             t.changes.push(change.clone());
-        } else {
-            if let Some(recorder) = &mut self.recorder {
-                recorder.record(&change).map_err(Error)?;
-            }
-            if let Some(kept) = &mut self.kept {
-                kept.push(change.clone());
-            }
+        } else if let Some(kept) = &mut self.kept {
+            kept.push(change.clone());
         }
         self.apply(change);
         Ok(())
@@ -2690,13 +2692,25 @@ mod tests {
         let c = s.create_class("TOWN", ClassKind::Class).unwrap();
         s.create_object(c, "Lyon").unwrap();
         assert_eq!(seen.lock().unwrap().len(), 2);
-        // A change the recorder refuses is not applied.
+        // A change the recorder refuses is not applied, launches no
+        // reflex and concerns no constraint.
         s.record_to(Box::new(Refuse));
+        s.watch(|_, _, launches| {
+            launches.push(Launch {
+                reflex: 1,
+                this: 1,
+                value: None,
+            })
+        });
+        s.check_with(|_, _, touched| {
+            touched.insert(1);
+        });
         assert_eq!(
             s.create_class("RIVER", ClassKind::Class),
             Err(Error("the disk is full".into()))
         );
         assert!(s.find_class("RIVER").is_none());
+        assert!(!s.has_launched() && !s.has_touched());
     }
 
     #[test]
