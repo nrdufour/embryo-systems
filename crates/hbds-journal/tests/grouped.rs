@@ -249,3 +249,90 @@ fn a_purged_id_is_not_given_again() {
     store.verify().unwrap();
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_last_line_cut_short_is_dropped() {
+    let dir = directory("cut-short");
+    let (mut store, _) = journal::open(&dir).unwrap();
+    work(&mut store, 0, 2);
+    let dump = store.dump();
+    drop(store);
+    // A crash in the middle of a line.
+    let path = dir.join("journal");
+    let whole = fs::read_to_string(&path).unwrap();
+    fs::write(&path, format!("{whole}object 99 1 \"ha")).unwrap();
+    let (mut store, warnings) = journal::open(&dir).unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("cut short"), "{warnings:?}");
+    assert_eq!(store.dump(), dump);
+    // Gone from the file too: what is written next follows a whole line.
+    assert_eq!(fs::read_to_string(&path).unwrap(), whole);
+    work(&mut store, 2, 2);
+    let dump = store.dump();
+    drop(store);
+    assert_eq!(reopened(&dir), dump);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_store_opens_once() {
+    let dir = directory("locked");
+    let (store, _) = journal::open(&dir).unwrap();
+    for second in [
+        journal::open(&dir).err().map(|e| e.0),
+        journal::open_grouped(&dir, Duration::ZERO)
+            .err()
+            .map(|e| e.0),
+        journal::compact(&dir).err().map(|e| e.0),
+    ] {
+        let e = second.expect("a second opening");
+        assert!(e.ends_with("the store is in use by another run"), "{e}");
+    }
+    drop(store);
+    journal::open(&dir).unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_stale_new_journal_is_not_read() {
+    let dir = directory("stale-new");
+    let (mut store, _) = journal::open(&dir).unwrap();
+    work(&mut store, 0, 20);
+    let dump = store.dump();
+    drop(store);
+    // A compaction that died before its rename: half a journal, beside.
+    fs::write(
+        dir.join("journal.new"),
+        "journal 4\nclass 1 \"GHOST\" class\ncommit\nclass 2 \"HA",
+    )
+    .unwrap();
+    assert_eq!(reopened(&dir), dump);
+    // The next compaction writes over it.
+    journal::compact(&dir).unwrap();
+    assert!(!dir.join("journal.new").exists());
+    assert_eq!(reopened(&dir), dump);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn no_compaction_while_a_step_is_held() {
+    let dir = directory("held");
+    let (mut store, durable, _) = journal::open_grouped(&dir, Duration::ZERO).unwrap();
+    work(&mut store, 0, 50);
+    durable.wait(durable.stats().submitted).unwrap();
+    // The kernel holds a process's step back: half of it would be kept.
+    store.hold_records();
+    work(&mut store, 50, 5);
+    durable.maybe_compact(&store, 10);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(durable.stats().compactions, 0);
+    store.release_records(Vec::new()).unwrap();
+    durable.wait(durable.stats().submitted).unwrap();
+    durable.maybe_compact(&store, 10);
+    let dump = store.dump();
+    drop(store);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(durable.stats().compactions, 1);
+    assert_eq!(reopened(&dir), dump);
+    let _ = fs::remove_dir_all(&dir);
+}

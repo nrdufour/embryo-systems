@@ -57,10 +57,49 @@ fn transaction(changes: &[Change]) -> (String, u64) {
 struct Writer {
     dir: PathBuf,
     file: File,
+    /// Where the last whole write ends: what a failed one is cut back to.
+    end: u64,
+    /// The next write fails after so many bytes, once: for tests.
+    #[cfg(test)]
+    fails_after: Option<usize>,
 }
 
 impl Writer {
+    /// A journal's file, whole up to `end`.
+    fn new(dir: &Path, file: File, end: u64) -> Writer {
+        Writer {
+            dir: dir.to_path_buf(),
+            file,
+            end,
+            #[cfg(test)]
+            fails_after: None,
+        }
+    }
+
+    /// Writes `text` whole, or not at all: a write that fails is cut
+    /// back to where the last one ended, so that no later line lands
+    /// after half a transaction. Whoever appends stops at the first
+    /// failure (decision 5); this keeps the file one that opens.
     fn append(&mut self, text: &str, sync: bool) -> std::io::Result<()> {
+        match self.write(text, sync) {
+            Ok(()) => {
+                self.end += text.len() as u64;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.file.set_len(self.end);
+                let _ = self.file.sync_data();
+                Err(e)
+            }
+        }
+    }
+
+    fn write(&mut self, text: &str, sync: bool) -> std::io::Result<()> {
+        #[cfg(test)]
+        if let Some(n) = self.fails_after.take() {
+            self.file.write_all(&text.as_bytes()[..n.min(text.len())])?;
+            return Err(std::io::Error::other("no space left, says the test"));
+        }
         self.file.write_all(text.as_bytes())?;
         if sync {
             self.file.sync_data()?;
@@ -108,6 +147,7 @@ impl Writer {
         self.file = OpenOptions::new()
             .append(true)
             .open(self.dir.join("journal"))?;
+        self.end = self.file.metadata()?.len();
         Ok(lines)
     }
 }
@@ -115,6 +155,8 @@ impl Writer {
 /// A sync per transaction: a standalone run's journal.
 struct Journal {
     writer: Writer,
+    /// Why it stopped, if it did: nothing after is kept.
+    failed: Option<String>,
     /// Locked while the store is open; the system lets go when the
     /// process ends, however it ends. Not the journal itself, which
     /// compaction replaces by another file.
@@ -126,10 +168,22 @@ impl Recorder for Journal {
         self.record_all(std::slice::from_ref(change))
     }
 
-    /// A transaction's changes in one write, then one sync.
+    /// A transaction's changes in one write, then one sync; one that
+    /// changed nothing writes nothing. A write that fails stops the
+    /// journal, as the grouped one stops: what follows is refused.
     fn record_all(&mut self, changes: &[Change]) -> Result<(), String> {
+        if let Some(e) = &self.failed {
+            return Err(e.clone());
+        }
+        if changes.is_empty() {
+            return Ok(());
+        }
         let (text, _) = transaction(changes);
-        (self.writer.append(&text, true)).map_err(|e| format!("the journal cannot be written: {e}"))
+        self.writer.append(&text, true).map_err(|e| {
+            let e = format!("the journal cannot be written: {e}");
+            self.failed = Some(e.clone());
+            e
+        })
     }
 }
 
@@ -242,10 +296,7 @@ fn opened(dir: &Path) -> Result<Opened, Error> {
         .open(&path)
         .map_err(io)?;
     file.set_len(kept as u64).map_err(io)?;
-    let mut writer = Writer {
-        dir: dir.to_path_buf(),
-        file,
-    };
+    let mut writer = Writer::new(dir, file, kept as u64);
     // A new journal, or an older one, is written anew in this one's.
     if version < VERSION || empty {
         count = writer.rewrite(&store.image()).map_err(io)?;
@@ -268,6 +319,7 @@ pub fn open(dir: &Path) -> Result<(Store, Vec<String>), Error> {
     let mut store = o.store;
     store.record_to(Box::new(Journal {
         writer: o.writer,
+        failed: None,
         _lock: o.lock,
     }));
     Ok((store, o.warnings))
@@ -435,6 +487,10 @@ impl Recorder for Grouped {
             held.extend_from_slice(changes);
             return Ok(());
         }
+        // A transaction that changed nothing writes nothing.
+        if changes.is_empty() {
+            return Ok(());
+        }
         let (text, lines) = transaction(changes);
         p.stats.submitted += 1;
         self.jobs
@@ -471,7 +527,10 @@ impl Recorder for Grouped {
 /// by a thread of their own, which syncs together those that queue up
 /// while it syncs. `delay` slows each sync, for tests.
 pub fn open_grouped(dir: &Path, delay: Duration) -> Result<(Store, Durable, Vec<String>), Error> {
-    let o = opened(dir)?;
+    grouped(opened(dir)?, delay)
+}
+
+fn grouped(o: Opened, delay: Duration) -> Result<(Store, Durable, Vec<String>), Error> {
     let shared = Arc::new(Shared {
         progress: Mutex::new(Progress {
             stats: Stats {
@@ -1043,6 +1102,99 @@ mod tests {
                 .create_class("A", hbds_gtad::ClassKind::Class)
                 .is_err()
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hbds-journal-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// A class and an object in one transaction.
+    fn town(store: &mut Store, name: &str) -> Result<(), hbds_gtad::Error> {
+        store.begin();
+        let made = (store.create_class(name, hbds_gtad::ClassKind::Class))
+            .and_then(|c| store.create_object(c, "one"));
+        store.end(made.is_ok())
+    }
+
+    /// The store in `dir`, opened anew: what its journal rebuilds.
+    fn rebuilt(dir: &Path) -> String {
+        let (store, warnings) = open(dir).unwrap();
+        assert_eq!(warnings, Vec::<String>::new());
+        store.dump()
+    }
+
+    #[test]
+    fn a_failed_write_stops_the_journal_and_leaves_it_whole() {
+        let dir = scratch("failed-write");
+        let mut o = opened(&dir).unwrap();
+        // The disk fills in the middle of the second transaction.
+        let mut store = std::mem::replace(&mut o.store, Store::memory());
+        let mut journal = Journal {
+            writer: o.writer,
+            failed: None,
+            _lock: o.lock,
+        };
+        journal.record_all(&[]).unwrap();
+        let empty = fs::read_to_string(dir.join("journal")).unwrap();
+        assert_eq!(empty, format!("journal {VERSION}\n"), "a bare commit");
+        store.record_to(Box::new(journal));
+        town(&mut store, "TOWN").unwrap();
+        let dump = store.dump();
+        let whole = fs::read_to_string(dir.join("journal")).unwrap();
+        store.record_to(Box::new(Journal {
+            writer: Writer {
+                fails_after: Some(9),
+                ..Writer::new(
+                    &dir,
+                    OpenOptions::new()
+                        .append(true)
+                        .open(dir.join("journal"))
+                        .unwrap(),
+                    whole.len() as u64,
+                )
+            },
+            failed: None,
+            _lock: File::open(dir.join("journal")).unwrap(),
+        }));
+        let e = town(&mut store, "RIVER").unwrap_err().0;
+        assert!(e.starts_with("the journal cannot be written"), "{e}");
+        // Refused whole, in the store and on disk; and so is what follows,
+        // which would land after it.
+        assert_eq!(store.dump(), dump);
+        assert_eq!(fs::read_to_string(dir.join("journal")).unwrap(), whole);
+        assert_eq!(town(&mut store, "DAM").unwrap_err().0, e);
+        assert_eq!(fs::read_to_string(dir.join("journal")).unwrap(), whole);
+        drop(store);
+        assert_eq!(rebuilt(&dir), dump);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_write_stops_the_grouped_journal_and_leaves_it_whole() {
+        let dir = scratch("failed-grouped");
+        let (mut store, durable, _) = open_grouped(&dir, Duration::ZERO).unwrap();
+        town(&mut store, "TOWN").unwrap();
+        durable.wait(durable.stats().submitted).unwrap();
+        let dump = store.dump();
+        drop((store, durable));
+        std::thread::sleep(Duration::from_millis(50));
+        let whole = fs::read_to_string(dir.join("journal")).unwrap();
+        let mut o = opened(&dir).unwrap();
+        o.writer.fails_after = Some(9);
+        let (mut store, durable, _) = grouped(o, Duration::ZERO).unwrap();
+        // Submitted, it is not on disk: its client hears why, and so does
+        // whoever writes after.
+        town(&mut store, "RIVER").unwrap();
+        let e = durable.wait(durable.stats().submitted).unwrap_err();
+        assert!(e.starts_with("the journal cannot be written"), "{e}");
+        assert_eq!(town(&mut store, "DAM").unwrap_err().0, e);
+        assert_eq!(fs::read_to_string(dir.join("journal")).unwrap(), whole);
+        drop((store, durable));
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(rebuilt(&dir), dump);
         let _ = fs::remove_dir_all(&dir);
     }
 }
