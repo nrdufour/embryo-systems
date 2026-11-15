@@ -228,8 +228,12 @@ The print leaves these open; they were decided on 2026-10-14.
   list. The parser refuses the rest, with its place: 100 000 parentheses,
   or as many terms in one sum, overflowed the stack of `check`, `run`
   and `fmt`, in the parser or in a pass after it, each of which walks
-  the tree by recursion. *Not the print's*, which gives no limit; these
-  are far past what a program written by hand reaches. Not chosen:
+  the tree by recursion. *Not the print's*, whose limits are of another
+  kind: page 32 gives a module at most 256 instructions, 256
+  identifiers, 256 constants and 256 expressions, a job 65 536 modules
+  and a string as many characters, generation parameters all, and says
+  nothing of nesting. Those sizes are not enforced here; the 256 is in
+  their spirit. Not chosen:
   passes that walk without recursion, each to rewrite and none ever
   done, the next pass being written the plain way.
 
