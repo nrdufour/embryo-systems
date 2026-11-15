@@ -822,12 +822,37 @@ fn the_ui_forwards_to_the_socket() {
         .trim_start_matches("http://")
         .trim_end_matches('/')
         .to_string();
-    let mut tcp = std::net::TcpStream::connect(&address).unwrap();
-    write!(tcp, "GET /schema HTTP/1.1\r\n\r\n").unwrap();
-    let mut answer = String::new();
-    tcp.read_to_string(&mut answer).unwrap();
+    let ask = |headers: &str| {
+        let mut tcp = std::net::TcpStream::connect(&address).unwrap();
+        write!(tcp, "GET /schema HTTP/1.1\r\n{headers}\r\n").unwrap();
+        let mut answer = String::new();
+        tcp.read_to_string(&mut answer).unwrap();
+        answer
+    };
+    let port = address.rsplit(':').next().unwrap();
+    let own = format!("Host: {address}\r\n");
+    let answer = ask(&own);
+    // The page's own requests, by either name, with its origin or none.
+    let named = ask(&format!(
+        "Host: localhost:{port}\r\nOrigin: http://localhost:{port}\r\n"
+    ));
+    // Another site's: under a name of its own, or from its own page.
+    let refused = [
+        ask(""),
+        ask("Host: evil.example\r\n"),
+        ask(&format!(
+            "Host: 127.0.0.1:{}\r\n",
+            port.parse::<u32>().unwrap() + 1
+        )),
+        ask(&format!("{own}Origin: http://evil.example\r\n")),
+        ask(&format!("{own}Origin: null\r\n")),
+    ];
     let _ = ui.kill();
     let _ = ui.wait();
+    assert!(named.starts_with("HTTP/1.1 200 OK"), "{named}");
+    for answer in refused {
+        assert!(answer.starts_with("HTTP/1.1 403 Forbidden"), "{answer}");
+    }
     assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
     assert!(
         answer.ends_with(
@@ -1378,4 +1403,215 @@ fn json_nested_without_end_is_refused_and_the_daemon_goes_on() {
     let answer = daemon.post("/pace", &"[".repeat(200_000));
     assert!(answer.contains("nested more than 64 deep"), "{answer}");
     assert!(daemon.get("/time").contains("now"));
+}
+
+/// A session opened as a client opens one, its frames read here, or not.
+struct Raw {
+    reader: BufReader<UnixStream>,
+    writer: UnixStream,
+}
+
+impl Raw {
+    fn open(daemon: &Daemon, path: &str) -> Raw {
+        let stream = UnixStream::connect(&daemon.socket).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        hbds_http::upgrade_request(path).write(&mut writer).unwrap();
+        let mut reader = BufReader::new(stream);
+        assert_eq!(hbds_http::Response::read(&mut reader).unwrap().status, 101);
+        Raw { reader, writer }
+    }
+
+    fn send(&mut self, key: &str, text: &str) {
+        let frame = hbds_http::json::Json::one(key, hbds_http::json::Json::String(text.into()));
+        let frame = hbds_http::Message::Text(frame.to_string());
+        hbds_http::write_message(&mut self.writer, &frame, true).unwrap();
+    }
+
+    /// The next frame that has `key`, as text.
+    fn until(&mut self, key: &str) -> String {
+        loop {
+            let m = hbds_http::read_message(&mut self.reader, &mut Default::default());
+            if let hbds_http::Message::Text(t) = m.expect("a frame in time")
+                && t.contains(key)
+            {
+                return t;
+            }
+        }
+    }
+}
+
+/// The corpus's ASKABLE program as A-code: CHAV asks for a value from a
+/// rule's PREMISES, code the store calls back, where the executor itself
+/// waits for the line (decision 8).
+fn asking() -> String {
+    acode(corpus().join("store/askable.adt").to_str().unwrap())
+}
+
+/// A program's A-code, as a client sends it.
+fn acode(file: &str) -> String {
+    let out = Command::new(BIN).args(["acode", file]).output().unwrap();
+    String::from_utf8(out.stdout).unwrap()
+}
+
+const SHORT: &str = "program short ;\nbegin\n        print \"short\"\nend ;\n";
+
+#[test]
+fn a_client_gone_during_a_read_frees_the_executor() {
+    let daemon = Daemon::start("gone-reading");
+    let mut asked = Raw::open(&daemon, "/session");
+    asked.send("run", &asking());
+    asked.until("input?");
+    drop(asked);
+    // Before, the executor waited for that line for good.
+    let short = write("daemon-gone-reading", "short.adt", SHORT);
+    assert_eq!(within(spawn(daemon.client(&short)), 20), "short\n");
+    assert_eq!(daemon.get("/sessions"), "");
+}
+
+#[test]
+fn a_kill_reaches_a_session_that_waits() {
+    let daemon = Daemon::start("kill-reading");
+    // The feed says which session it is: the executor, waiting, cannot.
+    let mut feed = Feed::open(&daemon);
+    let mut asked = Raw::open(&daemon, "/session");
+    asked.send("run", &asking());
+    let started = feed.until("started");
+    let id = started
+        .trim_start_matches("{\"session\":")
+        .trim_end_matches(",\"started\":true}");
+    asked.until("input?");
+    let kill = format!("/sessions/{id}/kill");
+    assert_eq!(daemon.post(&kill, ""), "killed\n");
+    let end = asked.until("end");
+    assert!(end.contains("killed by an administrator"), "{end}");
+    assert!(feed.until("ended").contains("killed by an administrator"));
+    assert_eq!(daemon.post(&kill, ""), "no such session\n");
+    let short = write("daemon-kill-reading", "short.adt", SHORT);
+    assert_eq!(within(spawn(daemon.client(&short)), 20), "short\n");
+}
+
+impl Daemon {
+    /// The memory the daemon holds, in MiB.
+    fn memory(&self) -> u64 {
+        let status = fs::read_to_string(format!("/proc/{}/status", self.child.id())).unwrap();
+        let line = status.lines().find(|l| l.starts_with("VmRSS:")).unwrap();
+        let kb: u64 = line.split_whitespace().nth(1).unwrap().parse().unwrap();
+        kb / 1024
+    }
+}
+
+#[test]
+fn a_client_that_reads_nothing_is_waited_for_then_let_go() {
+    let daemon = Daemon::start("not-reading");
+    let mut deaf = Raw::open(&daemon, "/session");
+    let line = "x".repeat(1000);
+    deaf.send(
+        "source",
+        &format!("LOOP WHILE TRUE DO PRINT \"{line}\" ENDLOOP"),
+    );
+    // Its queue fills, and it is run no more: the daemon stays small, and
+    // serves the others.
+    std::thread::sleep(Duration::from_secs(6));
+    let held = daemon.memory();
+    assert!(held < 150, "{held} MiB");
+    let short = write("daemon-not-reading", "short.adt", SHORT);
+    assert_eq!(within(spawn(daemon.client(&short)), 20), "short\n");
+    assert_eq!(daemon.get("/sessions").lines().count(), 1);
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(daemon.memory() <= held + 8, "{} MiB", daemon.memory());
+    // Nothing read for as long as a client gets: it is gone.
+    let t = Instant::now();
+    while !daemon.get("/sessions").is_empty() {
+        assert!(
+            t.elapsed() < Duration::from_secs(60),
+            "the session is still there"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn a_client_that_reads_slowly_loses_nothing() {
+    let daemon = Daemon::start("slow-reading");
+    let mut slow = Raw::open(&daemon, "/session");
+    // More than a queue holds, 40 MiB, read after a pause.
+    let line = "x".repeat(4000);
+    let prints = write(
+        "daemon-slow-reading",
+        "prints.adt",
+        &format!(
+            "program prints ;\nlocal i : integer ;\nbegin\n        loop for i : 1 to 10000 do print \"{line}\" endloop\nend ;\n"
+        ),
+    );
+    slow.send("run", &acode(&prints));
+    std::thread::sleep(Duration::from_secs(3));
+    let mut lines = 0;
+    loop {
+        let m = hbds_http::read_message(&mut slow.reader, &mut Default::default());
+        let hbds_http::Message::Text(t) = m.expect("a frame in time") else {
+            continue;
+        };
+        if t.contains("\"end\"") {
+            assert_eq!(t, "{\"end\":null}");
+            break;
+        }
+        lines += 1;
+    }
+    assert_eq!(lines, 10000);
+}
+
+#[test]
+fn a_subscriber_that_falls_behind_is_disconnected() {
+    let daemon = Daemon::start("feed-behind");
+    let mut behind = Raw::open(&daemon, "/events");
+    // 20 000 changes of 2000 bytes: more than a queue holds.
+    let (a, b) = ("a".repeat(2000), "b".repeat(2000));
+    let busy = write(
+        "daemon-feed-behind",
+        "busy.adt",
+        &format!(
+            "program busy ;\nlocal i : integer ;\nbegin\n        create \"c\" ; create \"c\" . \"v\" ; create \"o\" [ \"c\" ] ;\n        loop for i : 1 to 10000 do\n                let \"o\" [ \"c\" ] . \"v\" := \"{a}\" ;\n                let \"o\" [ \"c\" ] . \"v\" := \"{b}\"\n        endloop ;\n        print \"done\"\nend ;\n"
+        ),
+    );
+    assert_eq!(within(spawn(daemon.client(&busy)), 120), "done\n");
+    // Let go: what was written to it ends, where before it never did.
+    let mut rest = Vec::new();
+    behind
+        .reader
+        .read_to_end(&mut rest)
+        .expect("the feed's end");
+    assert!(rest.len() < 30 << 20, "{} bytes", rest.len());
+    // Another subscriber is served.
+    let mut feed = Feed::open(&daemon);
+    let short = write("daemon-feed-behind", "short.adt", SHORT);
+    assert_eq!(within(spawn(daemon.client(&short)), 20), "short\n");
+    feed.until("started");
+}
+
+#[test]
+fn a_file_where_the_socket_goes_is_not_removed() {
+    // A daemon that took the file's place left a socket there.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("daemon-socket-file");
+    let _ = fs::remove_file(dir.join("notes.txt"));
+    let file = write("daemon-socket-file", "notes.txt", "not a socket\n");
+    let mut daemon = Command::new(BIN)
+        .args(["daemon", "--socket", &file])
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let t = Instant::now();
+    while daemon.try_wait().unwrap().is_none() {
+        if t.elapsed() > Duration::from_secs(10) {
+            let _ = daemon.kill();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let out = daemon.wait_with_output().unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains("not a socket"), "{err}");
+    assert_eq!(fs::read_to_string(&file).unwrap(), "not a socket\n");
 }

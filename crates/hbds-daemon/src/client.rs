@@ -7,7 +7,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 
 use hbds_http::json::Json;
-use hbds_http::{Message, Response};
+use hbds_http::{Message, Request, Response};
 
 fn broken(what: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, what.into())
@@ -75,27 +75,61 @@ pub fn forward(socket: &Path, port: u16) -> io::Result<()> {
         .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", socket.display())))?;
     println!("http://{}/", listener.local_addr()?);
     io::stdout().flush()?;
+    let port = listener.local_addr()?.port();
     for stream in listener.incoming() {
         let Ok(browser) = stream else { continue };
         let socket = socket.to_path_buf();
         std::thread::spawn(move || {
-            let Ok(daemon) = UnixStream::connect(&socket) else {
-                return;
-            };
-            let (Ok(mut from_browser), Ok(mut to_daemon)) =
-                (browser.try_clone(), daemon.try_clone())
-            else {
-                return;
-            };
-            let up = std::thread::spawn(move || {
-                let _ = io::copy(&mut from_browser, &mut to_daemon);
-                let _ = to_daemon.shutdown(std::net::Shutdown::Write);
-            });
-            let (mut from_daemon, mut to_browser) = (daemon, browser);
-            let _ = io::copy(&mut from_daemon, &mut to_browser);
-            let _ = to_browser.shutdown(std::net::Shutdown::Write);
-            let _ = up.join();
+            let _ = forward_one(browser, &socket, port);
         });
     }
+    Ok(())
+}
+
+/// Whether a request is the page's own: sent to this address, and from
+/// no other origin. A page of another site reaches 127.0.0.1 through
+/// the user's browser, under a name of its own that resolves here, and
+/// a WebSocket crosses origins freely: either would run code against
+/// the store as the user.
+fn own(request: &Request, port: u16) -> bool {
+    let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    let host = request
+        .header("host")
+        .is_some_and(|h| hosts.contains(&h.to_string()));
+    let origin = match request.header("origin") {
+        Some(o) => hosts.iter().any(|h| o == format!("http://{h}")),
+        None => true,
+    };
+    host && origin
+}
+
+/// One browser's connection: its request checked, then forwarded, and
+/// all that follows copied both ways.
+fn forward_one(browser: std::net::TcpStream, socket: &Path, port: u16) -> io::Result<()> {
+    browser.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+    let mut from_browser = BufReader::new(browser.try_clone()?);
+    let mut to_browser = browser;
+    let Some(mut request) = Request::read(&mut from_browser)? else {
+        return Ok(());
+    };
+    if !own(&request, port) {
+        let no = "not this page's request: its Host or its Origin is another's\n";
+        return Response::text(403, "Forbidden", no).write(&mut to_browser);
+    }
+    to_browser.set_read_timeout(None)?;
+    let daemon = UnixStream::connect(socket)?;
+    let mut to_daemon = daemon.try_clone()?;
+    // Written again with its body's length.
+    request.headers.remove("content-length");
+    request.write(&mut to_daemon)?;
+    let up = std::thread::spawn(move || {
+        // What the reader holds beyond the request goes first.
+        let _ = io::copy(&mut from_browser, &mut to_daemon);
+        let _ = to_daemon.shutdown(std::net::Shutdown::Write);
+    });
+    let mut from_daemon = daemon;
+    let _ = io::copy(&mut from_daemon, &mut to_browser);
+    let _ = to_browser.shutdown(std::net::Shutdown::Write);
+    let _ = up.join();
     Ok(())
 }

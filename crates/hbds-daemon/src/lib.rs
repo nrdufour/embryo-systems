@@ -19,8 +19,10 @@ pub mod client;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{self, BufReader};
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -40,6 +42,15 @@ const STACK: usize = 256 << 20;
 /// How long a client has to send its request, between two reads.
 const REQUEST: Duration = Duration::from_secs(30);
 
+/// How long a client may read nothing of what is written to it: past
+/// that it is gone, whatever it says.
+const STALLED: Duration = Duration::from_secs(30);
+
+/// How much may wait to be written to one client, in bytes of frames:
+/// past that a session is not run until its client has read, and a
+/// feed's subscriber is let go.
+const QUEUE: usize = 16 << 20;
+
 /// How long an idle executor waits before it looks at the journal again.
 const IDLE: std::time::Duration = std::time::Duration::from_millis(100);
 
@@ -49,11 +60,12 @@ enum Msg {
         id: u64,
         program: Program,
         events: Events,
-        input: Receiver<Option<String>>,
+        input: Receiver<Input>,
     },
     /// A line of input, or its end, is on the session's channel.
     Wake(u64),
-    Gone(u64),
+    /// The session's connection ended, and why.
+    Gone(u64, &'static str),
     Dump(Sender<String>),
     Sessions(Sender<Vec<u64>>),
     Subscribe(Events),
@@ -130,11 +142,26 @@ enum Program {
     Source(String),
 }
 
+/// What a session's connection tells it, on a channel of its own: the
+/// executor may be waiting there, in a READ of code the store calls back,
+/// where no message reaches it.
+enum Input {
+    Line(String),
+    End,
+    /// An administrator ends the session.
+    Killed,
+}
+
+/// The sessions' channels, for a kill to reach one that waits.
+type Inputs = Arc<Mutex<BTreeMap<u64, Sender<Input>>>>;
+
 /// What the executor tells a session's connection, and how many of the
 /// journal's transactions must be on disk before the client hears it.
 struct Event {
     what: What,
     after: u64,
+    /// What it counts for in its queue.
+    size: usize,
 }
 
 enum What {
@@ -155,6 +182,25 @@ impl What {
             What::Feed(j) => j.clone(),
         }
     }
+
+    /// About how many bytes it holds while it waits to be written.
+    fn size(&self) -> usize {
+        fn text(j: &Json) -> usize {
+            match j {
+                Json::String(s) => s.len(),
+                Json::Array(a) => a.iter().map(text).sum(),
+                Json::Object(o) => o.iter().map(|(k, v)| k.len() + text(v)).sum(),
+                _ => 0,
+            }
+        }
+        let held = match self {
+            What::Output(t) => t.len(),
+            What::End(Some(e)) => e.len(),
+            What::Feed(j) => text(j),
+            _ => 0,
+        };
+        held + std::mem::size_of::<Event>()
+    }
 }
 
 /// Where events go, stamped with the journal's transactions so far.
@@ -162,22 +208,62 @@ impl What {
 struct Events {
     to: Sender<Event>,
     durable: Option<Durable>,
+    /// The bytes sent and not yet written to the client.
+    queued: Arc<AtomicUsize>,
 }
 
 impl Events {
+    /// The events' two ends: the executor's, and the connection's.
+    fn channel(durable: Option<Durable>) -> (Events, Written) {
+        let (to, from) = mpsc::channel();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let events = Events {
+            to,
+            durable,
+            queued: queued.clone(),
+        };
+        (events, Written { from, queued })
+    }
+
     /// Whether whoever listens is still there.
     fn send(&self, what: What) -> bool {
         let after = self.durable.as_ref().map_or(0, Durable::stamp);
-        self.to.send(Event { what, after }).is_ok()
+        let size = what.size();
+        self.queued.fetch_add(size, Ordering::Relaxed);
+        self.to.send(Event { what, after, size }).is_ok()
+    }
+
+    /// Whether more waits to be written than may: the client reads
+    /// slower than it is written to.
+    fn behind(&self) -> bool {
+        self.queued.load(Ordering::Relaxed) > QUEUE
+    }
+}
+
+/// The connection's end of [`Events`]: each event, to write, and counted
+/// out of the queue once it is taken.
+struct Written {
+    from: Receiver<Event>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl Iterator for Written {
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Event> {
+        let e = self.from.recv().ok()?;
+        self.queued.fetch_sub(e.size, Ordering::Relaxed);
+        Some(e)
     }
 }
 
 /// A session's input and output: its client's, by channel.
 struct Wire {
-    /// Lines come on `from`, `None` for the end of the input.
-    from: Receiver<Option<String>>,
+    from: Receiver<Input>,
     lines: VecDeque<String>,
     ended: bool,
+    /// An administrator's kill came on `from`: the input ends there.
+    killed: bool,
     events: Events,
     /// CHAV and HYPOCHAV runs, for the feed.
     rules: Vec<Json>,
@@ -212,24 +298,29 @@ fn rules_to_feed(feed: &mut Vec<Events>, report: Json, who: &str, id: u64) {
 }
 
 impl Wire {
-    fn take(&mut self, line: Option<String>) {
-        match line {
-            Some(l) => self.lines.push_back(l),
-            None => self.ended = true,
+    fn take(&mut self, input: Input) {
+        match input {
+            Input::Line(l) => self.lines.push_back(l),
+            Input::End => self.ended = true,
+            Input::Killed => (self.ended, self.killed) = (true, true),
         }
     }
 }
 
 impl hbds_vm::Io for Wire {
     /// A READ in code the store calls back cannot wait for another turn:
-    /// the executor waits on this client.
+    /// the executor waits on this client, until its line, its kill or
+    /// its connection's end.
     fn read_line(&mut self) -> Option<String> {
         if !self.ready() {
             self.events.send(What::WantsInput);
             match self.from.recv() {
-                Ok(line) => self.take(line),
+                Ok(input) => self.take(input),
                 Err(_) => self.ended = true,
             }
+        }
+        if self.killed {
+            return None;
         }
         self.lines.pop_front()
     }
@@ -264,6 +355,14 @@ struct Client {
     held: bool,
 }
 
+impl Client {
+    /// Whether its session may run a turn now: it waits for nothing, and
+    /// its client has read what was written to it.
+    fn ready(&self) -> bool {
+        !self.waiting && !self.held && !self.wire.events.behind()
+    }
+}
+
 /// What the kernel's processes print: to the client that activated the
 /// one running, while it is connected; to the daemon's output otherwise,
 /// until the UI has its feed (6d). They read nothing.
@@ -272,6 +371,8 @@ struct Router {
     owner: Option<u64>,
     process: Option<u64>,
     feed: Vec<Events>,
+    /// The clients written to: the kernel waits for those behind.
+    printed_to: BTreeSet<u64>,
 }
 
 impl Router {
@@ -289,9 +390,10 @@ impl hbds_vm::Io for Router {
     }
 
     fn write(&mut self, text: &str) {
-        match self.owner.and_then(|id| self.clients.get(&id)) {
-            Some(events) => {
+        match self.owner.and_then(|id| Some((id, self.clients.get(&id)?))) {
+            Some((id, events)) => {
                 events.send(What::Output(text.to_string()));
+                self.printed_to.insert(id);
             }
             None => {
                 let mut j = BTreeMap::from([("output".to_string(), Json::String(text.into()))]);
@@ -366,7 +468,14 @@ pub fn serve(
     language: &'static (dyn Language + Sync),
     pace: Pace,
 ) -> io::Result<()> {
-    if socket.exists() {
+    if let Ok(found) = std::fs::symlink_metadata(socket) {
+        // Only a socket is ours to remove: a file named by mistake stays.
+        if !found.file_type().is_socket() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{}: there is a file here, not a socket", socket.display()),
+            ));
+        }
         // Left by a daemon that died: the store's lock says none is
         // running on this store, but another may be on this socket.
         if UnixStream::connect(socket).is_ok() {
@@ -393,13 +502,14 @@ pub fn serve(
             die("the journal's thread");
         });
     }
+    let inputs = Inputs::default();
     let mut next = 0;
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         next += 1;
-        let (tx, id, durable) = (tx.clone(), next, durable.clone());
+        let (tx, id, durable, inputs) = (tx.clone(), next, durable.clone(), inputs.clone());
         std::thread::spawn(move || {
-            let _ = connection(stream, id, tx, durable);
+            let _ = connection(stream, id, tx, durable, inputs);
         });
     }
     Ok(())
@@ -411,6 +521,7 @@ fn connection(
     id: u64,
     tx: Sender<Msg>,
     durable: Option<Durable>,
+    inputs: Inputs,
 ) -> io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
@@ -422,6 +533,9 @@ fn connection(
     };
     if hbds_http::is_upgrade(&request) {
         writer.set_read_timeout(None)?;
+        // What is written to it, it reads: a write that waits this long
+        // fails, and the connection ends.
+        writer.set_write_timeout(Some(STALLED))?;
     }
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/store") => {
@@ -439,6 +553,13 @@ fn connection(
         }
         ("POST", path) if path.starts_with("/sessions/") && path.ends_with("/kill") => {
             let id = path["/sessions/".len()..path.len() - "/kill".len()].parse::<u64>();
+            // The executor may be waiting for this session's line, deaf
+            // to messages: the kill goes there too.
+            if let Ok(id) = id
+                && let Some(input) = inputs.lock().unwrap().get(&id)
+            {
+                let _ = input.send(Input::Killed);
+            }
             let (reply, killed) = mpsc::channel();
             match id {
                 Ok(id) if tx.send(Msg::Kill(id, reply)).is_ok() && killed.recv() == Ok(true) => {
@@ -505,7 +626,7 @@ fn connection(
         }
         ("GET", "/session") if hbds_http::is_upgrade(&request) => {
             hbds_http::upgrade(&request).write(&mut writer)?;
-            session(reader, writer, id, tx, durable)
+            session(reader, writer, id, tx, durable, inputs)
         }
         _ => Response::text(404, "Not Found", "no such thing here\n").write(&mut writer),
     }
@@ -521,26 +642,25 @@ fn feed(
     tx: Sender<Msg>,
     durable: Option<Durable>,
 ) -> io::Result<()> {
-    let (to, events) = mpsc::channel::<Event>();
+    let (events, written) = Events::channel(durable.clone());
     // Subscribed before the answer: nothing after it is missed.
-    let _ = tx.send(Msg::Subscribe(Events {
-        to,
-        durable: durable.clone(),
-    }));
+    let _ = tx.send(Msg::Subscribe(events));
     let mut out = writer;
     hbds_http::upgrade(request).write(&mut out)?;
     let write = std::thread::spawn(move || {
-        for e in events {
+        for e in written {
             if let Some(d) = &durable
                 && d.wait(e.after).is_err()
             {
-                return;
+                break;
             }
             let text = e.what.json().to_string();
             if hbds_http::write_message(&mut out, &Message::Text(text), false).is_err() {
-                return;
+                break;
             }
         }
+        // Let go by the executor, or not reading: the reader below ends.
+        let _ = out.shutdown(std::net::Shutdown::Both);
     });
     let mut partial = hbds_http::Partial::default();
     while !matches!(
@@ -553,8 +673,9 @@ fn feed(
 }
 
 /// A frame to every subscriber still there.
+/// One that is gone, or behind, is let go: its connection closes.
 fn broadcast(feed: &mut Vec<Events>, j: Json) {
-    feed.retain(|e| e.send(What::Feed(j.clone())));
+    feed.retain(|e| e.send(What::Feed(j.clone())) && !e.behind());
 }
 
 /// The changes the store kept, to the feed: a module by its hash, the
@@ -589,14 +710,13 @@ fn session(
     id: u64,
     tx: Sender<Msg>,
     durable: Option<Durable>,
+    inputs: Inputs,
 ) -> io::Result<()> {
-    let (to, from_executor) = mpsc::channel();
-    let events = Events {
-        to,
-        durable: durable.clone(),
-    };
+    let (events, from_executor) = Events::channel(durable.clone());
     let (input, lines) = mpsc::channel();
     let mut lines = Some(lines);
+    // Whether the client stopped reading: said when the session goes.
+    let stalled = Arc::new(AtomicBool::new(false));
     // The executor's events, written as they come, on a thread of their
     // own: the client's frames are read here meanwhile.
     // One frame at a time on the socket: the reader's pongs go between
@@ -605,9 +725,15 @@ fn session(
     let send = |out: &Mutex<UnixStream>, m: Message| {
         hbds_http::write_message(&mut *out.lock().unwrap(), &m, false)
     };
-    let writer = out.clone();
+    let (writer, stopped) = (out.clone(), stalled.clone());
     let write = std::thread::spawn(move || {
         let out = writer;
+        // A frame that does not go leaves the stream cut in a frame:
+        // nothing more is written, and the reader's side ends too.
+        let lost = |out: &Mutex<UnixStream>| {
+            stopped.store(true, Ordering::Relaxed);
+            let _ = out.lock().unwrap().shutdown(std::net::Shutdown::Both);
+        };
         for e in from_executor {
             // Done after the sync: the client hears nothing that the
             // journal could still lose what came before.
@@ -622,7 +748,7 @@ fn session(
             let end = matches!(e.what, What::End(_));
             let text = e.what.json().to_string();
             if send(&out, Message::Text(text)).is_err() {
-                return;
+                return lost(&out);
             }
             if end {
                 let _ = send(&out, Message::Close);
@@ -645,7 +771,9 @@ fn session(
         let frame = match message {
             Message::Text(t) => Json::parse(&t).ok(),
             Message::Ping(p) => {
-                send(&out, Message::Pong(p))?;
+                if send(&out, Message::Pong(p)).is_err() {
+                    break;
+                }
                 continue;
             }
             Message::Close => break,
@@ -658,26 +786,35 @@ fn session(
             _ => None,
         };
         if let Some(program) = program
-            && let (Some(events), Some(input)) = (events.take(), lines.take())
+            && let (Some(events), Some(lines)) = (events.take(), lines.take())
         {
             let start = Msg::Start {
                 id,
                 program,
                 events,
-                input,
+                input: lines,
             };
+            inputs.lock().unwrap().insert(id, input.clone());
             if tx.send(start).is_err() {
                 break;
             }
         } else if let Some(line) = frame.get("input").and_then(Json::as_str) {
-            let _ = input.send(Some(line.to_string()));
+            let _ = input.send(Input::Line(line.to_string()));
             let _ = tx.send(Msg::Wake(id));
         } else if frame.get("eof").is_some() {
-            let _ = input.send(None);
+            let _ = input.send(Input::End);
             let _ = tx.send(Msg::Wake(id));
         }
     }
-    let _ = tx.send(Msg::Gone(id));
+    // The channel closes with the connection: an executor waiting for
+    // this client's line stops waiting.
+    inputs.lock().unwrap().remove(&id);
+    drop(input);
+    let why = match stalled.load(Ordering::Relaxed) {
+        true => "the client stopped reading",
+        false => "the client left",
+    };
+    let _ = tx.send(Msg::Gone(id, why));
     let _ = write.join();
     Ok(())
 }
@@ -940,6 +1077,11 @@ fn executor(
     let mut sim = Sequencing::kernel();
     let mut kernel = Session::kernel();
     let mut loaded = BTreeSet::new();
+    // The sessions a kill ended while the executor waited on them, until
+    // the kill's message asks; and the clients the kernel's processes
+    // print to.
+    let mut killed = BTreeSet::new();
+    let mut printed_to: BTreeSet<u64> = BTreeSet::new();
     // The modules earlier clients brought: their bodies serve still.
     for (hash, text) in store.modules() {
         if let Ok(unit) = Unit::read(text) {
@@ -974,12 +1116,22 @@ fn executor(
         let in_time = |clients: &BTreeMap<u64, Client>, sim: &Sequencing| {
             (clients.iter()).any(|(&id, c)| !c.held && sim.is_engaged(Agent::Client(id)))
         };
+        // Nobody is written to faster than it reads: a session whose
+        // client is behind waits for it, and so does the kernel for the
+        // clients its processes print to. The executor itself never
+        // waits: it finds them not ready, and a client that reads
+        // nothing is gone within the time its connection gives it.
+        printed_to.retain(|id| clients.contains_key(id));
+        let reads = |printed_to: &BTreeSet<u64>, clients: &BTreeMap<u64, Client>| {
+            !(printed_to.iter()).any(|id| clients[id].wire.events.behind())
+        };
         let kernel_ready = !in_time(&clients, &sim)
+            && reads(&printed_to, &clients)
             && (kernel.in_process()
                 || sim
                     .next_due()
                     .is_some_and(|t| t <= b.until && b.events != Some(0)));
-        let ready = kernel_ready || clients.values().any(|c| !c.waiting && !c.held);
+        let ready = kernel_ready || clients.values().any(Client::ready);
         let first = match ready {
             true => rx.try_recv().ok(),
             // Idle, the journal may still be catching up: it is looked at
@@ -1042,6 +1194,7 @@ fn executor(
                             from: input,
                             lines: VecDeque::new(),
                             ended: false,
+                            killed: false,
                             events,
                             rules: Vec::new(),
                         };
@@ -1072,10 +1225,10 @@ fn executor(
                         c.waiting = false;
                     }
                 }
-                Msg::Gone(id) => {
+                Msg::Gone(id, why) => {
                     // Its processes stay; its own agent goes.
                     if clients.remove(&id).is_some() {
-                        ended(&mut feed, id, Some("the client left".into()));
+                        ended(&mut feed, id, Some(why.into()));
                     }
                     sim.forget(Agent::Client(id));
                 }
@@ -1094,7 +1247,8 @@ fn executor(
                         sim.forget(Agent::Client(id));
                         ended(&mut feed, id, Some(why));
                     }
-                    let _ = reply.send(found.is_some());
+                    // Or its kill reached it first, where it waited.
+                    let _ = reply.send(found.is_some() || killed.remove(&id));
                 }
                 Msg::Pace(set, reply) => {
                     if let Some(c) = set {
@@ -1114,7 +1268,7 @@ fn executor(
         }
         // The next ready client after the last one served.
         let next = (clients.range(after + 1..).chain(clients.range(..=after)))
-            .find(|(_, c)| !c.waiting && !c.held)
+            .find(|(_, c)| c.ready())
             .map(|(&id, _)| id);
         if let Some(id) = next {
             after = id;
@@ -1152,6 +1306,13 @@ fn executor(
                     ended(&mut feed, id, None);
                     true
                 }
+                Turn::Failed(_) if c.wire.killed => {
+                    let why = "killed by an administrator".to_string();
+                    c.wire.events.send(What::End(Some(why.clone())));
+                    ended(&mut feed, id, Some(why));
+                    killed.insert(id);
+                    true
+                }
                 Turn::Failed(e) => {
                     c.wire.events.send(What::End(Some(e.to_string())));
                     ended(&mut feed, id, Some(e.to_string()));
@@ -1167,7 +1328,9 @@ fn executor(
         // The simulation, between the clients' turns: its active process
         // runs until it holds, never switched for another.
         let b = bound(clock, real_from);
+        printed_to.retain(|id| clients.contains_key(id));
         let kernel_ready = !in_time(&clients, &sim)
+            && reads(&printed_to, &clients)
             && (kernel.in_process()
                 || sim
                     .next_due()
@@ -1180,10 +1343,11 @@ fn executor(
                 owner: None,
                 process: None,
                 feed: std::mem::take(&mut feed),
+                printed_to: std::mem::take(&mut printed_to),
             };
             let turn =
                 kernel.kernel_turn(&mut store, &mut sim, &mut io, language, Some(pace.slice), b);
-            feed = io.feed;
+            (feed, printed_to) = (io.feed, io.printed_to);
             if let (Clock::Step(_), Some(left)) = (clock, kernel.events_left()) {
                 clock = if left == 0 {
                     Clock::Paused
