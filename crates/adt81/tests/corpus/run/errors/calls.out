@@ -1,0 +1,2 @@
+1000
+14:16: runtime error: calls nest more than 1000 deep

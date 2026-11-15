@@ -19,18 +19,57 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-/// The largest body a request may carry: a program's A-code fits.
+/// The largest body a request may carry, and the largest message a
+/// WebSocket may, whole or in fragments: a program's A-code fits.
 const MAX_BODY: usize = 64 << 20;
+
+/// The largest head: the first line and the headers together.
+const MAX_HEAD: usize = 64 << 10;
+
+/// The largest control frame (RFC 6455, 5.5).
+const MAX_CONTROL: u64 = 125;
 
 fn bad(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
+/// The next line of a head, counted against what is `left` of it: a
+/// line that never ends is refused, not read for good.
+fn head_line(r: &mut impl BufRead, left: &mut usize) -> io::Result<String> {
+    let mut line = String::new();
+    let n = r.by_ref().take(*left as u64).read_line(&mut line)?;
+    if n == *left && !line.ends_with('\n') {
+        return Err(bad(format!("a head of more than {MAX_HEAD} bytes")));
+    }
+    *left -= n;
+    Ok(line)
+}
+
+/// The headers, names in lowercase, up to the empty line.
+fn headers(r: &mut impl BufRead, left: &mut usize) -> io::Result<BTreeMap<String, String>> {
+    let mut headers = BTreeMap::new();
+    loop {
+        let h = head_line(r, left)?;
+        if h.is_empty() {
+            return Err(bad("the headers end early"));
+        }
+        let h = h.trim_end_matches(['\r', '\n']);
+        if h.is_empty() {
+            return Ok(headers);
+        }
+        let (name, value) = h
+            .split_once(':')
+            .ok_or_else(|| bad(format!("a header: {h:?}")))?;
+        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+    }
+}
+
 impl Request {
     /// The next request on `r`, or `None` once the peer has closed.
     pub fn read(r: &mut impl BufRead) -> io::Result<Option<Request>> {
-        let mut line = String::new();
-        if r.read_line(&mut line)? == 0 {
+        let mut left = MAX_HEAD;
+        let line = head_line(r, &mut left)?;
+        if line.is_empty() {
             return Ok(None);
         }
         let mut parts = line.split_whitespace();
@@ -41,21 +80,7 @@ impl Request {
         if !version.starts_with("HTTP/1.") {
             return Err(bad(format!("not HTTP/1: {version}")));
         }
-        let mut headers = BTreeMap::new();
-        loop {
-            let mut h = String::new();
-            if r.read_line(&mut h)? == 0 {
-                return Err(bad("the headers end early"));
-            }
-            let h = h.trim_end_matches(['\r', '\n']);
-            if h.is_empty() {
-                break;
-            }
-            let (name, value) = h
-                .split_once(':')
-                .ok_or_else(|| bad(format!("a header: {h:?}")))?;
-            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
-        }
+        let headers = headers(r, &mut left)?;
         let length: usize = match headers.get("content-length") {
             Some(n) => n.parse().map_err(|_| bad(format!("a length: {n:?}")))?,
             None => 0,
@@ -135,8 +160,8 @@ impl Response {
 
     /// The response to a request, as a client reads it.
     pub fn read(r: &mut impl BufRead) -> io::Result<Response> {
-        let mut line = String::new();
-        r.read_line(&mut line)?;
+        let mut left = MAX_HEAD;
+        let line = head_line(r, &mut left)?;
         let mut parts = line.trim_end().splitn(3, ' ');
         let (Some(_), Some(status)) = (parts.next(), parts.next()) else {
             return Err(bad(format!("not a status line: {line:?}")));
@@ -145,21 +170,7 @@ impl Response {
             .parse()
             .map_err(|_| bad(format!("a status: {status:?}")))?;
         let reason = parts.next().unwrap_or("").to_string();
-        let mut headers = BTreeMap::new();
-        loop {
-            let mut h = String::new();
-            if r.read_line(&mut h)? == 0 {
-                return Err(bad("the headers end early"));
-            }
-            let h = h.trim_end_matches(['\r', '\n']);
-            if h.is_empty() {
-                break;
-            }
-            let (name, value) = h
-                .split_once(':')
-                .ok_or_else(|| bad(format!("a header: {h:?}")))?;
-            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
-        }
+        let headers = headers(r, &mut left)?;
         let length: usize = match headers.get("content-length") {
             Some(n) => n.parse().map_err(|_| bad(format!("a length: {n:?}")))?,
             None => 0,
@@ -251,10 +262,17 @@ pub enum Message {
     Close,
 }
 
-/// Reads the next message; fragments are put back together.
-pub fn read_message(r: &mut impl Read) -> io::Result<Message> {
-    let mut payload = Vec::new();
-    let mut kind = None;
+/// The fragments of a message read so far: control frames may come
+/// between them (RFC 6455, 5.4), and are given as they come.
+#[derive(Debug, Default)]
+pub struct Partial {
+    kind: Option<u8>,
+    payload: Vec<u8>,
+}
+
+/// Reads the next message; fragments are put back together, those read
+/// before a control frame kept in `partial` for the call that follows.
+pub fn read_message(r: &mut impl Read, partial: &mut Partial) -> io::Result<Message> {
     loop {
         let mut head = [0u8; 2];
         r.read_exact(&mut head)?;
@@ -271,8 +289,12 @@ pub fn read_message(r: &mut impl Read) -> io::Result<Message> {
             r.read_exact(&mut b)?;
             length = u64::from_be_bytes(b);
         }
-        if length > MAX_BODY as u64 {
-            return Err(bad(format!("a frame of {length} bytes")));
+        let control = opcode >= 0x8;
+        if control && (!fin || length > MAX_CONTROL) {
+            return Err(bad("a control frame in fragments, or over 125 bytes"));
+        }
+        if !control && partial.payload.len() as u64 + length > MAX_BODY as u64 {
+            return Err(bad(format!("a message of more than {MAX_BODY} bytes")));
         }
         let mut mask = [0u8; 4];
         if masked {
@@ -289,15 +311,20 @@ pub fn read_message(r: &mut impl Read) -> io::Result<Message> {
             0x8 => return Ok(Message::Close),
             0x9 => return Ok(Message::Ping(data)),
             0xa => return Ok(Message::Pong(data)),
+            0x0 if partial.kind.is_none() => return Err(bad("a fragment that continues nothing")),
             0x0 => {}
-            op => kind = Some(op),
+            _ if partial.kind.is_some() => {
+                return Err(bad("a message begins before the last has ended"));
+            }
+            op => partial.kind = Some(op),
         }
-        payload.extend(data);
+        partial.payload.extend(data);
         if fin {
             break;
         }
     }
-    match kind {
+    let payload = std::mem::take(&mut partial.payload);
+    match partial.kind.take() {
         Some(0x1) => String::from_utf8(payload)
             .map(Message::Text)
             .map_err(|_| bad("a text frame that is not UTF-8")),
@@ -399,7 +426,7 @@ mod tests {
         let frame = [
             0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d, 0x7f, 0x9f, 0x4d, 0x51, 0x58,
         ];
-        let m = read_message(&mut Cursor::new(frame)).unwrap();
+        let m = read_message(&mut Cursor::new(frame), &mut Partial::default()).unwrap();
         assert_eq!(m, Message::Text("Hello".into()));
         let mut out = Vec::new();
         write_message(&mut out, &m, true).unwrap();
@@ -410,16 +437,75 @@ mod tests {
     fn fragments_and_long_frames() {
         // Section 5.7: "Hel" then "lo", unmasked.
         let frames = [0x01, 0x03, 0x48, 0x65, 0x6c, 0x80, 0x02, 0x6c, 0x6f];
-        let m = read_message(&mut Cursor::new(frames)).unwrap();
+        let m = read_message(&mut Cursor::new(frames), &mut Partial::default()).unwrap();
         assert_eq!(m, Message::Text("Hello".into()));
         for n in [125, 126, 65535, 65536] {
             let text = "x".repeat(n);
             let mut out = Vec::new();
             write_message(&mut out, &Message::Text(text.clone()), n % 2 == 0).unwrap();
             assert_eq!(
-                read_message(&mut Cursor::new(out)).unwrap(),
+                read_message(&mut Cursor::new(out), &mut Partial::default()).unwrap(),
                 Message::Text(text)
             );
         }
+    }
+
+    #[test]
+    fn a_ping_between_fragments_loses_none() {
+        // "Hel", a ping, "lo": the ping is given first, the text whole.
+        let frames = [
+            0x01, 0x03, 0x48, 0x65, 0x6c, 0x89, 0x01, 0x21, 0x80, 0x02, 0x6c, 0x6f,
+        ];
+        let (mut r, mut partial) = (Cursor::new(frames), Partial::default());
+        let first = read_message(&mut r, &mut partial).unwrap();
+        assert_eq!(first, Message::Ping(vec![0x21]));
+        let second = read_message(&mut r, &mut partial).unwrap();
+        assert_eq!(second, Message::Text("Hello".into()));
+    }
+
+    #[test]
+    fn frames_out_of_order_are_refused() {
+        for frames in [
+            // A continuation of nothing.
+            &[0x80, 0x01, 0x48][..],
+            // A text beginning inside another.
+            &[0x01, 0x01, 0x48, 0x81, 0x01, 0x48],
+            // A ping in fragments, and one of 126 bytes.
+            &[0x09, 0x00],
+            &[0x89, 0x7e, 0x00, 0x7e],
+        ] {
+            let read = read_message(&mut Cursor::new(frames), &mut Partial::default());
+            assert!(read.is_err(), "{frames:?}");
+        }
+    }
+
+    #[test]
+    fn a_message_in_fragments_has_a_size() {
+        // Fragments of 32 MiB, never the last: the third is one too many.
+        let piece = vec![0u8; 32 << 20];
+        let mut frames = Vec::new();
+        for i in 0..3 {
+            frames.push(if i == 0 { 0x02 } else { 0x00 });
+            frames.push(127);
+            frames.extend((piece.len() as u64).to_be_bytes());
+            frames.extend(&piece);
+        }
+        let e = read_message(&mut Cursor::new(frames), &mut Partial::default()).unwrap_err();
+        assert!(e.to_string().contains("a message of more than"), "{e}");
+    }
+
+    #[test]
+    fn a_head_has_a_size() {
+        let endless = "GET /".to_string() + &"x".repeat(1 << 20);
+        let e = Request::read(&mut BufReader::new(Cursor::new(endless))).unwrap_err();
+        assert!(e.to_string().contains("a head of more than"), "{e}");
+        let many = "GET / HTTP/1.1\r\n".to_string() + &"a: b\r\n".repeat(20_000);
+        let e = Request::read(&mut BufReader::new(Cursor::new(many.clone()))).unwrap_err();
+        assert!(e.to_string().contains("a head of more than"), "{e}");
+        let status = many.replace("GET / HTTP/1.1", "HTTP/1.1 200 OK");
+        assert!(Response::read(&mut BufReader::new(Cursor::new(status))).is_err());
+        // Just under: the limit counts bytes, not lines.
+        let fits = "GET / HTTP/1.1\r\n".to_string() + &"a: b\r\n".repeat(10_000) + "\r\n";
+        assert!(Request::read(&mut BufReader::new(Cursor::new(fits))).is_ok());
     }
 }

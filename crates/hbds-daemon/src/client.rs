@@ -37,8 +37,9 @@ pub fn run(
         &mut writer,
         Json::one("run", Json::String(acode.to_string())),
     )?;
+    let mut partial = hbds_http::Partial::default();
     loop {
-        let text = match hbds_http::read_message(&mut reader)? {
+        let text = match hbds_http::read_message(&mut reader, &mut partial)? {
             Message::Text(t) => t,
             Message::Close => return Err(broken("the daemon closed the session")),
             _ => continue,

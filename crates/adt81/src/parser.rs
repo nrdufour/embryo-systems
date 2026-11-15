@@ -222,8 +222,21 @@ fn parse<'a>(
         furthest: 0,
         expected: Vec::new(),
         expressions: HashMap::new(),
+        nest: 0,
+        depth: 0,
+        peak: 0,
+        deep: None,
     };
-    match start(&mut parser) {
+    let parsed = start(&mut parser);
+    if let Some((at, message)) = parser.deep {
+        let t = parser.tokens[at];
+        return Err(Error {
+            message,
+            line: t.line,
+            column: t.column,
+        });
+    }
+    match parsed {
         Ok(Node::Tree(tree)) if parser.pos == parser.tokens.len() => Ok(tree),
         Ok(_) => {
             parser.expect(Expected::Thing("end of input"));
@@ -232,6 +245,13 @@ fn parse<'a>(
         Err(Fail) => Err(parser.error()),
     }
 }
+
+/// How deep statements may nest, and how high an expression's tree may
+/// be, an operator of a chain counting one for all that is on its left
+/// (docs/adt81.md, "Decisions"): every pass after this one walks the tree
+/// by recursion, on a stack that has an end.
+pub const STATEMENTS: usize = 64;
+pub const EXPRESSION: usize = 256;
 
 /// A rule failed to match; what was expected is in [`Parser::expected`].
 struct Fail;
@@ -281,8 +301,18 @@ struct Parser<'a> {
     /// the error reported if the parse fails.
     furthest: usize,
     expected: Vec<Expected>,
-    /// Every expression parsed, by start position: the node and the end.
-    expressions: HashMap<usize, Option<(Node<'a>, usize)>>,
+    /// Every expression parsed, by start position: the node, the end, and
+    /// how high its tree is.
+    expressions: HashMap<usize, Option<(Node<'a>, usize, usize)>>,
+    /// The statements open around the one being parsed.
+    nest: usize,
+    /// How deep in its expression's tree what is being parsed goes, and
+    /// the deepest reached since a chain or an expression began.
+    depth: usize,
+    peak: usize,
+    /// The token where a limit was passed, and which: the parse fails
+    /// with this, whatever else was expected.
+    deep: Option<(usize, String)>,
 }
 
 fn node(rule: Rule, children: Vec<Node<'_>>) -> Node<'_> {
@@ -438,11 +468,58 @@ impl<'a> Parser<'a> {
 
     /// Tries `rule` here; on failure, back to where it started.
     fn attempt<T>(&mut self, rule: impl FnOnce(&mut Self) -> Parse<T>) -> Option<T> {
-        let start = self.pos;
+        let (start, peak) = (self.pos, self.peak);
         let result = rule(self).ok();
         if result.is_none() {
-            self.pos = start;
+            (self.pos, self.peak) = (start, peak);
         }
+        result
+    }
+
+    // Limits
+
+    /// The expression's tree is higher than it may be: nothing parses
+    /// from here on.
+    fn too_high<T>(&mut self) -> Parse<T> {
+        let message = format!("an expression nests more than {EXPRESSION} deep");
+        self.deep
+            .get_or_insert((self.pos.min(self.tokens.len() - 1), message));
+        Err(Fail)
+    }
+
+    /// `rule`, one level deeper in the expression's tree.
+    fn deeper<T>(&mut self, rule: impl FnOnce(&mut Self) -> Parse<T>) -> Parse<T> {
+        if self.deep.is_some() || self.depth >= EXPRESSION {
+            return self.too_high();
+        }
+        self.depth += 1;
+        self.peak = self.peak.max(self.depth);
+        let result = rule(self);
+        self.depth -= 1;
+        result
+    }
+
+    /// `rule`, a chain of left-associative operators, whose tree leans
+    /// left: [`right`](Self::right) parses each operand after the first.
+    fn spine<T>(&mut self, rule: impl FnOnce(&mut Self) -> Parse<T>) -> Parse<T> {
+        let outer = std::mem::replace(&mut self.peak, self.depth);
+        let result = rule(self);
+        self.peak = self.peak.max(outer);
+        result
+    }
+
+    /// The next operand of a chain: what the chain holds so far goes one
+    /// level deeper, under the operator.
+    fn right<T>(&mut self, item: impl FnOnce(&mut Self) -> Parse<T>) -> Parse<T> {
+        let held = self.peak + 1;
+        if held > EXPRESSION {
+            return self.too_high();
+        }
+        self.peak = self.depth;
+        self.depth += 1;
+        let result = item(self);
+        self.depth -= 1;
+        self.peak = self.peak.max(held);
         result
     }
 
@@ -463,15 +540,17 @@ impl<'a> Parser<'a> {
         ops: &[&str],
         inlined: bool,
     ) -> Parse<Node<'a>> {
-        let mut c = vec![item(self)?];
-        while let Some(op) = self.opt_op(ops) {
-            c.push(op);
-            c.push(item(self)?);
-        }
-        Ok(if inlined {
-            inline(rule, c)
-        } else {
-            node(rule, c)
+        self.spine(|p| {
+            let mut c = vec![item(p)?];
+            while let Some(op) = p.opt_op(ops) {
+                c.push(op);
+                c.push(p.right(item)?);
+            }
+            Ok(if inlined {
+                inline(rule, c)
+            } else {
+                node(rule, c)
+            })
         })
     }
 
@@ -889,6 +968,21 @@ impl<'a> Parser<'a> {
 
     /// Anything that starts no statement is the empty statement.
     fn statement(&mut self) -> Parse<Node<'a>> {
+        if self.deep.is_some() {
+            return Err(Fail);
+        }
+        if self.nest >= STATEMENTS {
+            let message = format!("statements nest more than {STATEMENTS} deep");
+            self.deep = Some((self.pos.min(self.tokens.len() - 1), message));
+            return Err(Fail);
+        }
+        self.nest += 1;
+        let result = self.one_statement();
+        self.nest -= 1;
+        result
+    }
+
+    fn one_statement(&mut self) -> Parse<Node<'a>> {
         let Some(t) = self.peek(0) else {
             return Ok(node(R::EmptyStatement, vec![]));
         };
@@ -1530,16 +1624,25 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         if let Some(memo) = self.expressions.get(&start) {
             return match memo.clone() {
-                Some((node, end)) => {
+                Some((node, end, height)) => {
+                    if self.depth + height > EXPRESSION {
+                        return self.too_high();
+                    }
+                    self.peak = self.peak.max(self.depth + height);
                     self.pos = end;
                     Ok(node)
                 }
                 None => Err(Fail),
             };
         }
-        let result = self.disjunction();
-        let memo = result.as_ref().ok().map(|node| (node.clone(), self.pos));
-        self.expressions.insert(start, memo);
+        let (depth, outer) = (self.depth, std::mem::replace(&mut self.peak, self.depth));
+        let result = self.deeper(Self::disjunction);
+        let height = self.peak - depth;
+        self.peak = self.peak.max(outer);
+        if self.deep.is_none() {
+            let memo = (result.as_ref().ok()).map(|node| (node.clone(), self.pos, height));
+            self.expressions.insert(start, memo);
+        }
         result
     }
 
@@ -1562,7 +1665,7 @@ impl<'a> Parser<'a> {
 
     fn negation(&mut self) -> Parse<Node<'a>> {
         if self.is_kw(0, "NOT") {
-            let c = vec![self.take(), self.negation()?];
+            let c = vec![self.take(), self.deeper(Self::negation)?];
             Ok(node(R::Negation, c))
         } else {
             self.relation()
@@ -1623,12 +1726,14 @@ impl<'a> Parser<'a> {
         if self.is_sign(0) {
             c.push(self.sign());
         }
-        c.push(self.product()?);
-        while let Some(op) = self.opt_op(&["+", "-", "[+]"]) {
-            c.push(op);
-            c.push(self.product()?);
-        }
-        Ok(inline(R::Sum, c))
+        self.spine(|p| {
+            c.push(p.product()?);
+            while let Some(op) = p.opt_op(&["+", "-", "[+]"]) {
+                c.push(op);
+                c.push(p.right(Self::product)?);
+            }
+            Ok(inline(R::Sum, c))
+        })
     }
 
     fn product(&mut self) -> Parse<Node<'a>> {
@@ -1735,11 +1840,13 @@ impl<'a> Parser<'a> {
     }
 
     fn functor_expression(&mut self) -> Parse<Node<'a>> {
-        let mut c = vec![self.adt()?, self.sym("'")?, self.invocation()?];
-        while self.opt_sym("'", &mut c) {
-            c.push(self.invocation()?);
-        }
-        Ok(node(R::FunctorExpression, c))
+        self.spine(|p| {
+            let mut c = vec![p.adt()?, p.sym("'")?, p.right(Self::invocation)?];
+            while p.opt_sym("'", &mut c) {
+                c.push(p.right(Self::invocation)?);
+            }
+            Ok(node(R::FunctorExpression, c))
+        })
     }
 
     fn list_expression(&mut self) -> Parse<Node<'a>> {
@@ -1817,6 +1924,46 @@ mod tests {
         let mut ours: Vec<&str> = Rule::ALL.iter().map(|r| r.name()).collect();
         ours.sort_unstable();
         assert_eq!(ours, defined);
+    }
+
+    #[test]
+    fn nesting_has_limits() {
+        let refused = |statement: String| {
+            let source = format!("PROGRAM P ;\nBEGIN\n{statement}\nEND ;\n");
+            parse_program(&source).err().map(|e| e.message)
+        };
+        let high = Some(format!("an expression nests more than {EXPRESSION} deep"));
+        let nested = |n: usize| format!("x := {}1{}", "(".repeat(n), ")".repeat(n));
+        let sum = |n: usize| format!("x := {}1", "1 + ".repeat(n));
+        let not = |n: usize| format!("x := {}TRUE", "NOT ".repeat(n));
+        // The expression itself is one level.
+        for write in [&nested as &dyn Fn(usize) -> String, &sum, &not] {
+            assert_eq!(refused(write(EXPRESSION - 1)), None);
+            assert_eq!(refused(write(EXPRESSION)), high);
+            // What overflowed the stack, here or in a later pass.
+            assert_eq!(refused(write(100_000)), high);
+        }
+        // A chain's operators count with what nests on their left.
+        let mixed = |n: usize| {
+            let mut e = "1".to_string();
+            for _ in 0..n {
+                e = format!("({e} + 1 + 1 + 1)");
+            }
+            format!("x := {e}")
+        };
+        assert_eq!(refused(mixed(60)), None);
+        assert_eq!(refused(mixed(70)), high);
+        let ifs = |n: usize| {
+            let (open, close) = ("IF b THEN ".repeat(n), " ENDIF".repeat(n));
+            format!("{open}x := 1{close}")
+        };
+        let deep = Some(format!("statements nest more than {STATEMENTS} deep"));
+        assert_eq!(refused(ifs(STATEMENTS - 1)), None);
+        assert_eq!(refused(ifs(STATEMENTS)), deep);
+        assert_eq!(refused(ifs(100_000)), deep);
+        // Length is not depth.
+        assert_eq!(refused("x := 1 ; ".repeat(10_000)), None);
+        assert_eq!(refused(format!("PRINT {}1", "1, ".repeat(10_000))), None);
     }
 
     #[test]

@@ -1,0 +1,8 @@
+-- Runtime error: matrices declared without bounds have no cells to --
+-- multiply. Written for the limits' tests. --
+
+PROGRAM E ;
+LOCAL m, p : MATRIX OF INTEGER ;
+BEGIN
+        p := m [*] m
+END ;

@@ -1,0 +1,18 @@
+-- Powers of Gauss integers and quaternions, by squares: an exponent of --
+-- hundreds of millions costs as many products as it has bits. Written --
+-- for the limits' tests. --
+
+PROGRAM POWERS ;
+LOCAL
+        g : GAUSS ;
+        q : QUATERNION ;
+BEGIN
+        g := 1i ;
+        PRINT g ^ 0, g ^ 1, g ^ 2, g ^ 3, g ^ 300000000, g ^ 300000001 ;
+        g := 1 - 2i ;
+        PRINT g ^ 5, g * g * g * g * g, g ^ 30 ;
+        q := 1.0k ;
+        PRINT q ^ 2, q ^ 300000001, q ^ (-1) ;
+        q := 0.5 + 0.5i + 0.5j + 0.5k ;
+        PRINT q ^ 3, q * q * q, q ^ 600000000
+END ;

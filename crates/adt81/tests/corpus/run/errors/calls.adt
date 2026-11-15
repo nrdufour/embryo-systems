@@ -1,0 +1,15 @@
+-- Runtime error: calls nest 1000 deep and no deeper, a recursion --
+-- without end stopped there. Written for the limits' tests. --
+
+PROGRAM E ;
+BEGIN
+        PRINT DOWN(1, 1000) ;
+        PRINT DOWN(1, 0)
+END ;
+
+FUNCTION DOWN (n, last) RETURNS INTEGER ;
+        n, last : INTEGER IN ;
+BEGIN
+        IF n = last THEN RESULT n ENDIF ;
+        RESULT DOWN(n + 1, last)
+END ;

@@ -1,0 +1,11 @@
+-- Runtime error: a product of Gauss integers that no integer holds. --
+-- Written for the limits' tests. --
+
+PROGRAM E ;
+LOCAL n : INTEGER ; g : GAUSS ;
+BEGIN
+        n := -9223372036854775807 - 1 ;
+        g := n + n * 1i ;
+        PRINT g ;
+        PRINT g * g
+END ;

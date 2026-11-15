@@ -576,7 +576,9 @@ impl Feed {
 
     /// The next frame.
     fn next(&mut self) -> String {
-        match hbds_http::read_message(&mut self.reader).expect("a frame in time") {
+        match hbds_http::read_message(&mut self.reader, &mut Default::default())
+            .expect("a frame in time")
+        {
             hbds_http::Message::Text(t) => t,
             m => panic!("{m:?}"),
         }
@@ -864,7 +866,9 @@ fn answering(daemon: &Daemon, source: &str, lines: &[&str]) -> (String, hbds_htt
     .unwrap();
     let mut out = String::new();
     loop {
-        let hbds_http::Message::Text(t) = hbds_http::read_message(&mut reader).unwrap() else {
+        let hbds_http::Message::Text(t) =
+            hbds_http::read_message(&mut reader, &mut Default::default()).unwrap()
+        else {
             continue;
         };
         let f = Json::parse(&t).unwrap();
@@ -1337,4 +1341,41 @@ fn damaged_fibers_are_refused_not_run() {
         }
         assert_eq!(daemon.child.try_wait().unwrap(), None, "{what}: gone");
     }
+}
+
+/// A-code no compiler wrote: a loop that passes no statement, so that no
+/// turn of it would ever end.
+const ENDLESS: &str =
+    "acode 1\nlanguage \"ADT'81\"\n\nmodule program \"LOOP\" \"LOOP\" 1:1\n   0 1:1      jump 0\n";
+
+#[test]
+fn a_loop_without_a_statement_is_refused_and_the_daemon_goes_on() {
+    let daemon = Daemon::start("endless");
+    let looping = write("daemon-endless", "loop.acode", ENDLESS);
+    let mut exec = Command::new(BIN);
+    exec.args(["exec", "--connect", daemon.socket(), &looping]);
+    // Before, the client waited for good: the test must not.
+    let mut child = spawn(exec);
+    let start = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > Duration::from_secs(60) {
+            let _ = child.kill();
+            panic!("the loop is still running");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let err = String::from_utf8(child.wait_with_output().unwrap().stderr).unwrap();
+    assert!(err.contains("instructions without a statement"), "{err}");
+    assert_eq!(daemon.get("/sessions"), "");
+    let hello = corpus().join("hello.adt");
+    let out = daemon.client(hello.to_str().unwrap()).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
+#[test]
+fn json_nested_without_end_is_refused_and_the_daemon_goes_on() {
+    let daemon = Daemon::start("nested-json");
+    let answer = daemon.post("/pace", &"[".repeat(200_000));
+    assert!(answer.contains("nested more than 64 deep"), "{answer}");
+    assert!(daemon.get("/time").contains("now"));
 }

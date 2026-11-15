@@ -219,6 +219,23 @@ The print leaves these open; they were decided on 2026-10-14.
   `"THIS . ""temp"" > 0."`.
 - **`EXIT`, `NEXT`, `RELOOP` take an optional count**, one by default. Page
   22 always writes it.
+- **Nesting has limits** (decided 2026-11-15), which no rule of the
+  grammar can write: statements nest 64 deep, and an expression's tree is
+  at most 256 high, parentheses, `NOT`, arguments and indexes counting
+  one each, and each operator of a chain (`a + b + c`, `a & b`,
+  `x ' F ' G`) one for all that is on its left, since the chain's tree
+  leans left. Length is free: statements in sequence, the items of a
+  list. The parser refuses the rest, with its place: 100 000 parentheses,
+  or as many terms in one sum, overflowed the stack of `check`, `run`
+  and `fmt`, in the parser or in a pass after it, each of which walks
+  the tree by recursion. *Not the print's*, whose limits are of another
+  kind: page 32 gives a module at most 256 instructions, 256
+  identifiers, 256 constants and 256 expressions, a job 65 536 modules
+  and a string as many characters, generation parameters all, and says
+  nothing of nesting. Those sizes are not enforced here; the 256 is in
+  their spirit. Not chosen:
+  passes that walk without recursion, each to rewrite and none ever
+  done, the next pass being written the plain way.
 
 ## Name resolution
 

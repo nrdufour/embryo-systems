@@ -1,0 +1,12 @@
+-- A rule whose YES calls CHAV again, each run within the last: past 64 --
+-- deep, CHAV stops, refused whole. Written for the limits' tests. --
+
+PROGRAM NESTED ;
+BEGIN
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "again" [ "STEPS" ] ;
+        LET "again" [ "STEPS" ] ' PREMISES := "TRUE" ;
+        LET "again" [ "STEPS" ] ' YES := "CALL CHAV(""STEPS"")" ;
+        CALL CHAV("STEPS")
+END ;

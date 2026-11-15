@@ -381,6 +381,9 @@ impl Session {
                     prefix: fr.optional(|r| r.value())?,
                     this: fr.optional(|r| r.adt_ref())?,
                     depth: fr.parse()?,
+                    // A fiber is saved between statements, outside any
+                    // callback: each frame above its first is a call.
+                    calls: frames.len(),
                     within: fr.parse()?,
                 });
                 fr.end()?;

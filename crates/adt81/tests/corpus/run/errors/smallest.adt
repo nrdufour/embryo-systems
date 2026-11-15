@@ -1,0 +1,10 @@
+-- Runtime error: the smallest integer as an exponent has no opposite; --
+-- an overflow, as any other. Written for the limits' tests. --
+
+PROGRAM E ;
+LOCAL n : INTEGER ;
+BEGIN
+        n := -9223372036854775807 - 1 ;
+        PRINT 1 ^ n, (-1) ^ n, (-1) ^ 9223372036854775807 ;
+        PRINT (2 // 3) ^ n
+END ;

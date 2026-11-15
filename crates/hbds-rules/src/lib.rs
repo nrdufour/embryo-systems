@@ -5,6 +5,7 @@
 //! decides what runs when, the language runs it, through [`Host`].
 //! docs/hbds.md, "Expert systems", gives the rules.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::DerefMut;
 
@@ -38,6 +39,35 @@ pub const INHIBITS: (&str, &str) = ("inhibits", "inhibited by");
 
 /// More tries than this, and CHAV does not converge.
 pub const LIMIT: usize = 10_000;
+
+/// How deep CHAV and HYPOCHAV may nest, a rule's part calling them: as
+/// COND and ACTION.
+pub const DEPTH: usize = 64;
+
+thread_local! {
+    /// The runs under way on this thread, each within the last: a rule's
+    /// code runs to completion on the thread that chains.
+    static RUNNING: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One more run under way, until dropped.
+struct Nested;
+
+impl Nested {
+    fn enter() -> Result<Nested, String> {
+        if RUNNING.get() >= DEPTH {
+            return Err("CHAV nests too deep".into());
+        }
+        RUNNING.set(RUNNING.get() + 1);
+        Ok(Nested)
+    }
+}
+
+impl Drop for Nested {
+    fn drop(&mut self) {
+        RUNNING.set(RUNNING.get() - 1);
+    }
+}
 
 /// The properties a rule or a fact carries.
 pub fn is_property(key: &str) -> bool {
@@ -491,6 +521,7 @@ impl<'h> Chainer<'h> {
 
     /// The whole run is a transaction of the store's, nested in any open.
     fn run(mut self, hypotheses: Option<&Code>) -> Result<Run, String> {
+        let _nested = Nested::enter()?;
         let point = {
             let mut store = self.host.store();
             store.begin();
