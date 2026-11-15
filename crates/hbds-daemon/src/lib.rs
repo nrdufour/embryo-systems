@@ -944,6 +944,8 @@ fn executor(
     // Real time goes on from the time restored, not from 0.
     let mut real_from = (Instant::now(), sim.now());
     loop {
+        // A statement refused took what it did to the set with it.
+        sim.follow(&mut store);
         let b = bound(clock, real_from);
         let in_time = |clients: &BTreeMap<u64, Client>, sim: &Sequencing| {
             (clients.iter()).any(|(&id, c)| !c.held && sim.is_engaged(Agent::Client(id)))

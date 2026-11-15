@@ -1,0 +1,27 @@
+-- What HYPOCHAV's hypotheses do to the sequencing set goes with what --
+-- they do to the store: a process they activate, existing or created --
+-- by them, does not run afterwards. Written for the transaction's --
+-- tests (review of 2026-11-15). --
+
+PROGRAM HYPOTHETICAL ;
+BEGIN
+        CREATE "w" ;
+        INCLUDE "w" INTO "PROCESS" ;
+        CREATE "old" [ "w" ] ;
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CALL HYPOCHAV("CREATE ""new"" [ ""w"" ] ; ACTIVATE ""new"" [ ""w"" ] ; REACTIVATE ""old"" [ ""w"" ] AT 2 ; PRINT ""supposed""",
+                      "STEPS") ;
+        PRINT "old" [ "w" ] . "STATE" ;
+        HOLD FOR 5 ;
+        PRINT "after", TIME ;
+        ACTIVATE "old" [ "w" ] ;
+        HOLD FOR 5 ;
+        PRINT "after", TIME
+END ;
+
+COROUTINE "w" ;
+BEGIN
+        PRINT "runs", TIME ;
+        HOLD FOR 1
+END ;

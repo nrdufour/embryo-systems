@@ -201,3 +201,63 @@ fn a_reflex_in_time_is_due_and_kept() {
     s.forget(a);
     assert_eq!(s.reflex(1), None);
 }
+
+/// `p` activated, as a statement does it: the set told first.
+fn activate(s: &mut Sequencing, store: &mut hbds_gtad::Store, p: Agent) {
+    s.changing(store);
+    s.reactivate(p, When::Now, &d).unwrap();
+}
+
+#[test]
+fn the_set_goes_back_with_the_store() {
+    let mut store = hbds_gtad::Store::memory();
+    let mut s = Sequencing::new();
+    // Outside a transaction, and in one that is kept: it stays.
+    activate(&mut s, &mut store, P);
+    store.begin();
+    activate(&mut s, &mut store, Q);
+    store.end(true).unwrap();
+    s.follow(&mut store);
+    assert_eq!(names(&s).len(), 2);
+    // Refused: what it did is undone, and only that.
+    store.begin();
+    activate(&mut s, &mut store, R);
+    s.cancel(P, &d).unwrap();
+    store.end(false).unwrap();
+    s.follow(&mut store);
+    assert_eq!(
+        names(&s),
+        [(0.0, "p1".to_string()), (0.0, "p2".to_string())]
+    );
+    // A transaction refused that did not touch the set leaves it alone.
+    store.begin();
+    store.end(false).unwrap();
+    activate(&mut s, &mut store, R);
+    assert_eq!(names(&s).len(), 3);
+}
+
+#[test]
+fn a_rollback_takes_the_set_to_its_savepoint() {
+    let mut store = hbds_gtad::Store::memory();
+    let mut s = Sequencing::new();
+    store.begin();
+    activate(&mut s, &mut store, P);
+    let point = store.savepoint().unwrap();
+    activate(&mut s, &mut store, Q);
+    let inner = store.savepoint().unwrap();
+    activate(&mut s, &mut store, R);
+    store.rollback(inner);
+    s.follow(&mut store);
+    assert_eq!(names(&s).len(), 2);
+    store.rollback(point);
+    // Not asked in between: the rollback is not lost.
+    activate(&mut s, &mut store, R);
+    assert_eq!(
+        names(&s),
+        [(0.0, "p1".to_string()), (0.0, "p3".to_string())]
+    );
+    // And the whole of it refused takes the rest.
+    store.end(false).unwrap();
+    s.follow(&mut store);
+    assert_eq!(names(&s), []);
+}

@@ -356,6 +356,12 @@ pub struct Store {
     /// snapshot, as `launched` is.
     touched: BTreeSet<Id>,
     transaction: Option<Transaction>,
+    /// The snapshots taken so far, each known by its number: what goes
+    /// back with the model and lives outside it (the sequencing set)
+    /// tells by it how far.
+    stamps: Cell<u64>,
+    /// The earliest snapshot the model was put back to, since last asked.
+    undone: Option<u64>,
     counted: Counted,
 }
 
@@ -385,6 +391,7 @@ fn add(c: &Cell<u64>, n: usize) {
 /// The model as it was when a transaction began.
 #[derive(Clone)]
 struct Snapshot {
+    stamp: u64,
     next: Id,
     classes: PMap<Id, Class>,
     attributes: PMap<Id, Attribute>,
@@ -676,7 +683,9 @@ impl Store {
     }
 
     fn snapshot(&self) -> Snapshot {
+        self.stamps.set(self.stamps.get() + 1);
         Snapshot {
+            stamp: self.stamps.get(),
             next: self.next,
             classes: self.classes.clone(),
             attributes: self.attributes.clone(),
@@ -696,6 +705,7 @@ impl Store {
     }
 
     fn restore(&mut self, s: Snapshot) {
+        self.undone = Some(self.undone.map_or(s.stamp, |u| u.min(s.stamp)));
         self.next = s.next;
         self.classes.restore(s.classes);
         self.attributes.restore(s.attributes);
@@ -772,6 +782,23 @@ impl Store {
 
     pub fn has_touched(&self) -> bool {
         !self.touched.is_empty()
+    }
+
+    /// The number of the last snapshot taken: a transaction's beginning,
+    /// or a savepoint.
+    pub fn stamp(&self) -> u64 {
+        self.stamps.get()
+    }
+
+    /// The snapshot the open transaction began with, by its number.
+    pub fn began(&self) -> Option<u64> {
+        self.transaction.as_ref().map(|t| t.snapshot.stamp)
+    }
+
+    /// The earliest snapshot the model was put back to since last asked,
+    /// by a transaction refused or a rollback; `None` if it never was.
+    pub fn take_undone(&mut self) -> Option<u64> {
+        self.undone.take()
     }
 
     /// Whether the transaction open is the outermost: the one whose end

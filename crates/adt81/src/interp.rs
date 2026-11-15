@@ -1036,6 +1036,7 @@ impl Machine {
         if self.budget.is_some_and(|b| done > b) {
             return Err(error(s.span, BUDGET_SPENT));
         }
+        (self.sim.lock().unwrap()).follow(&mut self.store.lock().unwrap());
         self.drain(s.span)?;
         match &s.kind {
             StmtKind::Assign { target, value } => {
@@ -2185,6 +2186,7 @@ impl Machine {
         op: impl FnOnce(&mut Sequencing, hbds_simulation::Describe) -> Result<(), String>,
     ) -> Exec<()> {
         let mut sim = self.sim.lock().unwrap();
+        sim.changing(&mut self.store.lock().unwrap());
         op(&mut sim, &|a| self.agent_name(a)).map_err(|m| error(span, m))
     }
 
