@@ -26,10 +26,10 @@ functors        125      6.5      -
 functors        250     12.8   x2.0
 functors        500     25.0   x2.0
 functors       1000     52.4   x2.1
-functors-vm      125      6.1
-functors-vm      250     12.4   x2.
-functors-vm      500     23.7   x1.
-functors-vm     1000     49.7   x2.
+functors-vm      125      6.1      -
+functors-vm      250     12.4   x2.0
+functors-vm      500     23.7   x1.9
+functors-vm     1000     49.7   x2.1
 chav            125     11.8      -
 chav            250     22.1   x1.9
 chav            500     46.7   x2.1
@@ -42,10 +42,10 @@ simulation       50     25.2      -
 simulation      100     52.9   x2.1
 simulation      200    109.0   x2.1
 simulation      400    244.3   x2.2
-simulation-vm       50      6.4
-simulation-vm      100     14.0   x
-simulation-vm      200     28.2   x
-simulation-vm      400     59.3   x
+simulation-vm       50      6.4      -
+simulation-vm      100     14.0   x2.2
+simulation-vm      200     28.2   x2.0
+simulation-vm      400     59.3   x2.1
 values        32000     99.0      -
 values        64000    195.4   x2.0
 values       128000    389.1   x2.0
@@ -58,7 +58,7 @@ language     125000    338.8      -
 language     250000    671.1   x2.0
 language     500000   1374.1   x2.0
 language    1000000   2751.5   x2.0
-language-vm   125000    340.9
-language-vm   250000    685.3   x2.
-language-vm   500000   1388.5   x2.
-language-vm  1000000   2788.8   x2.
+language-vm   125000    340.9      -
+language-vm   250000    685.3   x2.0
+language-vm   500000   1388.5   x2.0
+language-vm  1000000   2788.8   x2.0
