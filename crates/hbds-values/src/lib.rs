@@ -34,6 +34,30 @@ pub fn integer(v: &Value) -> Computed<i64> {
     }
 }
 
+/// The most cells an array may have (docs/architecture.md, decision 4).
+pub const CELLS: usize = 1 << 24;
+
+/// An array's lows, its dimensions and how many cells it has, from its
+/// bounds, each a low and a high; no cells without bounds.
+pub fn shape(bounds: &[(i64, i64)]) -> Computed<(Vec<i64>, Vec<usize>, usize)> {
+    let (mut lows, mut dims) = (Vec::new(), Vec::new());
+    let mut size: usize = if bounds.is_empty() { 0 } else { 1 };
+    for &(low, high) in bounds {
+        if high < low {
+            return fault(format!("the bounds {low}:{high} are empty"));
+        }
+        let dim = usize::try_from(high as i128 - low as i128 + 1).ok();
+        let cells = dim.and_then(|d| size.checked_mul(d));
+        let (Some(dim), Some(cells)) = (dim, cells.filter(|c| *c <= CELLS)) else {
+            return fault(format!("an array of more than {CELLS} cells"));
+        };
+        lows.push(low);
+        dims.push(dim);
+        size = cells;
+    }
+    Ok((lows, dims, size))
+}
+
 /// Where the cell at `indices` is in an array's row-major cells.
 pub fn offset(a: &Array, indices: &[i64]) -> Computed<usize> {
     if indices.len() != a.dims.len() {
@@ -370,17 +394,22 @@ fn arith(op: Op, a: &Scalar, b: &Scalar) -> Computed<Scalar> {
         (Op::Div, Float(_), Float(0.0)) => return fault("division by zero"),
         (Op::Div, Float(x), Float(y)) => Float(x / y),
         (op, Gauss(a, b), Gauss(c, d)) => {
+            // Each product fits an i128; a sum of two may not.
             let (a, b, c, d) = (a as i128, b as i128, c as i128, d as i128);
             let (re, im) = match op {
                 Op::Add => (a + c, b + d),
                 Op::Sub => (a - c, b - d),
-                Op::Mul => (a * c - b * d, a * d + b * c),
+                Op::Mul => (
+                    overflow((a * c).checked_sub(b * d))?,
+                    overflow((a * d).checked_add(b * c))?,
+                ),
                 _ => {
-                    let norm = c * c + d * d;
+                    let norm = overflow((c * c).checked_add(d * d))?;
                     if norm == 0 {
                         return fault("division by zero");
                     }
-                    let (re, im) = (a * c + b * d, b * c - a * d);
+                    let re = overflow((a * c).checked_add(b * d))?;
+                    let im = overflow((b * c).checked_sub(a * d))?;
                     if re % norm != 0 || im % norm != 0 {
                         return fault("this Gauss integer division does not fall exact");
                     }
@@ -424,9 +453,13 @@ fn real(s: &Scalar) -> Option<f64> {
     }
 }
 
-fn int_pow(base: i64, exponent: i64) -> Computed<i64> {
-    let e = u32::try_from(exponent).map_err(|_| Fault("integer overflow".into()))?;
-    overflow(base.checked_pow(e))
+fn int_pow(base: i64, exponent: u64) -> Computed<i64> {
+    match (base, u32::try_from(exponent)) {
+        (_, Ok(e)) => overflow(base.checked_pow(e)),
+        (0 | 1, _) => Ok(base),
+        (-1, _) => Ok(if exponent.is_multiple_of(2) { 1 } else { -1 }),
+        _ => fault("integer overflow"),
+    }
 }
 
 /// `^`: integers and rationals to an integer stay exact, a negative
@@ -434,18 +467,21 @@ fn int_pow(base: i64, exponent: i64) -> Computed<i64> {
 fn pow(a: &Scalar, b: &Scalar) -> Computed<Scalar> {
     use Scalar::*;
     Ok(match (a, b) {
-        (Integer(x), Integer(n)) if *n >= 0 => Integer(int_pow(*x, *n)?),
+        (Integer(x), Integer(n)) if *n >= 0 => Integer(int_pow(*x, n.unsigned_abs())?),
         (Integer(x), Integer(n)) => {
             if *x == 0 {
                 return fault("division by zero");
             }
-            rational(1, int_pow(*x, -n)? as i128)?
-        }
-        (Rational(p, q), Integer(n)) if *n >= 0 => {
-            rational(int_pow(*p, *n)? as i128, int_pow(*q, *n)? as i128)?
+            rational(1, int_pow(*x, n.unsigned_abs())? as i128)?
         }
         (Rational(p, q), Integer(n)) => {
-            rational(int_pow(*q, -n)? as i128, int_pow(*p, -n)? as i128)?
+            let e = n.unsigned_abs();
+            let (p, q) = (int_pow(*p, e)? as i128, int_pow(*q, e)? as i128);
+            if *n >= 0 {
+                rational(p, q)?
+            } else {
+                rational(q, p)?
+            }
         }
         (Gauss(..) | Quaternion(_), Integer(n)) => {
             let to = if matches!(a, Gauss(..)) && *n >= 0 {
@@ -453,10 +489,18 @@ fn pow(a: &Scalar, b: &Scalar) -> Computed<Scalar> {
             } else {
                 Level::Quaternion
             };
-            let base = widen(a, to);
+            // By squares: as many products as the exponent has bits.
+            let mut square = widen(a, to);
             let mut result = widen(&Integer(1), to);
-            for _ in 0..n.unsigned_abs() {
-                result = arith(Op::Mul, &result, &base)?;
+            let mut left = n.unsigned_abs();
+            while left > 0 {
+                if left & 1 == 1 {
+                    result = arith(Op::Mul, &result, &square)?;
+                }
+                left >>= 1;
+                if left > 0 {
+                    square = arith(Op::Mul, &square, &square)?;
+                }
             }
             if *n < 0 {
                 result = arith(Op::Div, &widen(&Integer(1), to), &result)?;
@@ -766,9 +810,15 @@ fn array_op(op: Op, a: &Value, b: &Value) -> Computed<Value> {
         (ArrayMul, Value::Array(x), Value::Array(y))
             if x.rank == Rank::Matrix && y.rank == Rank::Matrix =>
         {
-            let (rows, inner, cols) = (x.dims[0], x.dims[1], y.dims[1]);
-            if inner != y.dims[0] {
+            // A matrix declared without bounds has no dimensions yet.
+            let (&[rows, inner], &[same, cols]) = (x.dims.as_slice(), y.dims.as_slice()) else {
+                return fault("[*] multiplies matrices that have cells");
+            };
+            if inner != same {
                 return fault("[*] multiplies matrices whose shapes agree");
+            }
+            if inner == 0 {
+                return fault("[*] multiplies matrices that have cells");
             }
             let mut cells = Vec::with_capacity(rows * cols);
             for r in 0..rows {
@@ -911,6 +961,82 @@ mod tests {
         let Value::Many(values) = z else { panic!() };
         assert_eq!(values.len(), 12);
         assert_eq!(values[5].x, Scalar::Integer(60));
+    }
+
+    #[test]
+    fn powers_go_by_squares() {
+        use Scalar::*;
+        let slowly = |base: &Scalar, n: u32| {
+            let mut result = widen(&Integer(1), level(base).unwrap());
+            for _ in 0..n {
+                result = arith(Op::Mul, &result, base).unwrap();
+            }
+            result
+        };
+        let q = Quaternion(Box::new([0.5, 0.25, -0.5, 1.0]));
+        for n in 0..12 {
+            let g = Gauss(1, -2);
+            assert_eq!(pow(&g, &Integer(n as i64)).unwrap(), slowly(&g, n));
+            let (Quaternion(fast), Quaternion(slow)) =
+                (pow(&q, &Integer(n as i64)).unwrap(), slowly(&q, n))
+            else {
+                panic!()
+            };
+            assert!(fast.iter().zip(slow.iter()).all(|(x, y)| close(*x, *y)));
+        }
+        // 300 million products before; 29 now.
+        assert_eq!(
+            pow(&Gauss(0, 1), &Integer(300_000_000)).unwrap(),
+            Gauss(1, 0)
+        );
+        assert!(pow(&Gauss(1, 1), &Integer(300_000_000)).is_err());
+    }
+
+    #[test]
+    fn the_smallest_integer_is_an_error_not_a_panic() {
+        use Scalar::*;
+        let min = i64::MIN;
+        assert!(pow(&Rational(2, 3), &Integer(min)).is_err());
+        assert!(pow(&Integer(2), &Integer(min)).is_err());
+        assert_eq!(pow(&Integer(-1), &Integer(i64::MAX)).unwrap(), Integer(-1));
+        assert_eq!(pow(&Integer(1), &Integer(min)).unwrap(), Rational(1, 1));
+        let g = Gauss(min, min);
+        assert!(arith(Op::Mul, &g, &g).is_err());
+        assert!(arith(Op::Div, &g, &g).is_err());
+    }
+
+    #[test]
+    fn an_array_has_a_size() {
+        assert_eq!(shape(&[]).unwrap(), (vec![], vec![], 0));
+        assert_eq!(
+            shape(&[(0, 9), (1, 3)]).unwrap(),
+            (vec![0, 1], vec![10, 3], 30)
+        );
+        assert!(shape(&[(1, CELLS as i64)]).is_ok());
+        for bounds in [
+            vec![(3, 2)],
+            vec![(0, CELLS as i64)],
+            vec![(1, i64::MAX)],
+            vec![(i64::MIN, i64::MAX)],
+            vec![(1, 1 << 32), (1, 1 << 32)],
+        ] {
+            assert!(shape(&bounds).is_err(), "{bounds:?}");
+        }
+    }
+
+    #[test]
+    fn a_matrix_without_cells_does_not_multiply() {
+        let matrix = |dims: &[usize]| {
+            Value::Array(Box::new(Array {
+                rank: Rank::Matrix,
+                lows: vec![1; dims.len()],
+                dims: dims.to_vec(),
+                cells: Vec::new().into(),
+            }))
+        };
+        for (x, y) in [(&[2, 0][..], &[0, 2][..]), (&[], &[])] {
+            assert!(binary(Op::ArrayMul, &matrix(x), &matrix(y)).is_err());
+        }
     }
 
     #[test]

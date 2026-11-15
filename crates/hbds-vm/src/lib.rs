@@ -26,6 +26,13 @@ use hbds_values::{Fault, Fz, List, Op, Scalar, Value};
 /// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
 const DEPTH: usize = 64;
 
+/// How many instructions a daemon's session or process may run without
+/// passing a statement (decision 3): a turn ends at a statement only, so
+/// that a loop that passes none would hold the executor for good. The
+/// compiler writes one such loop, an EACH whose filter refuses: some
+/// twelve million elements refused in a row come to this.
+pub const STATEMENT: u32 = 100_000_000;
+
 /// The language a run's code is in: it compiles the code the store
 /// keeps, and tells SES what a rule's part uses.
 pub trait Language: hbds_acode::Language + hbds_rules::Compiler {}
@@ -182,6 +189,8 @@ struct Owned {
     bodies: HashMap<String, usize>,
     budget: Option<u64>,
     statements: u64,
+    /// Instructions run since the last statement began.
+    since: u32,
     frames: Vec<Frame>,
     stack: Vec<Item>,
     /// Transactions begun and not yet ended.
@@ -262,6 +271,7 @@ impl Session {
             bodies: HashMap::new(),
             budget,
             statements: 0,
+            since: 0,
             frames: Vec::new(),
             stack: Vec::new(),
             open: 0,
@@ -622,6 +632,8 @@ struct Frame {
     this: Option<AdtRef>,
     /// How many CONDs and ACTIONs this frame runs within.
     depth: usize,
+    /// How many calls this frame runs within, on its fiber.
+    calls: usize,
     /// Whether this frame runs code the store calls back, or code that
     /// code calls: it runs to completion.
     within: bool,
@@ -915,6 +927,8 @@ impl<'r> Vm<'r> {
                 Item::Ref(..) | Item::Shared(_) => None,
             };
         }
+        // A callback runs within the calls of what it is called from.
+        let calls = self.o.frames.last().map_or(0, |f| f.calls);
         self.o.frames.push(Frame {
             module,
             pc: 0,
@@ -923,6 +937,7 @@ impl<'r> Vm<'r> {
             prefix,
             this,
             depth,
+            calls,
             within,
         });
     }
@@ -1627,6 +1642,13 @@ impl<'r> Vm<'r> {
             }
             self.o.frames.last_mut().expect("a frame").pc += 1;
             let span = m.spans[pc];
+            self.o.since = self.o.since.saturating_add(1);
+            if self.o.since > STATEMENT && self.o.mode != Mode::Standalone {
+                return Err(RuntimeError {
+                    span,
+                    message: format!("more than {STATEMENT} instructions without a statement"),
+                });
+            }
             if let Some(fuel) = &mut self.o.fuel {
                 if *fuel == 0 {
                     return Err(RuntimeError {
@@ -2077,6 +2099,7 @@ impl<'r> Vm<'r> {
         match i {
             Instr::Stmt => {
                 self.sim.follow(self.store);
+                self.o.since = 0;
                 self.o.statements += 1;
                 if self.o.budget.is_some_and(|b| self.o.statements > b) {
                     return Err(BUDGET_SPENT.into());
@@ -2148,20 +2171,8 @@ impl<'r> Vm<'r> {
             Instr::InitArray(s, rank, n) => {
                 let bounds = self.pop_integers(2 * n)?;
                 let fill = self.pop();
-                let (mut lows, mut dims) = (Vec::new(), Vec::new());
-                for b in bounds.chunks(2) {
-                    let (low, high) = (b[0], b[1]);
-                    if high < low {
-                        return Err(format!("the bounds {low}:{high} are empty").into());
-                    }
-                    lows.push(low);
-                    dims.push((high - low + 1) as usize);
-                }
-                let size = if dims.is_empty() {
-                    0
-                } else {
-                    dims.iter().product()
-                };
+                let bounds: Vec<(i64, i64)> = bounds.chunks(2).map(|b| (b[0], b[1])).collect();
+                let (lows, dims, size) = hbds_values::shape(&bounds).map_err(fault)?;
                 let a = Value::Array(Box::new(hbds_values::Array {
                     rank: *rank,
                     lows,
@@ -2304,8 +2315,12 @@ impl<'r> Vm<'r> {
             }
             Instr::Call(callee, n) => {
                 let args = self.o.stack.split_off(self.o.stack.len() - n);
-                let within = self.frame().within;
+                let (within, calls) = (self.frame().within, self.frame().calls);
+                if calls >= hbds_core::CALLS {
+                    return Err(format!("calls nest more than {} deep", hbds_core::CALLS).into());
+                }
                 self.enter(*callee, args, None, 0, within);
+                self.o.frames.last_mut().expect("a frame").calls = calls + 1;
             }
             Instr::Result => return Ok(Next::Return(Some(Box::new(self.pop())))),
             Instr::Return => return Ok(Next::Return(None)),

@@ -22,6 +22,10 @@
 // can tell. And a bare name is one rule, whatever it designates: a
 // variable, a class, an object, an attribute or a link. Types and kinds are
 // the checker's.
+//
+// What no rule here can write: statements nest 64 deep, and an
+// expression's tree is at most 256 high (docs/adt81.md, "Decisions"). The
+// Rust parser refuses the rest.
 
 start: program | fragment
 

@@ -1,0 +1,9 @@
+-- Runtime error: an array of more cells than an array may have; the --
+-- product of the dimensions is counted, not left to wrap. Written for --
+-- the limits' tests. --
+
+PROGRAM E ;
+LOCAL m : MATRIX [1:4294967296, 1:4294967296] OF INTEGER ;
+BEGIN
+        PRINT "made"
+END ;

@@ -369,6 +369,12 @@ struct Ses {
 /// How deep CONDs and ACTIONs may nest, an ACTION's change running others.
 const DEPTH: usize = 64;
 
+thread_local! {
+    /// The calls under way on this thread, which runs one flow of
+    /// control: the VM's count on a fiber's frames.
+    static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A change that runs CONDs and ACTIONs (docs/hbds.md, "COND and ACTION").
 enum Invoked {
     Created(Id),
@@ -599,6 +605,26 @@ impl Machine {
 
     // Modules
 
+    /// A call a program writes, at `span`: [`call`](Machine::call) within
+    /// the limit on calls.
+    fn enter(
+        &self,
+        m: &Module,
+        args: Vec<Arg>,
+        prefix: Option<Value>,
+        span: Span,
+    ) -> Exec<Option<Value>> {
+        let calls = CALLS.get();
+        if calls >= hbds_core::CALLS {
+            let limit = hbds_core::CALLS;
+            return Err(error(span, format!("calls nest more than {limit} deep")));
+        }
+        CALLS.set(calls + 1);
+        let result = self.call(m, args, prefix, None);
+        CALLS.set(calls);
+        result
+    }
+
     fn call(
         &self,
         m: &Module,
@@ -658,8 +684,7 @@ impl Machine {
     /// An array of the declared shape, every cell `fill`. Without bounds,
     /// an array has no cells until a whole array is assigned to it.
     fn array(&self, shape: &Shape, fill: Value, f: &Frame, span: Span) -> Exec<Value> {
-        let mut lows = Vec::new();
-        let mut dims = Vec::new();
+        let mut bounds = Vec::new();
         for b in &shape.bounds {
             let end = |e: &Bound| -> Exec<i64> {
                 match e {
@@ -674,18 +699,9 @@ impl Machine {
                     }
                 }
             };
-            let (low, high) = (end(&b.low)?, end(&b.high)?);
-            if high < low {
-                return Err(error(span, format!("the bounds {low}:{high} are empty")));
-            }
-            lows.push(low);
-            dims.push((high - low + 1) as usize);
+            bounds.push((end(&b.low)?, end(&b.high)?));
         }
-        let size = if dims.is_empty() {
-            0
-        } else {
-            dims.iter().product()
-        };
+        let (lows, dims, size) = at(hbds_values::shape(&bounds), span)?;
         Ok(Value::Array(Box::new(value::Array {
             rank: value::rank(shape.rank),
             lows,
@@ -1462,7 +1478,7 @@ impl Machine {
                     ));
                 };
                 let args = self.args(m, c, f)?;
-                self.call(m, args, None, None).map(|_| ())
+                self.enter(m, args, None, c.name.span).map(|_| ())
             }
             StmtKind::Resume(c) => self.resume(c, f),
             StmtKind::Read(vs) => {
@@ -1612,7 +1628,7 @@ impl Machine {
                 ));
             }
             let args = self.args(m, c, f)?;
-            let v = self.call(m, args, None, None)?;
+            let v = self.enter(m, args, None, c.name.span)?;
             return Ok(v.expect("a function's result"));
         }
         if !builtins::is_function(&c.name.key) {
@@ -3045,7 +3061,7 @@ impl Machine {
                 ));
             }
             let args = self.args(m, c, f)?;
-            let v = self.call(m, args, Some(prefix), None)?;
+            let v = self.enter(m, args, Some(prefix), c.name.span)?;
             return Ok(v.expect("a functor's result"));
         }
         let Some(functor) = builtins::functor(&c.name.key) else {

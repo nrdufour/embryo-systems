@@ -215,7 +215,10 @@ flowchart TD
 
 A run is one transaction, refused whole by an error, or past 10 000 tries
 ("CHAV does not converge"). A change to nothing new triggers nothing, and
-the values a rule's PREMISES asked for do not put it back.
+the values a rule's PREMISES asked for do not put it back. A rule's part
+may call CHAV or HYPOCHAV, a run within the run, 64 deep at most as
+ACTIONs are ("CHAV nests too deep", decided 2026-11-15): without a
+limit, a rule whose YES chains again overflowed the stack.
 `CALL HYPOCHAV("statements", "RULES", ...)` first runs the statements,
 whose facts are hypothetical; the rules they trigger go before all others,
 and what those establish is hypothetical in turn (page 107). It prints

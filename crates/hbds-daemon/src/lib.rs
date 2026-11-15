@@ -22,6 +22,7 @@ use std::io::{self, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 use hbds_acode::Unit;
 use hbds_gtad::Store;
@@ -35,6 +36,9 @@ use hbds_vm::{Agent, Bound, Language, Sequencing, Session, Turn};
 
 /// The executor's stack: the VM's, for code the store calls back.
 const STACK: usize = 256 << 20;
+
+/// How long a client has to send its request, between two reads.
+const REQUEST: Duration = Duration::from_secs(30);
 
 /// How long an idle executor waits before it looks at the journal again.
 const IDLE: std::time::Duration = std::time::Duration::from_millis(100);
@@ -410,9 +414,15 @@ fn connection(
 ) -> io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
+    // A request arrives whole within the time, or its thread is given
+    // back; a WebSocket, once open, may stay silent as long as it likes.
+    writer.set_read_timeout(Some(REQUEST))?;
     let Some(request) = Request::read(&mut reader)? else {
         return Ok(());
     };
+    if hbds_http::is_upgrade(&request) {
+        writer.set_read_timeout(None)?;
+    }
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/store") => {
             let (reply, dump) = mpsc::channel();
@@ -532,8 +542,9 @@ fn feed(
             }
         }
     });
+    let mut partial = hbds_http::Partial::default();
     while !matches!(
-        hbds_http::read_message(&mut reader),
+        hbds_http::read_message(&mut reader, &mut partial),
         Err(_) | Ok(Message::Close)
     ) {}
     let _ = reader.get_ref().shutdown(std::net::Shutdown::Both);
@@ -588,8 +599,15 @@ fn session(
     let mut lines = Some(lines);
     // The executor's events, written as they come, on a thread of their
     // own: the client's frames are read here meanwhile.
-    let mut out = writer.try_clone()?;
+    // One frame at a time on the socket: the reader's pongs go between
+    // the writer's frames, never inside one.
+    let out = Arc::new(Mutex::new(writer));
+    let send = |out: &Mutex<UnixStream>, m: Message| {
+        hbds_http::write_message(&mut *out.lock().unwrap(), &m, false)
+    };
+    let writer = out.clone();
     let write = std::thread::spawn(move || {
+        let out = writer;
         for e in from_executor {
             // Done after the sync: the client hears nothing that the
             // journal could still lose what came before.
@@ -597,37 +615,37 @@ fn session(
                 && let Err(failure) = d.wait(e.after)
             {
                 let end = What::End(Some(failure)).json().to_string();
-                let _ = hbds_http::write_message(&mut out, &Message::Text(end), false);
-                let _ = hbds_http::write_message(&mut out, &Message::Close, false);
+                let _ = send(&out, Message::Text(end));
+                let _ = send(&out, Message::Close);
                 return;
             }
             let end = matches!(e.what, What::End(_));
             let text = e.what.json().to_string();
-            if hbds_http::write_message(&mut out, &Message::Text(text), false).is_err() {
+            if send(&out, Message::Text(text)).is_err() {
                 return;
             }
             if end {
-                let _ = hbds_http::write_message(&mut out, &Message::Close, false);
+                let _ = send(&out, Message::Close);
                 return;
             }
         }
         // The executor is gone without a word: the client hears it.
         let gone = What::End(Some("the daemon stopped running this session".into()));
-        let _ = hbds_http::write_message(&mut out, &Message::Text(gone.json().to_string()), false);
-        let _ = hbds_http::write_message(&mut out, &Message::Close, false);
-        let _ = out.shutdown(std::net::Shutdown::Both);
+        let _ = send(&out, Message::Text(gone.json().to_string()));
+        let _ = send(&out, Message::Close);
+        let _ = out.lock().unwrap().shutdown(std::net::Shutdown::Both);
     });
+    let mut partial = hbds_http::Partial::default();
     let mut events = Some(events);
     loop {
-        let message = match hbds_http::read_message(&mut reader) {
+        let message = match hbds_http::read_message(&mut reader, &mut partial) {
             Ok(m) => m,
             Err(_) => Message::Close,
         };
         let frame = match message {
             Message::Text(t) => Json::parse(&t).ok(),
             Message::Ping(p) => {
-                let mut w = writer.try_clone()?;
-                hbds_http::write_message(&mut w, &Message::Pong(p), false)?;
+                send(&out, Message::Pong(p))?;
                 continue;
             }
             Message::Close => break,

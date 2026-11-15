@@ -157,6 +157,18 @@ specification and the gate's other half. `tests/cli.rs` checks the
 command's wiring, a store kept by one engine read by the other. Step 4
 is done but for interned names (decision 11).
 
+Calls nest 1000 deep (2026-11-15), in one flow of control: the main
+program, a coroutine, a process's body, each counted apart, and the code
+the store calls back within what it is called from. A recursion without
+end ate the memory on the VM, whose frames are data, and overflowed the
+reference's stack, so that depth 200 000 ran on one and aborted on the
+other: one limit (`hbds_core::CALLS`), the same error at the same place
+on both. 1000 is what the reference's stack takes with room to spare in
+a debug build, about 70 KB a call; the VM would go a hundred times
+further. Not chosen: a limit for each engine, the gate then blind where
+they differ; the reference on a larger stack, which moves the abort and
+keeps it.
+
 ### 3. Fibers, and a sequential world with threads around it
 
 Everything that runs as its own flow of control is a **fiber**: the main
@@ -224,6 +236,24 @@ journal hear that its thread is gone, rather than wait for good. A pace
 is no way to get there: its factor is a finite number, and a hold too
 far for the clock to count is simply not due yet.
 
+The limit on a statement is built (2026-11-15): in the daemon, a
+session or a process that runs more than 100 000 000 instructions
+without passing a statement is refused, its statement whole
+(`hbds_vm::STATEMENT`). A turn ends, and the budget is counted, at a
+statement only; a client's A-code need pass none, and the verifier
+cannot ask for it: one `jump` to itself held the executor for good, no
+kill ever read. The compiler's own code passes a statement in every
+loop but one, an EACH whose filter refuses, eight instructions an
+element: the `language` benchmark showed it, refused at a limit of a
+million. Hence a hundred million, a second or so of the executor: an
+EACH that refuses twelve million elements in a row is over it, as CHAV
+is past 10 000 tries. Standalone there is no limit, as above: nobody
+else waits. Not chosen: a turn ending at any instruction, which a
+callback and an open transaction forbid; a statement counted at each
+element an EACH refuses, which changes what both engines count and
+where reflexes run; the verifier refusing a loop without a statement,
+a rule on what code looks like where the machine counts what it does.
+
 ### 4. Values compute as HBDS says, and A-code carries it
 
 What the front end compiles away does not reach the runtime: control flow
@@ -248,6 +278,19 @@ conversions to SPECIFY's `Base`; ADT'81 maps its operators onto them in
 `Op` prints as the print writes it, for messages. UNION, INTER and COMPL
 stay the list engine's, so that hbds-lists can take SIGMA's addition from
 hbds-values without a cycle. Values' text was already hbds-core's.
+
+Values have edges, and each is an error (2026-11-15). An array has at
+most 16 777 216 cells (`hbds_values::CELLS`, 512 MB of them), its size
+counted without wrapping: `VECTOR [1:9223372036854775807]` passed the
+checker and panicked. A Gauss integer or a quaternion to an integer
+power goes by squares, as many products as the exponent has bits, where
+it multiplied as many times as the exponent says, 45 s for
+`q ^ 300000000`. The smallest integer as an exponent, and a product of
+Gauss integers past what 128 bits hold, are overflows, not panics in a
+debug build and wrong numbers in a release one. Matrices without cells,
+declared without bounds, do not multiply. Not chosen: no limit on
+arrays, a size that fits the memory being the machine's to know: the
+error then is the allocator's abort.
 
 ### 5. Persistence: exact processes, compaction, group commit
 
@@ -493,6 +536,21 @@ Since (2026-11-14): an entry that asks for a line (READ, a dialog's
 question) gets a field under it, its line sent as `{"input": LINE}`,
 "end input" as `{"eof": true}`; it had its input ended at once. The
 page's dialogs start that way (docs/hbds.md, "Dialog").
+
+The wire has limits (2026-11-15). JSON nests 64 deep: 200 000 `[` in a
+`POST /pace` overflowed the stack and ended the daemon. A request's
+first line and headers fit 64 KiB together, where a line without an end
+was read for good; a WebSocket message fits 64 MiB, as a body does,
+whole or in fragments, which had no limit together; a control frame is
+whole and at most 125 bytes (RFC 6455, 5.5). A request arrives within
+30 s between two reads or its thread is given back; a WebSocket, once
+open, may stay silent. Two defects went with them: a ping between the
+fragments of a message dropped those already read, now kept for the
+read that follows; and a session's pong was written from the reader's
+thread while the writer's wrote, now each a frame at a time under one
+lock. Not chosen: a limit on connections, each still a thread: with the
+socket's permissions, who connects is already chosen, and a client that
+holds a session open and silent is what a session is.
 
 ### 9. Standalone builds carry what they need
 

@@ -12,6 +12,11 @@ pub mod value;
 
 pub type Id = u64;
 
+/// How deep calls may nest in one flow of control: the main program, a
+/// coroutine, a process's body. The same on every engine that runs
+/// modules (docs/architecture.md, decision 2).
+pub const CALLS: usize = 1000;
+
 /// An a.d.t., by its id: the six basic ones (page 46).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AdtRef {

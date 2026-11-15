@@ -38,6 +38,7 @@ impl Json {
         let mut p = Parser {
             s: text.as_bytes(),
             i: 0,
+            depth: 0,
         };
         let v = p.value()?;
         p.space();
@@ -97,9 +98,14 @@ impl fmt::Display for Json {
     }
 }
 
+/// How deep arrays and objects may nest: the daemon's frames nest two.
+const DEPTH: usize = 64;
+
 struct Parser<'a> {
     s: &'a [u8],
     i: usize,
+    /// The arrays and objects open around the value being read.
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -123,6 +129,19 @@ impl Parser<'_> {
 
     fn value(&mut self) -> Result<Json, String> {
         self.space();
+        if matches!(self.s.get(self.i), Some(b'{' | b'[')) {
+            if self.depth == DEPTH {
+                return Err(format!("JSON: nested more than {DEPTH} deep at {}", self.i));
+            }
+            self.depth += 1;
+            let v = self.single();
+            self.depth -= 1;
+            return v;
+        }
+        self.single()
+    }
+
+    fn single(&mut self) -> Result<Json, String> {
         match self.s.get(self.i) {
             Some(b'{') => {
                 self.i += 1;
@@ -280,6 +299,17 @@ mod tests {
         assert_eq!(v.get("b").and_then(Json::as_str), Some(expected));
         let pair = Json::parse(&format!("\"\\u{}\\u{}\"", "d834", "dd1e")).unwrap();
         assert_eq!(pair, Json::String("\u{1d11e}".into()));
+    }
+
+    #[test]
+    fn nesting_has_a_limit() {
+        let nested = |n: usize| "[".repeat(n) + &"]".repeat(n);
+        assert!(Json::parse(&nested(64)).is_ok());
+        let e = Json::parse(&nested(65)).unwrap_err();
+        assert!(e.contains("nested more than 64 deep at 64"), "{e}");
+        // What aborted the daemon: no stack to overflow now.
+        assert!(Json::parse(&"[".repeat(200_000)).is_err());
+        assert!(Json::parse(&"{\"a\":".repeat(200_000)).is_err());
     }
 
     #[test]
