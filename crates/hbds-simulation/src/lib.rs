@@ -90,6 +90,7 @@ pub enum When {
 }
 
 /// The time, the sequencing set, and each agent's state and clock.
+#[derive(Clone)]
 pub struct Sequencing {
     now: f64,
     /// Due times, in order; first in, first out among equal times.
@@ -106,6 +107,10 @@ pub struct Sequencing {
     /// object, and the number the next one takes.
     reflexes: BTreeMap<u64, (Id, Id)>,
     next_reflex: u64,
+    /// The set as it was before its first change after a snapshot of the
+    /// store's, by the snapshot's number, in order: what it goes back to
+    /// when the store does (decision 7). None outside a transaction.
+    copies: Vec<(u64, Sequencing)>,
 }
 
 impl Default for Sequencing {
@@ -129,6 +134,7 @@ impl Sequencing {
             engaged: BTreeSet::new(),
             reflexes: BTreeMap::new(),
             next_reflex: 1,
+            copies: Vec::new(),
         }
     }
 
@@ -144,6 +150,41 @@ impl Sequencing {
             engaged: BTreeSet::new(),
             reflexes: BTreeMap::new(),
             next_reflex: 1,
+            copies: Vec::new(),
+        }
+    }
+
+    /// Goes back where the store went: a statement refused, or a
+    /// rollback, undoes what it did to the set with what it did to the
+    /// model. Asked before the set is read or changed; costs nothing
+    /// when the store undid nothing.
+    pub fn follow(&mut self, store: &mut Store) {
+        if let Some(stamp) = store.take_undone()
+            && let Some(i) = self.copies.iter().position(|(t, _)| *t >= stamp)
+        {
+            let mut copies = std::mem::take(&mut self.copies);
+            copies.truncate(i + 1);
+            *self = copies.pop().expect("found").1;
+            self.copies = copies;
+        }
+        if !self.copies.is_empty() {
+            // A transaction ended takes its copies with it.
+            let began = store.began().unwrap_or(u64::MAX);
+            self.copies.retain(|(t, _)| *t >= began);
+        }
+    }
+
+    /// Before a change to the set: inside a transaction, the set as it
+    /// is now is kept, once for each snapshot of the store's, for
+    /// [`follow`](Sequencing::follow) to go back to.
+    pub fn changing(&mut self, store: &mut Store) {
+        self.follow(store);
+        let stamp = store.stamp();
+        if store.began().is_some() && self.copies.last().is_none_or(|(t, _)| *t != stamp) {
+            let copies = std::mem::take(&mut self.copies);
+            let copy = self.clone();
+            self.copies = copies;
+            self.copies.push((stamp, copy));
         }
     }
 
@@ -564,6 +605,7 @@ impl Sequencing {
             engaged,
             reflexes,
             next_reflex,
+            copies: Vec::new(),
         })
     }
 }

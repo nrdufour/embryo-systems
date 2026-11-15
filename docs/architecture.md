@@ -289,7 +289,8 @@ hash and its place there) and the sequencing set (`Change::Sequencing`).
 A crash in the middle of a step loses the step whole, which then runs
 again from the last pause: nothing runs twice. A client hears nothing
 before the write that holds its own; compaction waits while a step is
-held. A client's change to the set is kept as it makes it. A restarted
+held. A client's change to the set is kept as it makes it, and undone with
+its statement if that is refused (decision 7). A restarted
 daemon loads its store's units, then the set and the fibers, the
 clients' agents dropped: every process resumes where it paused.
 `tests/daemon.rs` kills a daemon in the middle of a counting process's
@@ -360,6 +361,24 @@ keeps its changes copies one path. At the top rung of `store`, 4000
 objects, the entries copied fall from 16 016 001 to 271 476 and the
 time from 3.2 s to 0.9 s here; growth stays x4, the lookups still
 scanning. Associations stay a `Vec`, which no benchmark uses.
+
+The sequencing set is part of the transaction (2026-11-15). ACTIVATE,
+CANCEL, KILL, DELAY and a delayed reflex's launch change the set, which
+lives beside the store, not in it: a statement refused, and HYPOCHAV's
+rollback, put the store back and left the set as changed, so that a
+process activated by a refused ACTION ran all the same, or was
+dispatched when its object no longer existed. Now the store numbers its
+snapshots (a transaction's beginning, a savepoint) and remembers the
+earliest it was put back to; the set keeps a copy of itself before its
+first change after each snapshot, and goes back to the right one when
+it sees the store went back (`Sequencing::follow`, asked at each
+statement, at each turn, and before each change). A statement that does
+not touch the set copies nothing; one that does copies it once, whole.
+Not chosen: telling the set at each `begin()` and `end()`, of which the
+VM alone has some twenty, the engines more, and one forgotten is this
+defect again; the set inside the store, which the dialog engine's state
+is, and which would be right if the set were only data: it is also who
+runs now.
 
 ### 8. The daemon's interface: our HTTP, one Unix socket
 

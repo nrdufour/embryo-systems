@@ -1144,3 +1144,32 @@ fn a_slow_pace_and_a_far_hold_leave_the_daemon_up() {
     let _ = far.kill();
     let _ = far.wait();
 }
+
+/// A process class, a passive process, and an ACTION that creates and
+/// activates one, activates the other, then does what a COND refuses.
+const REFUSING: &str = "program setup ;\nbegin\n        create \"w\" ; include \"w\" into \"process\" ; create \"w\" . \"n\" ;\n        create \"old\" [ \"w\" ] ;\n        let \"old\" [ \"w\" ] . \"n\" := 0 ;\n        create \"AREA\" ; create \"AREA\" . \"temp\" ; create \"AREA\" . \"level\" ;\n        create \"a1\" [ \"AREA\" ] ;\n        let \"AREA\" . \"level\" ' COND := \"THIS . \"\"level\"\" > 0\" ;\n        let \"AREA\" . \"temp\" ' ACTION := \"CREATE \"\"new\"\" [ \"\"w\"\" ] ; ACTIVATE \"\"new\"\" [ \"\"w\"\" ] ; ACTIVATE \"\"old\"\" [ \"\"w\"\" ] ; LET THIS . \"\"level\"\" := -1\" ;\n        print \"ready\"\nend ;\n";
+
+const REFUSED: &str = "program refused ;\nbegin\n        let \"a1\" [ \"AREA\" ] . \"temp\" := 3\nend ;\n\ncoroutine \"w\" ;\nbegin\n        let this . \"n\" := 1 ;\n        hold for 1\nend ;\n";
+
+#[test]
+fn a_refused_statement_activates_nothing() {
+    let daemon = Daemon::start("refused");
+    let setup = write("daemon-refused", "setup.adt", REFUSING);
+    let refused = write("daemon-refused", "refused.adt", REFUSED);
+    assert_eq!(within(spawn(daemon.client(&setup)), 20), "ready\n");
+    let out = spawn(daemon.client(&refused)).wait_with_output().unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains("the COND of AREA.level refuses"), "{err}");
+    // Time is free to go: neither process is in the set, and the one
+    // that was there before never ran.
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        daemon.get("/time"),
+        "{\"due\":[],\"now\":0,\"processes\":[]}\n"
+    );
+    let store = daemon.get("/store");
+    assert!(
+        store.contains("n = 0") && !store.contains("object new"),
+        "{store}"
+    );
+}

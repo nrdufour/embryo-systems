@@ -327,6 +327,7 @@ impl Session {
         };
         vm.o.slice = slice;
         vm.watch();
+        vm.sim.follow(vm.store);
         if let Mode::Client(id) = vm.o.mode {
             vm.sim.run_as(Agent::Client(id));
         }
@@ -363,6 +364,7 @@ impl Session {
         vm.o.slice = slice;
         vm.o.bound = bound;
         vm.watch();
+        vm.sim.follow(vm.store);
         match vm.kernel_turn() {
             Ok(turn) => turn,
             Err(e) => Turn::Failed(e),
@@ -436,6 +438,7 @@ impl Vm<'_> {
             for _ in 0..std::mem::take(&mut self.o.open) {
                 let _ = self.store.end(false);
             }
+            self.sim.follow(self.store);
             self.o.started = false;
             match exit? {
                 Exit::Returned(_) | Exit::End(End::Done) => {
@@ -496,6 +499,8 @@ impl Vm<'_> {
             for _ in 0..std::mem::take(&mut self.o.open) {
                 let _ = self.store.end(false);
             }
+            // The set goes back with the store, before the process ends.
+            self.sim.follow(self.store);
             if let Some(a) = self.o.running.take() {
                 self.sim.run_as(a);
                 let _ = self.sim.terminate();
@@ -1414,6 +1419,7 @@ impl<'r> Vm<'r> {
         &mut self,
         op: impl FnOnce(&mut Sequencing, hbds_simulation::Describe) -> Result<(), String>,
     ) -> Run<()> {
+        self.sim.changing(self.store);
         let store = &*self.store;
         let name = |a: Agent| match a {
             Agent::Main | Agent::Client(_) => "the main program".to_string(),
@@ -2010,6 +2016,7 @@ impl<'r> Vm<'r> {
     fn step(&mut self, i: &Instr, m: &Module, span: Span) -> Run<Next> {
         match i {
             Instr::Stmt => {
+                self.sim.follow(self.store);
                 self.o.statements += 1;
                 if self.o.budget.is_some_and(|b| self.o.statements > b) {
                     return Err(BUDGET_SPENT.into());
