@@ -2073,8 +2073,15 @@ impl Image {
     /// taken from, ids kept.
     pub fn changes(&self) -> Vec<Change> {
         let mut out = Vec::new();
+        self.each_change(&mut |c| out.push(c));
+        out
+    }
+
+    /// [`changes`](Image::changes), one at a time: what compaction writes
+    /// as it goes, holding none of them.
+    pub fn each_change(&self, f: &mut dyn FnMut(Change)) {
         for (&id, c) in self.classes.iter() {
-            out.push(Change::Class {
+            f(Change::Class {
                 id,
                 name: c.name.clone(),
                 kind: c.kind.clone(),
@@ -2082,11 +2089,11 @@ impl Image {
         }
         for (&id, c) in self.classes.iter() {
             for &hyper in &c.hyper {
-                out.push(Change::Include { class: id, hyper });
+                f(Change::Include { class: id, hyper });
             }
         }
         for (&id, a) in self.attributes.iter() {
-            out.push(Change::Attribute {
+            f(Change::Attribute {
                 id,
                 class: a.class,
                 name: a.name.clone(),
@@ -2104,7 +2111,7 @@ impl Image {
             if !first {
                 continue;
             }
-            out.push(Change::ClassLink {
+            f(Change::ClassLink {
                 id,
                 reverse: l.reverse,
                 from: l.from,
@@ -2114,7 +2121,7 @@ impl Image {
             });
         }
         for (&id, o) in self.objects.iter() {
-            out.push(Change::Object {
+            f(Change::Object {
                 id,
                 class: o.class,
                 name: o.name.clone(),
@@ -2122,7 +2129,7 @@ impl Image {
         }
         for (&(object, attribute), oa) in self.object_attributes.iter() {
             if let Some(value) = &oa.value {
-                out.push(Change::Set {
+                f(Change::Set {
                     object,
                     attribute,
                     value: value.clone(),
@@ -2131,7 +2138,7 @@ impl Image {
         }
         for (&id, l) in self.object_links.iter() {
             if id <= l.reverse {
-                out.push(Change::ObjectLink {
+                f(Change::ObjectLink {
                     id,
                     reverse: l.reverse,
                     class_link: l.class_link,
@@ -2172,7 +2179,7 @@ impl Image {
         );
         for (target, p) in carriers {
             if p.spec.is_some() || p.unit.is_some() || p.computed {
-                out.push(Change::Specify {
+                f(Change::Specify {
                     target,
                     spec: p.spec,
                     unit: p.unit.clone(),
@@ -2180,7 +2187,7 @@ impl Image {
                 });
             }
             for (name, code) in &p.properties {
-                out.push(Change::Property {
+                f(Change::Property {
                     target,
                     name: name.clone(),
                     language: code.language.clone(),
@@ -2189,10 +2196,10 @@ impl Image {
             }
         }
         for &(a, b) in &self.associations {
-            out.push(Change::Assoc { a, b });
+            f(Change::Assoc { a, b });
         }
         for (&(class_link, from, to), &m) in &self.modalities {
-            out.push(Change::Modality {
+            f(Change::Modality {
                 class_link,
                 from,
                 to,
@@ -2200,16 +2207,16 @@ impl Image {
             });
         }
         for (hash, text) in &self.modules {
-            out.push(Change::Module {
+            f(Change::Module {
                 hash: hash.clone(),
                 text: text.clone(),
             });
         }
         if let Some(text) = &self.fibers {
-            out.push(Change::Fibers { text: text.clone() });
+            f(Change::Fibers { text: text.clone() });
         }
         if let Some(text) = &self.sequencing {
-            out.push(Change::Sequencing { text: text.clone() });
+            f(Change::Sequencing { text: text.clone() });
         }
         let states = (self
             .classes
@@ -2239,10 +2246,9 @@ impl Image {
         );
         for (target, state) in states {
             if state != State::Active {
-                out.push(Change::State { target, state });
+                f(Change::State { target, state });
             }
         }
-        out
     }
 }
 

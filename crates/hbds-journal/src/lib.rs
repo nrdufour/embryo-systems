@@ -24,7 +24,7 @@
 //! transaction. Both are read as they meant, and rewritten as 3.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -42,6 +42,8 @@ use hbds_gtad::{Change, ClassKind, Error, Image, Modality, Recorder, State, Stor
 pub const VERSION: u32 = 3;
 
 const COMMIT: &str = "commit";
+/// The changes a compacted journal commits together.
+const CHUNK: u64 = 10_000;
 
 /// A transaction's lines: its changes, then `commit`.
 fn transaction(changes: &[Change]) -> (String, u64) {
@@ -66,20 +68,39 @@ impl Writer {
         Ok(())
     }
 
-    /// Replaces the journal, atomically, by one rebuilding the world from
-    /// `changes`: written beside it, synced, renamed over it, the
-    /// directory synced. Its lines.
-    fn rewrite(&mut self, changes: &[Change]) -> std::io::Result<u64> {
+    /// Replaces the journal, atomically, by one rebuilding the world in
+    /// `image`: written beside it, synced, renamed over it, the directory
+    /// synced. Its lines.
+    fn rewrite(&mut self, image: &Image) -> std::io::Result<u64> {
         let new = self.dir.join("journal.new");
-        // Line by line: the whole journal as one string would double
-        // what compaction holds.
+        // Each change written as it comes, a commit every CHUNK: replay
+        // holds a transaction until its commit, and the file is whole
+        // once renamed, so neither side holds the world twice.
         let mut file = BufWriter::new(File::create(&new)?);
         writeln!(file, "journal {VERSION}")?;
-        if !changes.is_empty() {
-            for c in changes {
-                writeln!(file, "{}", encode(c))?;
+        let (mut lines, mut open, mut failed) = (1, 0, None);
+        image.each_change(&mut |c| {
+            if failed.is_some() {
+                return;
             }
+            let mut put = || {
+                writeln!(file, "{}", encode(&c))?;
+                open += 1;
+                if open == CHUNK {
+                    writeln!(file, "{COMMIT}")?;
+                    lines += open + 1;
+                    open = 0;
+                }
+                Ok(())
+            };
+            failed = put().err();
+        });
+        if let Some(e) = failed {
+            return Err(e);
+        }
+        if open > 0 {
             writeln!(file, "{COMMIT}")?;
+            lines += open + 1;
         }
         file.into_inner().map_err(|e| e.into_error())?.sync_all()?;
         fs::rename(&new, self.dir.join("journal"))?;
@@ -87,11 +108,7 @@ impl Writer {
         self.file = OpenOptions::new()
             .append(true)
             .open(self.dir.join("journal"))?;
-        Ok(if changes.is_empty() {
-            1
-        } else {
-            changes.len() as u64 + 2
-        })
+        Ok(lines)
     }
 }
 
@@ -143,23 +160,39 @@ fn opened(dir: &Path) -> Result<Opened, Error> {
         TryLockError::Error(e) => io(e),
     })?;
     let path = dir.join("journal");
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+    // Read a line at a time: the whole journal as one string would sit
+    // beside the store it rebuilds.
+    let mut reader = match File::open(&path) {
+        Ok(f) => Some(BufReader::new(f)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(io(e)),
     };
     let mut warnings = Vec::new();
-    let complete = text.rfind('\n').map_or(0, |i| i + 1);
-    if complete < text.len() {
-        warnings.push(format!(
-            "the journal's last line was cut short, and is dropped: {:?}",
-            &text[complete..]
-        ));
-    }
-    let mut lines = text[..complete].lines().enumerate().peekable();
-    let version = match lines.peek() {
-        Some((_, first)) if first.starts_with("journal ") => {
-            let v = first["journal ".len()..].trim();
+    let mut store = Store::memory();
+    let mut pending = Vec::new();
+    let (mut version, mut empty, mut buf) = (1, true, String::new());
+    // Where the last whole transaction ends, in bytes, and in lines.
+    let (mut offset, mut kept, mut count) = (0, 0, 1);
+    for n in 0.. {
+        let Some(r) = &mut reader else { break };
+        buf.clear();
+        let read = r.read_line(&mut buf).map_err(io)?;
+        if read == 0 {
+            break;
+        }
+        empty = false;
+        let Some(line) = buf.strip_suffix('\n') else {
+            warnings.push(format!(
+                "the journal's last line was cut short, and is dropped: {buf:?}"
+            ));
+            break;
+        };
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        offset += read;
+        if n == 0
+            && let Some(v) = line.strip_prefix("journal ")
+        {
+            let v = v.trim();
             let v: u32 = v
                 .parse()
                 .map_err(|_| Error(format!("journal line 1: a version, not {v:?}")))?;
@@ -168,21 +201,12 @@ fn opened(dir: &Path) -> Result<Opened, Error> {
                     "the journal's version {v} is newer than this reader's, {VERSION}"
                 )));
             }
-            lines.next();
-            v
+            version = v;
+            if v >= 2 {
+                kept = offset;
+            }
+            continue;
         }
-        _ => 1,
-    };
-    let mut store = Store::memory();
-    let mut pending = Vec::new();
-    // Where the last whole transaction ends, in bytes, and in lines.
-    let mut offset = match version {
-        1 => 0,
-        _ => text.find('\n').map_or(0, |i| i + 1),
-    };
-    let (mut kept, mut count) = (offset, 1);
-    for (n, line) in lines {
-        offset += line.len() + 1;
         if version >= 2 && line == COMMIT {
             for c in pending.drain(..) {
                 store.replay(c);
@@ -205,6 +229,7 @@ fn opened(dir: &Path) -> Result<Opened, Error> {
             _ => pending.push(change),
         }
     }
+    drop(reader);
     if !pending.is_empty() {
         warnings.push(format!(
             "the journal's last transaction was not committed, and is dropped: {} change(s)",
@@ -222,8 +247,8 @@ fn opened(dir: &Path) -> Result<Opened, Error> {
         file,
     };
     // A new journal, or an older one, is written anew in this one's.
-    if version < VERSION || text.is_empty() {
-        count = writer.rewrite(&store.changes()).map_err(io)?;
+    if version < VERSION || empty {
+        count = writer.rewrite(&store.image()).map_err(io)?;
     }
     Ok(Opened {
         store,
@@ -253,7 +278,7 @@ pub fn open(dir: &Path) -> Result<(Store, Vec<String>), Error> {
 pub fn compact(dir: &Path) -> Result<(u64, u64), Error> {
     let io = |e: std::io::Error| Error(format!("{}: {e}", dir.display()));
     let mut o = opened(dir)?;
-    let after = o.writer.rewrite(&o.store.changes()).map_err(io)?;
+    let after = o.writer.rewrite(&o.store.image()).map_err(io)?;
     Ok((o.lines, after))
 }
 
@@ -474,9 +499,7 @@ fn journal_thread(mut writer: Writer, queue: Receiver<Job>, shared: Arc<Shared>,
                     if !flush(&mut batch, &mut count, &mut lines, &mut writer) {
                         return;
                     }
-                    let changes = image.changes();
-                    drop(image);
-                    match writer.rewrite(&changes) {
+                    match writer.rewrite(&image) {
                         Ok(n) => {
                             let mut p = shared.progress.lock().unwrap();
                             p.stats.compactions += 1;
