@@ -752,34 +752,29 @@ mod tests {
             Value::exact(Scalar::Float(1e300)),
             Value::exact(Scalar::Gauss(1, -2)),
             Value::exact(Scalar::Complex(1.5, -2.25)),
-            Value::exact(Scalar::Quaternion([1.0, 2.0, -3.0, 4.5])),
+            Value::exact(Scalar::Quaternion(Box::new([1.0, 2.0, -3.0, 4.5]))),
             Value::boolean(true),
             Value::exact(Scalar::Character('"')),
             Value::exact(Scalar::String("a \"quoted\" \\ line\nand (parens)".into())),
-            Value::One(Fz {
-                x: Scalar::Float(25.3),
-                appr: Some(0.37),
-                prob: Some(0.73),
-                subj: Some("conform; unexpected".into()),
-            }),
-            Value::One(Fz {
-                x: Scalar::Integer(1),
-                appr: None,
-                prob: Some(0.5),
-                subj: None,
-            }),
+            Value::One(Fz::new(
+                Scalar::Float(25.3),
+                Some(0.37),
+                Some(0.73),
+                Some("conform; unexpected".into()),
+            )),
+            Value::One(Fz::new(Scalar::Integer(1), None, Some(0.5), None)),
             Value::Many(vec![fz(Scalar::Integer(1)), fz(Scalar::Float(2.5))]),
             Value::List(List {
                 items: vec![Value::integer(1), Value::Adt(AdtRef::ObjectAttribute(3, 4))].into(),
                 cursor: 1,
                 circular: true,
             }),
-            Value::Array(Array {
+            Value::Array(Box::new(Array {
                 rank: Rank::Matrix,
                 lows: vec![0, -1],
                 dims: vec![1, 2],
                 cells: vec![Value::integer(1), Value::integer(2)].into(),
-            }),
+            })),
             Value::Adt(AdtRef::ClassLink(9)),
         ]
     }
@@ -827,16 +822,23 @@ mod tests {
                 2 => Scalar::Float(float(next)),
                 3 => Scalar::Gauss(next(100) as i64 - 50, next(100) as i64 - 50),
                 4 => Scalar::Complex(float(next), float(next)),
-                5 => Scalar::Quaternion([float(next), float(next), float(next), float(next)]),
+                5 => Scalar::Quaternion(Box::new([
+                    float(next),
+                    float(next),
+                    float(next),
+                    float(next),
+                ])),
                 6 => Scalar::Boolean(next(2) == 0),
                 7 => Scalar::Character(['a', '"', '\\', ' '][next(4) as usize]),
                 _ => Scalar::String(text(next).into()),
             };
-            let fz = |next: &mut dyn FnMut(u64) -> u64| Fz {
-                x: scalar(next),
-                appr: (next(3) == 0).then(|| float(next)),
-                prob: (next(3) == 0).then(|| next(100) as f64 / 100.0),
-                subj: (next(3) == 0).then(|| text(next)),
+            let fz = |next: &mut dyn FnMut(u64) -> u64| {
+                Fz::new(
+                    scalar(next),
+                    (next(3) == 0).then(|| float(next)),
+                    (next(3) == 0).then(|| next(100) as f64 / 100.0),
+                    (next(3) == 0).then(|| text(next)),
+                )
             };
             match next(if depth == 0 { 3 } else { 6 }) {
                 0 | 1 => Value::One(fz(next)),
@@ -850,7 +852,7 @@ mod tests {
                     cursor: next(4) as usize,
                     circular: next(2) == 0,
                 }),
-                _ => Value::Array(Array {
+                _ => Value::Array(Box::new(Array {
                     rank: Rank::Vector,
                     lows: vec![next(5) as i64 - 2],
                     dims: vec![2],
@@ -858,7 +860,7 @@ mod tests {
                         .map(|_| value(next, depth - 1))
                         .collect::<Vec<_>>()
                         .into(),
-                }),
+                })),
             }
         }
         for _ in 0..2000 {

@@ -686,12 +686,12 @@ impl Machine {
         } else {
             dims.iter().product()
         };
-        Ok(Value::Array(value::Array {
+        Ok(Value::Array(Box::new(value::Array {
             rank: value::rank(shape.rank),
             lows,
             dims,
             cells: vec![fill; size].into(),
-        }))
+        })))
     }
 
     fn args(&self, m: &Module, c: &Call, f: &mut Frame) -> Exec<Vec<Arg>> {
@@ -1902,7 +1902,7 @@ impl Machine {
         match found {
             Some(v) => {
                 if let Value::One(fz) = &v {
-                    self.read_fact(fz.prob);
+                    self.read_fact(fz.prob());
                 }
                 Ok(v)
             }
@@ -1938,7 +1938,7 @@ impl Machine {
                 stored(self.store.lock().unwrap().set(o, a, v.clone()), span)?;
                 self.trigger(Invoked::Set(o, a), &Frame::default(), span)?;
                 if let Value::One(fz) = &v {
-                    self.read_fact(fz.prob);
+                    self.read_fact(fz.prob());
                 }
                 return Ok(v);
             }
@@ -3019,7 +3019,7 @@ impl Machine {
     fn stamped(&self, v: Value) -> Value {
         match (self.ses.lock().unwrap().stamp, v) {
             (Some(p), Value::One(mut fz)) => {
-                fz.prob = Some(p);
+                fz.set_prob(Some(p));
                 Value::One(fz)
             }
             (_, v) => v,
@@ -3166,15 +3166,19 @@ pub fn literal(n: &FuzzyNumber) -> Computed<Fz> {
         Number::Real(Real::Float(f)) => Scalar::Float(f),
         Number::Imaginary(Real::Integer(i), _) => Scalar::Gauss(0, int(i)?),
         Number::Imaginary(Real::Float(f), Unit::I) => Scalar::Complex(0.0, f),
-        Number::Imaginary(Real::Float(f), Unit::J) => Scalar::Quaternion([0.0, 0.0, f, 0.0]),
-        Number::Imaginary(Real::Float(f), Unit::K) => Scalar::Quaternion([0.0, 0.0, 0.0, f]),
+        Number::Imaginary(Real::Float(f), Unit::J) => {
+            Scalar::Quaternion(Box::new([0.0, 0.0, f, 0.0]))
+        }
+        Number::Imaginary(Real::Float(f), Unit::K) => {
+            Scalar::Quaternion(Box::new([0.0, 0.0, 0.0, f]))
+        }
     };
-    Ok(Fz {
+    Ok(Fz::new(
         x,
-        appr: n.approximation.as_ref().map(real),
-        prob: n.probability.as_ref().map(real),
-        subj: n.opinion.clone(),
-    })
+        n.approximation.as_ref().map(real),
+        n.probability.as_ref().map(real),
+        n.opinion.clone(),
+    ))
 }
 
 pub fn constant(c: &Constant) -> Value {
@@ -3183,7 +3187,7 @@ pub fn constant(c: &Constant) -> Value {
         Constant::Float(x) => Scalar::Float(*x),
         Constant::Complex { re, im } => Scalar::Complex(*re, *im),
         Constant::Gauss { re, im } => Scalar::Gauss(*re, *im),
-        Constant::Quaternion(q) => Scalar::Quaternion(*q),
+        Constant::Quaternion(q) => Scalar::Quaternion(Box::new(*q)),
         Constant::Rational(n, d) => {
             value::rational(*n as i128, *d as i128).unwrap_or(Scalar::Rational(*n, 1))
         }
@@ -3196,24 +3200,22 @@ pub fn constant(c: &Constant) -> Value {
 pub fn math(key: &str, x: &Fz) -> Computed<Fz> {
     let integral = |fz: Fz| -> Computed<Fz> {
         match fz.x {
-            Scalar::Float(v) if v.abs() < 9.2e18 => Ok(Fz {
-                x: Scalar::Integer(v as i64),
-                appr: None,
-                ..fz
-            }),
+            Scalar::Float(v) if v.abs() < 9.2e18 => Ok(Fz::new(
+                Scalar::Integer(v as i64),
+                None,
+                fz.prob(),
+                fz.subj().map(str::to_string),
+            )),
             _ => Err(value::Fault("integer overflow".into())),
         }
     };
     match key {
         "SQRT" => value::real_function(x, f64::sqrt, |v| 0.5 / v.sqrt()),
         "ABS" => match x.x {
-            Scalar::Integer(i) => Ok(Fz {
-                x: Scalar::Integer(
-                    i.checked_abs()
-                        .ok_or_else(|| value::Fault("integer overflow".into()))?,
-                ),
-                ..x.clone()
-            }),
+            Scalar::Integer(i) => Ok(x.with(Scalar::Integer(
+                i.checked_abs()
+                    .ok_or_else(|| value::Fault("integer overflow".into()))?,
+            ))),
             _ => value::real_function(x, f64::abs, |_| 1.0),
         },
         "EXP" => value::real_function(x, f64::exp, f64::exp),

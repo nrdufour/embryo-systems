@@ -143,15 +143,15 @@ pub fn scalar(s: &Scalar) -> Term {
 }
 
 pub fn fuzzy(fz: &Fz) -> Term {
-    if fz.appr.is_none() && fz.prob.is_none() && fz.subj.is_none() {
+    if fz.is_exact() {
         return scalar(&fz.x);
     }
     list(vec![
         word("fz"),
         scalar(&fz.x),
-        optional(fz.appr.map(float)),
-        optional(fz.prob.map(float)),
-        optional(fz.subj.as_deref().map(text)),
+        optional(fz.appr().map(float)),
+        optional(fz.prob().map(float)),
+        optional(fz.subj().map(text)),
     ])
 }
 
@@ -290,7 +290,12 @@ impl<'t> Reader<'t> {
             "f" => Scalar::Float(self.parse()?),
             "g" => Scalar::Gauss(self.parse()?, self.parse()?),
             "x" => Scalar::Complex(self.parse()?, self.parse()?),
-            "q" => Scalar::Quaternion([self.parse()?, self.parse()?, self.parse()?, self.parse()?]),
+            "q" => Scalar::Quaternion(Box::new([
+                self.parse()?,
+                self.parse()?,
+                self.parse()?,
+                self.parse()?,
+            ])),
             "b" => Scalar::Boolean(self.parse()?),
             "ch" => {
                 let s = self.text()?;
@@ -317,12 +322,12 @@ impl<'t> Reader<'t> {
         let tag = s.word()?;
         let x = s.scalar(tag)?;
         s.end()?;
-        let fz = Fz {
+        let fz = Fz::new(
             x,
-            appr: r.optional(|r| r.parse())?,
-            prob: r.optional(|r| r.parse())?,
-            subj: r.optional(|r| r.text())?,
-        };
+            r.optional(|r| r.parse())?,
+            r.optional(|r| r.parse())?,
+            r.optional(|r| r.text())?,
+        );
         r.end()?;
         Ok(fz)
     }
@@ -360,12 +365,12 @@ impl<'t> Reader<'t> {
                 };
                 let lows = r.list()?.rest(|r| r.parse())?;
                 let dims = r.list()?.rest(|r| r.parse())?;
-                Value::Array(Array {
+                Value::Array(Box::new(Array {
                     rank,
                     lows,
                     dims,
                     cells: r.rest(|r| r.value())?.into(),
-                })
+                }))
             }
             _ => Value::Adt(r.adt_ref()?),
         };

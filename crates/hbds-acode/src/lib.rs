@@ -1078,10 +1078,12 @@ mod tests {
                     code: vec![
                         Instr::Stmt,
                         Instr::Const(Value::exact(Scalar::String("say \"hi\"".into()))),
-                        Instr::Const(Value::One(Fz {
-                            appr: Some(0.5),
-                            ..Fz::exact(Scalar::Float(2.25))
-                        })),
+                        Instr::Const(Value::One(Fz::new(
+                            Scalar::Float(2.25),
+                            Some(0.5),
+                            None,
+                            None,
+                        ))),
                         Instr::Op(Op::ArrayDot),
                         Instr::Leave(Leave::Next, vec![3, 7]),
                         Instr::Functor("SUBLIST".into(), "sublist".into(), 2, Some(0)),

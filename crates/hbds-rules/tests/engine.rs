@@ -60,7 +60,7 @@ impl Host for Fake {
                 .find_attribute(store.objects()[&o].class, &c[2])
                 .unwrap();
             match store.get(o, a) {
-                Some(Value::One(fz)) => reliability = reliability.min(fz.prob.unwrap_or(1.0)),
+                Some(Value::One(fz)) => reliability = reliability.min(fz.prob().unwrap_or(1.0)),
                 Some(_) => {}
                 None => holds = false,
             }
@@ -87,7 +87,7 @@ impl Host for Fake {
                 _ => c[3].parse().unwrap(),
             };
             let mut fz = Fz::exact(Scalar::Integer(n));
-            fz.prob = (reliability < 1.0).then_some(reliability);
+            fz.set_prob((reliability < 1.0).then_some(reliability));
             store.set(o, a, Value::One(fz)).map_err(|e| e.0)?;
         }
         Ok(())
@@ -332,14 +332,14 @@ fn reliability_is_the_rules_times_the_premises() {
         let o = object(&store, "A");
         let x = store.find_attribute(a, "x").unwrap();
         let mut fz = Fz::exact(Scalar::Integer(1));
-        fz.prob = Some(0.8);
+        fz.set_prob(Some(0.8));
         store.set(o, x, Value::One(fz)).unwrap();
     }
     chav(&mut w, &[]).unwrap();
     let Some(Value::One(fz)) = w.value("B", "y") else {
         panic!("no value")
     };
-    assert_eq!(fz.prob, Some(0.4));
+    assert_eq!(fz.prob(), Some(0.4));
 }
 
 #[test]
