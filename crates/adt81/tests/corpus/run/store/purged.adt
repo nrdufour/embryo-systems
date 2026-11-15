@@ -1,0 +1,60 @@
+-- PURGE leaves nothing behind (review of 2026-11-15): a hyperclass --
+-- purged is in no class's lineage, and its attributes' values are --
+-- gone from the objects that inherited them; a rule purged while it --
+-- waits on CHAV's agenda is not tried; a process purged while it --
+-- waits in the sequencing set does not run; a functor passes over an --
+-- object that is gone, as over a destroyed one. Written for the --
+-- store's tests. --
+
+PROGRAM PURGED ;
+LOCAL
+        towns : LIST OF OBJECT ;
+BEGIN
+        CREATE "TOWN", "PLACE" ;
+        CREATE "PLACE" . "size" ;
+        INCLUDE "TOWN" INTO "PLACE" ;
+        CREATE "Lyon" [ "TOWN" ], "Arles" [ "TOWN" ] ;
+        LET "Lyon" [ "TOWN" ] . "size" := 7 ;
+        PRINT "TOWN" ' CONTOF, "Lyon" [ "TOWN" ] . "size" ;
+        DESTROY "PLACE" ;
+        PURGE "PLACE" ;
+        PRINT "TOWN" ' CONTOF, "TOWN" ' OBJ ;
+        CREATE "PLACE" ;
+        CREATE "PLACE" . "size" ;
+        PRINT "TOWN" ' CONTOF, "TOWN" ' OBJ ' OATTN("size") ;
+
+        towns := "TOWN" ' OBJ ;
+        DESTROY "Lyon" [ "TOWN" ] ;
+        PURGE "Lyon" [ "TOWN" ] ;
+        PRINT towns, towns ' OBJOF ;
+
+        CREATE "STEPS" ;
+        INCLUDE "STEPS" INTO "RULE" ;
+        CREATE "first" [ "STEPS" ], "second" [ "STEPS" ] ;
+        LET "first" [ "STEPS" ] . "PRIORITY" := 9 ;
+        LET "first" [ "STEPS" ] ' YES :=
+            "DESTROY ""second"" [ ""STEPS"" ] ; PURGE ""second"" [ ""STEPS"" ] ; PRINT ""first""" ;
+        LET "second" [ "STEPS" ] ' YES := "PRINT ""second""" ;
+        CALL CHAV("STEPS") ;
+
+        CREATE "w" ;
+        INCLUDE "w" INTO "PROCESS" ;
+        CREATE "w1" [ "w" ], "w2" [ "w" ] ;
+        ACTIVATE "w1" [ "w" ] ;
+        ACTIVATE "w2" [ "w" ] ;
+        DESTROY "w1" [ "w" ] ;
+        PURGE "w1" [ "w" ] ;
+        HOLD FOR 2 ;
+        DESTROY "w2" [ "w" ] ;
+        PURGE "w2" [ "w" ] ;
+        HOLD FOR 2 ;
+        PRINT "after", TIME
+END ;
+
+COROUTINE "w" ;
+BEGIN
+        LOOP WHILE TRUE DO
+                PRINT THIS, "runs", TIME ;
+                HOLD FOR 1
+        ENDLOOP
+END ;

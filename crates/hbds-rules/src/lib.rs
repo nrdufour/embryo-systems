@@ -135,9 +135,15 @@ pub fn facts(store: &Store, uses: &Uses) -> Vec<AdtRef> {
 /// class attribute, an object link its class link.
 pub fn fact_of(store: &Store, r: AdtRef) -> AdtRef {
     match r {
-        AdtRef::Object(o) => AdtRef::Class(store.objects()[&o].class),
+        AdtRef::Object(o) => match store.objects().get(&o) {
+            Some(o) => AdtRef::Class(o.class),
+            None => r,
+        },
         AdtRef::ObjectAttribute(_, a) => AdtRef::ClassAttribute(a),
-        AdtRef::ObjectLink(l) => AdtRef::ClassLink(store.object_links()[&l].class_link),
+        AdtRef::ObjectLink(l) => match store.object_links().get(&l) {
+            Some(l) => AdtRef::ClassLink(l.class_link),
+            None => r,
+        },
         r => r,
     }
 }
@@ -435,9 +441,9 @@ struct Chainer<'h> {
     done: Run,
 }
 
-/// A rule's attribute, inherited from RULE.
+/// A rule's attribute, inherited from RULE; none if the rule is gone.
 fn attribute(store: &Store, rule: Id, name: &str) -> Option<Value> {
-    let a = store.find_attribute(store.objects()[&rule].class, name)?;
+    let a = store.find_attribute(store.objects().get(&rule)?.class, name)?;
     store.get(rule, a).cloned()
 }
 
@@ -521,6 +527,11 @@ impl<'h> Chainer<'h> {
             self.agenda.remove(&r);
             let urgent = self.urgent.remove(&r);
             self.changed.remove(&r);
+            // A rule another one purged, or that its statement undid,
+            // while it waited: gone, it is not tried.
+            if !self.host.store().exists(AdtRef::Object(r)) {
+                continue;
+            }
             self.try_rule(r, urgent)?;
         }
         if self.hypothetical.is_some() {

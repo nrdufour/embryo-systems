@@ -1304,6 +1304,15 @@ impl<'r> Vm<'r> {
                 return Ok(None);
             }
             Some(Agent::Process(p)) => {
+                if !self.store.exists(AdtRef::Object(p)) {
+                    // Purged since it was put in the set, or undone with
+                    // its statement: nothing to run.
+                    self.sim.forget(Agent::Process(p));
+                    if let Some(f) = self.o.processes.remove(&p) {
+                        self.o.fibers[f].state = FiberState::Ended;
+                    }
+                    return self.dispatch();
+                }
                 self.o.running = Some(Agent::Process(p));
                 if self.o.mode == Mode::Kernel {
                     let owner = self.sim.owner(Agent::Process(p));
@@ -2420,7 +2429,7 @@ impl<'r> Vm<'r> {
             }
             Instr::Designate(any) => {
                 let r = match self.pop() {
-                    Value::Adt(r) => r,
+                    Value::Adt(r) => stored(self.store.follow(r))?,
                     v => AdtRef::Class(self.class_named(&text_of(&v), *any)?),
                 };
                 self.push(Value::Adt(r));

@@ -1,0 +1,20 @@
+-- A value that refers to a purged a.d.t. stays as it was written, and --
+-- prints as what is left of it; following it is an error that names --
+-- it (docs/hbds.md, The model). --
+
+PROGRAM GONE ;
+LOCAL
+        a, b : OBJECT ;
+BEGIN
+        CREATE "TOWN" ; CREATE "TOWN" . "size" ; CREATE "TOWN" . "twin" ;
+        CREATE "Lyon" [ "TOWN" ], "Arles" [ "TOWN" ] ;
+        LET "Lyon" [ "TOWN" ] . "size" := 7 ;
+        a := "TOWN" ' OBJ ' FIRST ;
+        b := "TOWN" ' OBJ ' LAST ;
+        LET b . "twin" := a ;
+        DESTROY a ;
+        PURGE a ;
+        CREATE "Lyon" [ "TOWN" ] ;
+        PRINT a, b . "twin", a = "TOWN" ' OBJ ' LAST ;
+        PRINT a . "size"
+END ;
