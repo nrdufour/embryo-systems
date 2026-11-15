@@ -402,6 +402,23 @@ struct Snapshot {
     ix: Indexes,
 }
 
+/// The world as a store held it at one moment, apart from the store: its
+/// maps shared, so cheap to take, and sent to another thread to build
+/// [`changes`](Image::changes) while the store goes on.
+pub struct Image {
+    classes: PMap<Id, Class>,
+    attributes: PMap<Id, Attribute>,
+    objects: PMap<Id, Object>,
+    object_attributes: PMap<(Id, Id), ObjectAttribute>,
+    class_links: PMap<Id, ClassLink>,
+    object_links: PMap<Id, ObjectLink>,
+    associations: Vec<(AdtRef, AdtRef)>,
+    modalities: BTreeMap<(Id, Id, Id), Modality>,
+    modules: Vec<(String, String)>,
+    fibers: Option<String>,
+    sequencing: Option<String>,
+}
+
 /// What the model is looked up by (docs/architecture.md, decision 11),
 /// kept as it changes in `apply` and `purge` only: so a replay rebuilds
 /// it, and nothing journals it. Names are folded. A map of pairs to `()`
@@ -1894,8 +1911,166 @@ impl Store {
         }
     }
 
+    /// The world as it is now, to build its changes elsewhere.
+    pub fn image(&self) -> Image {
+        Image {
+            classes: self.classes.clone(),
+            attributes: self.attributes.clone(),
+            objects: self.objects.clone(),
+            object_attributes: self.object_attributes.clone(),
+            class_links: self.class_links.clone(),
+            object_links: self.object_links.clone(),
+            associations: self.associations.clone(),
+            modalities: self.modalities.clone(),
+            modules: self.modules.clone(),
+            fibers: self.fibers.clone(),
+            sequencing: self.sequencing.clone(),
+        }
+    }
+
     /// The shortest sequence of changes that rebuilds this store, ids
     /// kept: what compaction writes (docs/architecture.md, decision 5).
+    pub fn changes(&self) -> Vec<Change> {
+        self.image().changes()
+    }
+
+    pub fn dump(&self) -> String {
+        let mut out = String::new();
+        let state = |s: State| match s {
+            State::Active => String::new(),
+            s => format!(" ({})", state_name(s)),
+        };
+        let props = |p: &Props| {
+            let mut t = String::new();
+            if let Some(s) = &p.spec {
+                t += &format!(" : {s}");
+            }
+            if let Some(u) = &p.unit {
+                t += &format!(" UNIT ({u})");
+            }
+            if p.computed {
+                t += " COMPUTED";
+            }
+            for (k, code) in &p.properties {
+                t += &format!(" {k} ({}) = \"{}\"", code.language, code.text);
+            }
+            t
+        };
+        for (id, c) in &self.classes {
+            let kind = match &c.kind {
+                ClassKind::Class => String::new(),
+                ClassKind::Embryo => " embryo".into(),
+                ClassKind::Prototype(e) => format!(
+                    " prototype of {}",
+                    e.iter()
+                        .map(|e| self.describe(AdtRef::Class(*e)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                ClassKind::Structure(p) => {
+                    format!(" structure as {}", self.describe(AdtRef::Class(*p)))
+                }
+            };
+            out += &format!(
+                "class {}{kind}{}{}\n",
+                c.name,
+                state(c.state),
+                props(&c.props)
+            );
+            for h in &c.hyper {
+                out += &format!("  in {}\n", self.describe(AdtRef::Class(*h)));
+            }
+            for aid in self.attributes_of(*id) {
+                let a = &self.attributes[&aid];
+                out += &format!(
+                    "  attribute {}{}{}\n",
+                    a.name,
+                    state(a.state),
+                    props(&a.props)
+                );
+            }
+            for lid in self.class_links_from(*id) {
+                let l = &self.class_links[&lid];
+                out += &format!(
+                    "  link {}{}{}\n",
+                    self.describe(AdtRef::ClassLink(lid)),
+                    state(l.state),
+                    props(&l.props)
+                );
+            }
+            for oid in self.objects_of(*id) {
+                let o = &self.objects[&oid];
+                out += &format!("  object {}{}{}\n", o.name, state(o.state), props(&o.props));
+                for a in self.attributes_held(oid) {
+                    let oa = &self.object_attributes[&(oid, a)];
+                    let name = self.attributes.get(&a).map_or("?", |a| a.name.as_str());
+                    let value = oa
+                        .value
+                        .as_ref()
+                        .map_or(String::new(), |v| format!(" = {}", self.show(v)));
+                    out += &format!("    {name}{value}{}\n", props(&oa.props));
+                }
+                for lid in self.links_from(oid) {
+                    let l = &self.object_links[&lid];
+                    let p = l.probability.map_or(String::new(), |p| format!(" % {p}"));
+                    out += &format!(
+                        "    link {}{p}{}{}\n",
+                        self.describe(AdtRef::ObjectLink(lid)),
+                        state(l.state),
+                        props(&l.props)
+                    );
+                }
+            }
+        }
+        for (hash, _) in &self.modules {
+            out += &format!("module {hash}\n");
+        }
+        for (a, b) in &self.associations {
+            out += &format!("assoc {} WITH {}\n", self.describe(*a), self.describe(*b));
+        }
+        for (&key, &m) in &self.modalities {
+            out += &format!("{}\n", self.pair(key, m));
+        }
+        out
+    }
+
+    /// A value, a.d.t. by their names.
+    pub fn show(&self, v: &Value) -> String {
+        match v {
+            Value::Adt(r) => self.describe(*r),
+            Value::List(l) => format!(
+                "[{}]",
+                l.items
+                    .iter()
+                    .map(|v| self.show(v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            v => v.to_string(),
+        }
+    }
+}
+
+fn involves(a: AdtRef, r: AdtRef) -> bool {
+    a == r
+        || match (a, r) {
+            (AdtRef::ObjectAttribute(o, _), AdtRef::Object(x)) => o == x,
+            (AdtRef::ObjectAttribute(_, at), AdtRef::ClassAttribute(x)) => at == x,
+            _ => false,
+        }
+}
+
+pub fn state_name(s: State) -> &'static str {
+    match s {
+        State::Active => "active",
+        State::Hibernating => "hibernating",
+        State::Destroyed => "destroyed",
+    }
+}
+
+impl Image {
+    /// The shortest sequence of changes that rebuilds the store it was
+    /// taken from, ids kept.
     pub fn changes(&self) -> Vec<Change> {
         let mut out = Vec::new();
         for (&id, c) in self.classes.iter() {
@@ -2068,139 +2243,6 @@ impl Store {
             }
         }
         out
-    }
-
-    pub fn dump(&self) -> String {
-        let mut out = String::new();
-        let state = |s: State| match s {
-            State::Active => String::new(),
-            s => format!(" ({})", state_name(s)),
-        };
-        let props = |p: &Props| {
-            let mut t = String::new();
-            if let Some(s) = &p.spec {
-                t += &format!(" : {s}");
-            }
-            if let Some(u) = &p.unit {
-                t += &format!(" UNIT ({u})");
-            }
-            if p.computed {
-                t += " COMPUTED";
-            }
-            for (k, code) in &p.properties {
-                t += &format!(" {k} ({}) = \"{}\"", code.language, code.text);
-            }
-            t
-        };
-        for (id, c) in &self.classes {
-            let kind = match &c.kind {
-                ClassKind::Class => String::new(),
-                ClassKind::Embryo => " embryo".into(),
-                ClassKind::Prototype(e) => format!(
-                    " prototype of {}",
-                    e.iter()
-                        .map(|e| self.describe(AdtRef::Class(*e)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                ClassKind::Structure(p) => {
-                    format!(" structure as {}", self.describe(AdtRef::Class(*p)))
-                }
-            };
-            out += &format!(
-                "class {}{kind}{}{}\n",
-                c.name,
-                state(c.state),
-                props(&c.props)
-            );
-            for h in &c.hyper {
-                out += &format!("  in {}\n", self.describe(AdtRef::Class(*h)));
-            }
-            for aid in self.attributes_of(*id) {
-                let a = &self.attributes[&aid];
-                out += &format!(
-                    "  attribute {}{}{}\n",
-                    a.name,
-                    state(a.state),
-                    props(&a.props)
-                );
-            }
-            for lid in self.class_links_from(*id) {
-                let l = &self.class_links[&lid];
-                out += &format!(
-                    "  link {}{}{}\n",
-                    self.describe(AdtRef::ClassLink(lid)),
-                    state(l.state),
-                    props(&l.props)
-                );
-            }
-            for oid in self.objects_of(*id) {
-                let o = &self.objects[&oid];
-                out += &format!("  object {}{}{}\n", o.name, state(o.state), props(&o.props));
-                for a in self.attributes_held(oid) {
-                    let oa = &self.object_attributes[&(oid, a)];
-                    let name = self.attributes.get(&a).map_or("?", |a| a.name.as_str());
-                    let value = oa
-                        .value
-                        .as_ref()
-                        .map_or(String::new(), |v| format!(" = {}", self.show(v)));
-                    out += &format!("    {name}{value}{}\n", props(&oa.props));
-                }
-                for lid in self.links_from(oid) {
-                    let l = &self.object_links[&lid];
-                    let p = l.probability.map_or(String::new(), |p| format!(" % {p}"));
-                    out += &format!(
-                        "    link {}{p}{}{}\n",
-                        self.describe(AdtRef::ObjectLink(lid)),
-                        state(l.state),
-                        props(&l.props)
-                    );
-                }
-            }
-        }
-        for (hash, _) in &self.modules {
-            out += &format!("module {hash}\n");
-        }
-        for (a, b) in &self.associations {
-            out += &format!("assoc {} WITH {}\n", self.describe(*a), self.describe(*b));
-        }
-        for (&key, &m) in &self.modalities {
-            out += &format!("{}\n", self.pair(key, m));
-        }
-        out
-    }
-
-    /// A value, a.d.t. by their names.
-    pub fn show(&self, v: &Value) -> String {
-        match v {
-            Value::Adt(r) => self.describe(*r),
-            Value::List(l) => format!(
-                "[{}]",
-                l.items
-                    .iter()
-                    .map(|v| self.show(v))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            v => v.to_string(),
-        }
-    }
-}
-
-fn involves(a: AdtRef, r: AdtRef) -> bool {
-    a == r
-        || match (a, r) {
-            (AdtRef::ObjectAttribute(o, _), AdtRef::Object(x)) => o == x,
-            (AdtRef::ObjectAttribute(_, at), AdtRef::ClassAttribute(x)) => at == x,
-            _ => false,
-        }
-}
-
-pub fn state_name(s: State) -> &'static str {
-    match s {
-        State::Active => "active",
-        State::Hibernating => "hibernating",
-        State::Destroyed => "destroyed",
     }
 }
 

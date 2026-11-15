@@ -24,7 +24,7 @@
 //! transaction. Both are read as they meant, and rewritten as 3.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -34,7 +34,7 @@ use hbds_core::AdtRef;
 use hbds_core::terms::{
     Reader, Term, adt_ref, float, list, optional, read_terms, text, value, word, write_term,
 };
-use hbds_gtad::{Change, ClassKind, Error, Modality, Recorder, State, Store, state_name};
+use hbds_gtad::{Change, ClassKind, Error, Image, Modality, Recorder, State, Store, state_name};
 
 /// The journal's format, decision 10: older ones read, newer refused.
 /// Version 3 gives object attributes properties of their own; before it,
@@ -70,20 +70,28 @@ impl Writer {
     /// `changes`: written beside it, synced, renamed over it, the
     /// directory synced. Its lines.
     fn rewrite(&mut self, changes: &[Change]) -> std::io::Result<u64> {
-        let (body, lines) = transaction(changes);
         let new = self.dir.join("journal.new");
-        let mut file = File::create(&new)?;
-        file.write_all(format!("journal {VERSION}\n").as_bytes())?;
+        // Line by line: the whole journal as one string would double
+        // what compaction holds.
+        let mut file = BufWriter::new(File::create(&new)?);
+        writeln!(file, "journal {VERSION}")?;
         if !changes.is_empty() {
-            file.write_all(body.as_bytes())?;
+            for c in changes {
+                writeln!(file, "{}", encode(c))?;
+            }
+            writeln!(file, "{COMMIT}")?;
         }
-        file.sync_all()?;
+        file.into_inner().map_err(|e| e.into_error())?.sync_all()?;
         fs::rename(&new, self.dir.join("journal"))?;
         File::open(&self.dir)?.sync_all()?;
         self.file = OpenOptions::new()
             .append(true)
             .open(self.dir.join("journal"))?;
-        Ok(if changes.is_empty() { 1 } else { lines + 1 })
+        Ok(if changes.is_empty() {
+            1
+        } else {
+            changes.len() as u64 + 2
+        })
     }
 }
 
@@ -281,7 +289,7 @@ struct Shared {
 
 enum Job {
     Write(String, u64),
-    Compact(Vec<Change>),
+    Compact(Box<Image>),
 }
 
 /// The grouped journal's progress, shared: what a client waits on before
@@ -321,7 +329,8 @@ impl Durable {
 
     /// Compacts the journal if it has grown past twice what the last
     /// compaction wrote, and past `at` lines: `store` is the world as the
-    /// transactions submitted so far leave it.
+    /// transactions submitted so far leave it. The journal's thread builds
+    /// its changes from an image of it, so the store goes on meanwhile.
     pub fn maybe_compact(&self, store: &Store, at: u64) {
         {
             let mut p = self.shared.progress.lock().unwrap();
@@ -333,7 +342,7 @@ impl Durable {
             }
             p.compacting = true;
         }
-        let _ = self.jobs.send(Job::Compact(store.changes()));
+        let _ = self.jobs.send(Job::Compact(Box::new(store.image())));
     }
 }
 
@@ -461,10 +470,12 @@ fn journal_thread(mut writer: Writer, queue: Receiver<Job>, shared: Arc<Shared>,
                 }
                 // In the order it came: what was queued before is in
                 // `changes`, what comes after goes to the new file.
-                Job::Compact(changes) => {
+                Job::Compact(image) => {
                     if !flush(&mut batch, &mut count, &mut lines, &mut writer) {
                         return;
                     }
+                    let changes = image.changes();
+                    drop(image);
                     match writer.rewrite(&changes) {
                         Ok(n) => {
                             let mut p = shared.progress.lock().unwrap();
