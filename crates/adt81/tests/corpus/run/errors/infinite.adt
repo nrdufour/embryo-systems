@@ -1,0 +1,12 @@
+-- Runtime error: a float too large is an overflow, as an integer's is: --
+-- no infinity is stored, nor what two of them make. Written for the --
+-- tests of what both engines had wrong together. --
+
+PROGRAM E ;
+LOCAL x, y : FLOAT ;
+BEGIN
+        x := 10.0 ^ 308 ;
+        PRINT x > 1.0 ;
+        y := x * 10.0 ;
+        PRINT y - y = 5
+END ;

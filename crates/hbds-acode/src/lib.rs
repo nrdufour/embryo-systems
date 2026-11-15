@@ -16,7 +16,7 @@ pub use verify::depth_at;
 
 use std::fmt::{self, Write as _};
 
-use hbds_core::spec::Spec;
+use hbds_core::spec::{Fuzziness, Spec};
 use hbds_core::terms::{self, Reader, Term};
 use hbds_values::{Base, Computed, Fz, Op, Rank, Unary, Value};
 
@@ -39,7 +39,7 @@ impl Modal {
 }
 
 /// The version this crate writes and reads.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// What a unit needs from the language it was compiled from: its own
 /// functions (decision 4's support module), how it reads input, and its
@@ -130,6 +130,10 @@ pub struct Slot {
     pub name: String,
     pub ty: SlotType,
     pub constant: bool,
+    /// The fuzziness a value stored there may carry, for a slot of a
+    /// type: none unless declared (page 152). Version 1 did not say:
+    /// its slots take any.
+    pub fuzziness: Option<Fuzziness>,
 }
 
 /// What a value stored in a slot converts to.
@@ -254,6 +258,10 @@ pub enum Instr {
     /// Pops the bound, then the counter; pushes whether the counter is
     /// within it, as the second slot of LoopStep says.
     Within(usize),
+    /// Pops the step, then the counter; pushes their sum. If the sum is
+    /// past what the counter's type holds, pushes the counter as it is
+    /// and marks LoopStep's second slot: Within is false from then on.
+    LoopAdd(usize),
     /// Pops a list; its items and a position into the two slots: EACH.
     EachStart(usize, usize),
     /// Pushes the next item of EachStart's slots, or jumps to `t`.
@@ -593,6 +601,7 @@ fn instr(i: &Instr) -> Vec<Term> {
         }
         Instr::LoopStep(a, b) => vec![word("loop.step"), n(a), n(b)],
         Instr::Within(s) => vec![word("within"), n(s)],
+        Instr::LoopAdd(s) => vec![word("loop.add"), n(s)],
         Instr::EachStart(a, b) => vec![word("each.start"), n(a), n(b)],
         Instr::EachNext(a, b, t) => vec![word("each.next"), n(a), n(b), n(t)],
         Instr::Call(m, k) => vec![word("call"), n(m), n(k)],
@@ -723,6 +732,7 @@ fn read_instr(r: &mut Reader) -> Result<Instr, String> {
         "leave" => Instr::Leave(named(LEAVES, r.word()?, "a way out")?, r.rest(n)?),
         "loop.step" => Instr::LoopStep(n(r)?, n(r)?),
         "within" => Instr::Within(n(r)?),
+        "loop.add" => Instr::LoopAdd(n(r)?),
         "each.start" => Instr::EachStart(n(r)?, n(r)?),
         "each.next" => Instr::EachNext(n(r)?, n(r)?, n(r)?),
         "call" => Instr::Call(n(r)?, n(r)?),
@@ -898,6 +908,14 @@ impl Unit {
             for s in &m.slots {
                 let mut items = vec![word("slot"), text(&s.name)];
                 items.extend(slot_type(s.ty));
+                let f = s.fuzziness.unwrap_or_default();
+                let kinds = [
+                    (f.appr, "appr"),
+                    (f.prob, "prob"),
+                    (f.subj, "subj"),
+                    (f.mult, "mult"),
+                ];
+                items.extend(kinds.iter().filter(|k| k.0).map(|k| word(k.1)));
                 if s.constant {
                     items.push(word("constant"));
                 }
@@ -997,12 +1015,25 @@ impl Unit {
                     let name = r.text().map_err(at)?;
                     let ty = read_slot_type(&mut r).map_err(at)?;
                     let rest = r.rest(|r| r.word().map(String::from)).map_err(at)?;
-                    let constant = match rest.as_slice() {
-                        [] => false,
-                        [w] if w == "constant" => true,
-                        _ => return Err(at(format!("{rest:?} after a slot's type"))),
-                    };
-                    m.slots.push(Slot { name, ty, constant });
+                    let (mut f, mut constant) = (Fuzziness::default(), false);
+                    for w in &rest {
+                        match w.as_str() {
+                            "appr" if version > 1 => f.appr = true,
+                            "prob" if version > 1 => f.prob = true,
+                            "subj" if version > 1 => f.subj = true,
+                            "mult" if version > 1 => f.mult = true,
+                            "constant" => constant = true,
+                            _ => return Err(at(format!("{rest:?} after a slot's type"))),
+                        }
+                    }
+                    // Version 1 wrote no fuzziness: its slots take any.
+                    let fuzziness = (version > 1).then_some(f);
+                    m.slots.push(Slot {
+                        name,
+                        ty,
+                        constant,
+                        fuzziness,
+                    });
                 }
                 "param" => {
                     r.word().map_err(at)?;
@@ -1071,16 +1102,19 @@ mod tests {
                             name: "n".into(),
                             ty: SlotType::Base(Base::Integer),
                             constant: false,
+                            fuzziness: Some(Fuzziness::default()),
                         },
                         Slot {
                             name: "v".into(),
                             ty: SlotType::Array(Rank::Vector, Some(Base::Float)),
                             constant: true,
+                            fuzziness: Some(Fuzziness::default()),
                         },
                         Slot {
                             name: "#0".into(),
                             ty: SlotType::Any,
                             constant: false,
+                            fuzziness: Some(Fuzziness::default()),
                         },
                     ],
                     prefix: None,
@@ -1157,11 +1191,13 @@ mod tests {
                             name: "x".into(),
                             ty: SlotType::List,
                             constant: false,
+                            fuzziness: Some(Fuzziness::default()),
                         },
                         Slot {
                             name: "f".into(),
                             ty: SlotType::Any,
                             constant: false,
+                            fuzziness: Some(Fuzziness::default()),
                         },
                     ],
                     prefix: Some(0),
@@ -1183,12 +1219,35 @@ mod tests {
     }
 
     #[test]
+    fn version_1_reads_its_slots_taking_any_fuzziness() {
+        // As version 1 wrote it: no fuzziness, and no word for one.
+        let text = "acode 1\nlanguage \"L\"\n\nmodule program \"P\" \"P\" 1:1\nslot \"n\" integer\nslot \"k\" integer constant\n   0 1:1      return\n";
+        let unit = Unit::parse(text).unwrap();
+        let slots = &unit.modules[0].slots;
+        assert_eq!((slots[0].fuzziness, slots[1].fuzziness), (None, None));
+        assert!(slots[1].constant);
+        assert!(Unit::parse(&text.replace("integer\n", "integer appr\n")).is_err());
+        // Version 2 says what each takes, none unless written.
+        let text = text.replace("acode 1", "acode 2");
+        let unit = Unit::parse(&text.replace("integer\n", "integer appr mult\n")).unwrap();
+        let slots = &unit.modules[0].slots;
+        let taken = Fuzziness {
+            appr: true,
+            mult: true,
+            ..Fuzziness::default()
+        };
+        assert_eq!(slots[0].fuzziness, Some(taken));
+        assert_eq!(slots[1].fuzziness, Some(Fuzziness::default()));
+        assert_eq!(Unit::parse(&unit.text()), Ok(unit));
+    }
+
+    #[test]
     fn a_newer_version_is_refused() {
-        let text = sample().text().replacen("acode 1", "acode 2", 1);
+        let text = sample().text().replacen("acode 2", "acode 3", 1);
         assert_eq!(
             Unit::parse(&text),
             Err(Error(
-                "A-code version 2 is newer than this reader's, 1".into()
+                "A-code version 3 is newer than this reader's, 2".into()
             ))
         );
     }

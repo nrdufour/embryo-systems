@@ -661,6 +661,16 @@ before each frame's instruction. A journal line that fails is refused
 whole, with the reason; it was taken as written, and panicked later, in
 the kernel's loop.
 
+A-code's version 2 (2026-11-15) says, of each slot of a type, the
+fuzziness it takes (`slot "x" float appr`), none unless written, and has
+`loop.add`, a counter's step that says when there is no next value. The
+machine checks the first when a value is stored: what the checker
+proves of a program it can type, held of a value it could not
+(docs/adt81.md, "Running"). A unit of version 1 reads as before, its
+slots taking any fuzziness, as when it was written; what a store keeps
+runs on. Not chosen: the check in the instruction that reads, READ
+alone, which leaves an attribute's value the same way in.
+
 ### 11. Engine performance
 
 - **GTAD gets indexes, early**: name to class, class and name to object,

@@ -209,6 +209,7 @@ impl Verifier<'_> {
             | Ref(s)
             | Prefix(s)
             | Within(s)
+            | LoopAdd(s)
             | CheckList(s)
             | Insert(s, _)
             | Extract(s)
@@ -321,8 +322,8 @@ impl Verifier<'_> {
             InitArray(_, _, n) => go(s, 2 * n + 1, 0),
             AsInteger | Unary(_) | ExpectOne(_) | Native(_) | Named | ToClass | Designate(_)
             | IsObject | Hypotheses | RuleClass(_) | Dial | Process | AsTime => go(s, 1, 1),
-            Op(_) | ListOp(_) | Within(_) | ObjectNamed(_) | AttrOf | LinkOf(_) | ClassAttr
-            | FindAttribute | FindLink(_) | AttrValue | Linked(_) => go(s, 2, 1),
+            Op(_) | ListOp(_) | Within(_) | LoopAdd(_) | ObjectNamed(_) | AttrOf | LinkOf(_)
+            | ClassAttr | FindAttribute | FindLink(_) | AttrValue | Linked(_) => go(s, 2, 1),
             // These look at the top, and leave it.
             Text | HasBody => go(s, 1, 1),
             DialStep => go(s, 1, 2),

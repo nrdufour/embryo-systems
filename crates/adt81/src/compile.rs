@@ -12,7 +12,7 @@ use hbds_acode::{
     Due, Instr, Kind, Language, Leave, ListOp, Mode as AMode, Module as AModule, Param, Place,
     Slot, SlotType, Span as ASpan, StateOp as AState, Unit,
 };
-use hbds_values::{Base, Computed, Fz, Op, Value};
+use hbds_values::{Base, Computed, Fuzziness, Fz, Op, Value};
 
 use super::ast::*;
 use super::builtins::{self, Takes};
@@ -209,6 +209,8 @@ pub fn compile(program: &Program) -> Unit {
 
 struct Compiler<'p> {
     callees: &'p HashMap<String, Callee>,
+    /// A function's slot for what RESULT gives, of the type it returns.
+    result: Option<usize>,
     slots: Vec<Slot>,
     names: HashMap<String, usize>,
     code: Vec<Instr>,
@@ -249,6 +251,7 @@ impl<'p> Compiler<'p> {
     fn new(callees: &'p HashMap<String, Callee>) -> Self {
         Compiler {
             callees,
+            result: None,
             slots: Vec::new(),
             names: HashMap::new(),
             code: Vec::new(),
@@ -289,17 +292,25 @@ impl<'p> Compiler<'p> {
             name: format!("#{n}"),
             ty: SlotType::Any,
             constant: false,
+            fuzziness: Some(Fuzziness::default()),
         });
         n
     }
 
-    fn declare(&mut self, n: &Name, ty: &Ty, constant: bool) -> usize {
+    /// A slot of a declared type, which takes the fuzziness declared.
+    fn typed(&mut self, name: &str, ty: &Typed, constant: bool) -> usize {
         let s = self.slots.len();
         self.slots.push(Slot {
-            name: n.spelling.clone(),
-            ty: slot_type(ty),
+            name: name.to_string(),
+            ty: slot_type(&ty.ty),
             constant,
+            fuzziness: Some(value::fuzziness(ty.fuzz)),
         });
+        s
+    }
+
+    fn declare(&mut self, n: &Name, ty: &Typed, constant: bool) -> usize {
+        let s = self.typed(&n.spelling, ty, constant);
         self.names.insert(n.key.clone(), s);
         s
     }
@@ -435,13 +446,18 @@ impl<'p> Compiler<'p> {
                 Mode::Out => AMode::Out,
                 Mode::InOut => AMode::InOut,
             };
-            let s = self.declare(p, &ty.ty, false);
+            let s = self.declare(p, &ty, false);
             params.push(Param { slot: s, mode });
             self.emit(Instr::Bind(i, s), p.span);
         }
         let mut result = None;
         if let (ModuleKind::Functor { returns, .. }, ModuleName::Name(n)) = (&m.kind, &m.name) {
-            result = Some(self.declare(n, &Typed::of(returns).ty, false));
+            result = Some(self.declare(n, &Typed::of(returns), false));
+        }
+        // What RESULT gives goes through a slot of the function's type,
+        // to be converted to it.
+        if let ModuleKind::Function { returns } = &m.kind {
+            self.result = Some(self.typed("RESULT", &Typed::of_scalar(returns), false));
         }
         for d in &m.locals {
             self.local(d);
@@ -484,7 +500,7 @@ impl<'p> Compiler<'p> {
             None => None,
         };
         for n in &d.names {
-            let s = self.declare(n, &ty.ty, constant);
+            let s = self.declare(n, &ty, constant);
             match &d.ty {
                 DataType::Array { shape, element, .. } => {
                     let element = Typed::of_scalar(element).ty;
@@ -738,6 +754,10 @@ impl<'p> Compiler<'p> {
             }
             StmtKind::Result(e) => {
                 self.expr(e);
+                if let Some(r) = self.result {
+                    self.emit(Instr::Store(r), e.span);
+                    self.emit(Instr::Load(r), e.span);
+                }
                 self.emit(Instr::Result, s.span);
             }
             StmtKind::Insert {
@@ -1128,10 +1148,10 @@ impl<'p> Compiler<'p> {
             self.expr(u);
             exits.push(self.emit(Instr::JumpTrue(PENDING), u.span));
         }
-        if let Some((r, step, _)) = counter {
+        if let Some((r, step, up)) = counter {
             self.load(&r.name);
             self.emit(Instr::Load(step), r.name.span);
-            self.emit(Instr::Op(Op::Add), r.name.span);
+            self.emit(Instr::LoopAdd(up), r.name.span);
             self.assign(&Self::whole(&r.name), r.name.span);
         }
         self.emit(Instr::Jump(top), Span::default());

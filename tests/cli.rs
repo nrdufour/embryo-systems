@@ -128,8 +128,8 @@ fn exec_refuses_what_it_cannot_run() {
     for (name, text, message) in [
         (
             "newer.acode",
-            text.replacen("acode 1", "acode 2", 1),
-            "A-code version 2 is newer than this reader's, 1",
+            text.replacen("acode 2", "acode 3", 1),
+            "A-code version 3 is newer than this reader's, 2",
         ),
         (
             "other.acode",

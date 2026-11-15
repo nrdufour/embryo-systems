@@ -1,0 +1,30 @@
+-- RESULT gives a value of the function's type: an integer a FLOAT --
+-- function gives back is a float, so that its half is a half. Written --
+-- for the tests of what both engines had wrong together. --
+
+PROGRAM RESULTS ;
+LOCAL x : FLOAT ;
+BEGIN
+        PRINT HALVED(3), HALVED(3) / 2 ;
+        x := HALVED(7) ; PRINT x / 2 ;
+        PRINT THIRDS(2), THIRDS(2) / 4 ;
+        PRINT PLANE(2), PLANE(2) * PLANE(2)
+END ;
+
+FUNCTION HALVED (n) RETURNS FLOAT ;
+        n : INTEGER IN ;
+BEGIN
+        RESULT n
+END ;
+
+FUNCTION THIRDS (n) RETURNS RATIONAL ;
+        n : INTEGER IN ;
+BEGIN
+        RESULT n
+END ;
+
+FUNCTION PLANE (n) RETURNS COMPLEX ;
+        n : INTEGER IN ;
+BEGIN
+        RESULT n
+END ;

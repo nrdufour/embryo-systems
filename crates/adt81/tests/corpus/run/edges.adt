@@ -1,0 +1,23 @@
+-- Results that exist at the integers' edges, where an overflow was --
+-- reported: a remainder by -1, a loop that ends at the largest integer --
+-- or at the smallest. And what / and MOD give for each sign: the --
+-- quotient towards zero, the remainder never negative. Written for the --
+-- tests of what both engines had wrong together. --
+
+PROGRAM EDGES ;
+LOCAL n, i, c : INTEGER ;
+BEGIN
+        n := -9223372036854775807 - 1 ;
+        PRINT n MOD (-1), n MOD 1, 9223372036854775807 MOD (-1) ;
+        c := 0 ;
+        LOOP FOR i : 9223372036854775805 TO 9223372036854775807 DO c := c + 1 ENDLOOP ;
+        PRINT c, i ;
+        c := 0 ;
+        LOOP FOR i : n + 2 TO n STEP -1 DO c := c + 1 ENDLOOP ;
+        PRINT c, i = n ;
+        c := 0 ;
+        LOOP FOR i : 9223372036854775800 TO 9223372036854775807 STEP 5 DO c := c + 1 ENDLOOP ;
+        PRINT c, i ;
+        PRINT 7 / 2, (-7) / 2, 7 / (-2), (-7) / (-2) ;
+        PRINT 7 MOD 2, (-7) MOD 2, 7 MOD (-2), (-7) MOD (-2)
+END ;

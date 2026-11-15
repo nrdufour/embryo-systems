@@ -1,0 +1,3 @@
+{ 1, 2 } 3.0 +- 0.5
+7
+12:14: runtime error: `n` is not declared MULT, yet receives such a value (page 152)
