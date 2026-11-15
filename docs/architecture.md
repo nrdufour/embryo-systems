@@ -552,6 +552,42 @@ lock. Not chosen: a limit on connections, each still a thread: with the
 socket's permissions, who connects is already chosen, and a client that
 holds a session open and silent is what a session is.
 
+Clients that do not cooperate (2026-11-15). The executor never waits on
+a client but in one place, a READ inside code the store calls back
+(above), and that wait now ends with the client: when its connection
+closes, the READ finds no more input; and a kill reaches the session
+there, on its input's channel, where the executor hears no message.
+Before, a client gone at that moment held the executor for good.
+
+What is written to a client waits in a queue, of 16 MiB at most. A
+session whose queue is full is not run until its client has read, and
+the kernel does not run while a client its processes print to is
+behind, as it waits for a client in time; the executor finds them not
+ready, and goes on with the others. A client that reads nothing for
+30 s is gone: its connection closes, its session ends ("the client
+stopped reading"). A feed's subscriber that is behind is let go at
+once, the store's changes waiting for nobody; the page connects again.
+Before, a session printing to a client that did not read took the
+daemon to gigabytes, and killing it freed nothing. Decided on
+2026-11-15 as "a session that outruns its client is killed"; built as
+"waits, then is let go", since measured, every session that prints in
+a loop outruns its client, one that reads as fast as it can included:
+3 million lines put 240 MB in the queue of a client reading them all.
+Not chosen: the executor writing to the socket itself, and waiting;
+killing at the limit, which ends well-behaved programs; dropping
+output, which a client cannot tell from a program that printed less.
+
+`ui` forwards the page's own requests only: a `Host` that is its
+address, 127.0.0.1 or localhost and its port, and an `Origin`, if there
+is one, that is the same. A page of another site reaches 127.0.0.1
+through the user's browser, by a WebSocket, which crosses origins, or
+under a name of its own that resolves there: it ran code against the
+store. What it does not close: any user of the machine reaches the
+port, past the socket's permissions; `ui` is for the user's own
+machine, nginx and its authentication for the rest. And the daemon
+removes what it finds where its socket goes only if it is a socket,
+left by a daemon that died: a file named by mistake was deleted.
+
 ### 9. Standalone builds carry what they need
 
 - **Two products:** an `.acode` file, portable compiled modules (for
