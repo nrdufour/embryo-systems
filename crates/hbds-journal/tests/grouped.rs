@@ -142,11 +142,46 @@ fn versions_older_read_newer_refused() {
     let dump = reopened(&dir);
     assert!(dump.contains("object Lyon"), "{dump}");
     let text = fs::read_to_string(dir.join("journal")).unwrap();
-    assert!(text.starts_with("journal 2\n"), "{text}");
+    assert!(text.starts_with("journal 3\n"), "{text}");
     assert_eq!(reopened(&dir), dump);
-    fs::write(dir.join("journal"), "journal 3\n").unwrap();
+    fs::write(dir.join("journal"), "journal 4\n").unwrap();
     let e = journal::open(&dir).err().expect("a newer journal").0;
-    assert_eq!(e, "the journal's version 3 is newer than this reader's, 2");
+    assert_eq!(e, "the journal's version 4 is newer than this reader's, 3");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn before_version_3_an_object_attributes_property_was_its_class_attributes() {
+    let dir = directory("version-2-properties");
+    let (mut store, _) = journal::open(&dir).unwrap();
+    let town = store.create_class("TOWN", ClassKind::Class).unwrap();
+    let size = store.create_attribute(town, "size").unwrap();
+    let lyon = store.create_object(town, "Lyon").unwrap();
+    store
+        .set_property(
+            AdtRef::ObjectAttribute(lyon, size),
+            "ACTION",
+            "ADT81",
+            "PRINT 1",
+        )
+        .unwrap();
+    drop(store);
+    let own = reopened(&dir);
+    let text = fs::read_to_string(dir.join("journal")).unwrap();
+    fs::write(
+        dir.join("journal"),
+        text.replacen("journal 3", "journal 2", 1),
+    )
+    .unwrap();
+    let older = reopened(&dir);
+    assert_ne!(own, older);
+    let (store, _) = journal::open(&dir).unwrap();
+    assert!(
+        store.props(AdtRef::ObjectAttribute(lyon, size)).is_none(),
+        "{older}"
+    );
+    let class_attribute = store.props(AdtRef::ClassAttribute(size)).unwrap();
+    assert!(class_attribute.properties.contains_key("ACTION"), "{older}");
     let _ = fs::remove_dir_all(&dir);
 }
 

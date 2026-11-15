@@ -136,7 +136,7 @@ pub fn launches(store: &Store, change: &Change, out: &mut Vec<Launch>) {
             }
             let value = |name| {
                 let a = store.find_attribute(o.class, name)?;
-                o.values.get(&a).cloned()
+                store.get(r, a).cloned()
             };
             let wakes = (store.associations().iter())
                 .any(|(l, b)| *b == AdtRef::Object(r) && launchers.contains(l));
@@ -165,7 +165,7 @@ pub fn delay(store: &Store, reflex: Id) -> f64 {
         return 0.0;
     };
     let a = store.find_attribute(o.class, DELAY);
-    match a.and_then(|a| o.values.get(&a)).and_then(Value::scalar) {
+    match a.and_then(|a| store.get(reflex, a)).and_then(Value::scalar) {
         Some(Scalar::Integer(i)) => *i as f64,
         Some(Scalar::Float(x)) => *x,
         Some(Scalar::Rational(n, d)) => *n as f64 / *d as f64,

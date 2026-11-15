@@ -102,7 +102,17 @@ pub struct Object {
     pub class: Id,
     pub name: String,
     pub state: State,
-    pub values: BTreeMap<Id, Value>,
+    pub props: Props,
+}
+
+/// An object's attribute (page 46, figure 6): its value, and what it
+/// carries of its own, COND and ACTION among them (pages 156 and 157). It
+/// has no state of its own (page 23 changes none): it is seen while its
+/// object and its class attribute are. Kept by (object, attribute) only
+/// while it holds something.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ObjectAttribute {
+    pub value: Option<Value>,
     pub props: Props,
 }
 
@@ -127,6 +137,7 @@ pub struct ObjectLink {
     pub reverse: Id,
     pub probability: Option<f64>,
     pub state: State,
+    pub props: Props,
 }
 
 /// What a pair of objects is held to, by a link of their classes (page
@@ -286,6 +297,7 @@ pub struct Store {
     classes: PMap<Id, Class>,
     attributes: PMap<Id, Attribute>,
     objects: PMap<Id, Object>,
+    object_attributes: PMap<(Id, Id), ObjectAttribute>,
     class_links: PMap<Id, ClassLink>,
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
@@ -346,6 +358,7 @@ struct Snapshot {
     classes: PMap<Id, Class>,
     attributes: PMap<Id, Attribute>,
     objects: PMap<Id, Object>,
+    object_attributes: PMap<(Id, Id), ObjectAttribute>,
     class_links: PMap<Id, ClassLink>,
     object_links: PMap<Id, ObjectLink>,
     associations: Vec<(AdtRef, AdtRef)>,
@@ -574,6 +587,7 @@ impl Store {
             copied: self.classes.copied()
                 + self.attributes.copied()
                 + self.objects.copied()
+                + self.object_attributes.copied()
                 + self.class_links.copied()
                 + self.object_links.copied()
                 + self.ix.copied(),
@@ -619,6 +633,7 @@ impl Store {
             classes: self.classes.clone(),
             attributes: self.attributes.clone(),
             objects: self.objects.clone(),
+            object_attributes: self.object_attributes.clone(),
             class_links: self.class_links.clone(),
             object_links: self.object_links.clone(),
             associations: self.associations.clone(),
@@ -637,6 +652,7 @@ impl Store {
         self.classes.restore(s.classes);
         self.attributes.restore(s.attributes);
         self.objects.restore(s.objects);
+        self.object_attributes.restore(s.object_attributes);
         self.class_links.restore(s.class_links);
         self.object_links.restore(s.object_links);
         self.associations = s.associations;
@@ -804,7 +820,6 @@ impl Store {
                         class,
                         name,
                         state: State::Active,
-                        values: BTreeMap::new(),
                         props: Props::default(),
                     },
                 );
@@ -860,6 +875,7 @@ impl Store {
                     reverse,
                     probability,
                     state: State::Active,
+                    props: Props::default(),
                 };
                 self.put_object_link(id, link(class_link, from, to, reverse));
                 self.put_object_link(reverse, link(back, to, from, id));
@@ -874,8 +890,8 @@ impl Store {
                 attribute,
                 value,
             } => {
-                if let Some(o) = self.objects.get_mut(&object) {
-                    o.values.insert(attribute, value);
+                if self.objects.contains_key(&object) {
+                    self.object_attribute_mut(object, attribute).value = Some(value);
                 }
             }
             Change::Specify {
@@ -884,6 +900,12 @@ impl Store {
                 unit,
                 computed,
             } => {
+                // An object attribute is specified by its class attribute
+                // (page 24: SPECIFY takes class attributes).
+                let target = match target {
+                    AdtRef::ObjectAttribute(_, a) => AdtRef::ClassAttribute(a),
+                    t => t,
+                };
                 if let Some(p) = self.props_mut(target) {
                     p.spec = spec;
                     p.unit = unit;
@@ -957,11 +979,12 @@ impl Store {
         match r {
             AdtRef::Class(id) => self.classes.get(&id).map(|c| &c.props),
             AdtRef::Object(id) => self.objects.get(&id).map(|o| &o.props),
-            AdtRef::ClassAttribute(id) | AdtRef::ObjectAttribute(_, id) => {
-                self.attributes.get(&id).map(|a| &a.props)
+            AdtRef::ClassAttribute(id) => self.attributes.get(&id).map(|a| &a.props),
+            AdtRef::ObjectAttribute(o, a) => {
+                self.object_attributes.get(&(o, a)).map(|oa| &oa.props)
             }
             AdtRef::ClassLink(id) => self.class_links.get(&id).map(|l| &l.props),
-            AdtRef::ObjectLink(_) => None,
+            AdtRef::ObjectLink(id) => self.object_links.get(&id).map(|l| &l.props),
         }
     }
 
@@ -969,11 +992,15 @@ impl Store {
         match r {
             AdtRef::Class(id) => self.classes.get_mut(&id).map(|c| &mut c.props),
             AdtRef::Object(id) => self.objects.get_mut(&id).map(|o| &mut o.props),
-            AdtRef::ClassAttribute(id) | AdtRef::ObjectAttribute(_, id) => {
-                self.attributes.get_mut(&id).map(|a| &mut a.props)
+            AdtRef::ClassAttribute(id) => self.attributes.get_mut(&id).map(|a| &mut a.props),
+            AdtRef::ObjectAttribute(o, a) => {
+                if !self.objects.contains_key(&o) || !self.attributes.contains_key(&a) {
+                    return None;
+                }
+                Some(&mut self.object_attribute_mut(o, a).props)
             }
             AdtRef::ClassLink(id) => self.class_links.get_mut(&id).map(|l| &mut l.props),
-            AdtRef::ObjectLink(_) => None,
+            AdtRef::ObjectLink(id) => self.object_links.get_mut(&id).map(|l| &mut l.props),
         }
     }
 
@@ -989,11 +1016,13 @@ impl Store {
                     o.state = state;
                 }
             }
-            AdtRef::ClassAttribute(id) | AdtRef::ObjectAttribute(_, id) => {
+            AdtRef::ClassAttribute(id) => {
                 if let Some(a) = self.attributes.get_mut(&id) {
                     a.state = state;
                 }
             }
+            // No state of its own: page 23 changes none.
+            AdtRef::ObjectAttribute(..) => {}
             AdtRef::ClassLink(id) => {
                 if let Some(l) = self.class_links.get_mut(&id) {
                     l.state = state;
@@ -1033,21 +1062,27 @@ impl Store {
             }
             AdtRef::Object(id) => {
                 self.drop_object(id);
+                for a in self.attributes_held(id) {
+                    self.object_attributes.remove(&(id, a));
+                }
                 let mut links = seconds(&self.ix.links_from, id);
                 links.extend(seconds(&self.ix.links_to, id));
                 for l in links {
                     self.drop_object_link(l);
                 }
             }
-            AdtRef::ClassAttribute(id) | AdtRef::ObjectAttribute(_, id) => {
+            AdtRef::ClassAttribute(id) => {
                 self.drop_attribute(id);
-                let holding: Vec<Id> = (self.objects.iter())
-                    .filter(|(_, o)| o.values.contains_key(&id))
-                    .map(|(i, _)| *i)
+                let held: Vec<(Id, Id)> = (self.object_attributes.keys())
+                    .filter(|(_, a)| *a == id)
+                    .copied()
                     .collect();
-                for o in holding {
-                    self.objects.get_mut(&o).unwrap().values.remove(&id);
+                for k in held {
+                    self.object_attributes.remove(&k);
                 }
+            }
+            AdtRef::ObjectAttribute(o, a) => {
+                self.object_attributes.remove(&(o, a));
             }
             AdtRef::ClassLink(id) => {
                 if let Some(l) = self.drop_class_link(id) {
@@ -1150,6 +1185,11 @@ impl Store {
                 || !self.object_links.contains_key(&l.reverse)
             {
                 dangling.push(format!("object link {id}'s ends, class link or reverse"));
+            }
+        }
+        for ((o, a), _) in &self.object_attributes {
+            if !object(o) || !self.attributes.contains_key(a) {
+                dangling.push(format!("object attribute {o}.{a}'s object or attribute"));
             }
         }
         if !dangling.is_empty() {
@@ -1408,7 +1448,36 @@ impl Store {
     }
 
     pub fn get(&self, object: Id, attribute: Id) -> Option<&Value> {
-        self.objects.get(&object)?.values.get(&attribute)
+        self.object_attributes
+            .get(&(object, attribute))?
+            .value
+            .as_ref()
+    }
+
+    /// An object's values, by attribute, in Id order.
+    pub fn values_of(&self, object: Id) -> impl Iterator<Item = (Id, &Value)> {
+        (self.object_attributes.range_from(&(object, 0)))
+            .take_while(move |((o, _), _)| *o == object)
+            .filter_map(|((_, a), oa)| Some((*a, oa.value.as_ref()?)))
+    }
+
+    /// The attributes an object holds something for, in Id order.
+    fn attributes_held(&self, object: Id) -> Vec<Id> {
+        (self.object_attributes.range_from(&(object, 0)))
+            .take_while(|((o, _), _)| *o == object)
+            .map(|((_, a), _)| *a)
+            .collect()
+    }
+
+    /// An object's attribute, to change: made if it held nothing.
+    fn object_attribute_mut(&mut self, object: Id, attribute: Id) -> &mut ObjectAttribute {
+        if !self.object_attributes.contains_key(&(object, attribute)) {
+            self.object_attributes
+                .insert((object, attribute), ObjectAttribute::default());
+        }
+        self.object_attributes
+            .get_mut(&(object, attribute))
+            .unwrap()
     }
 
     // Changing
@@ -1618,6 +1687,11 @@ impl Store {
 
     /// HIBERN, AWAKE, DESTROY, RESUR: each from the state it expects.
     pub fn change_state(&mut self, target: AdtRef, from: State, to: State) -> Stored<()> {
+        if matches!(target, AdtRef::ObjectAttribute(..)) {
+            return error(
+                "an object attribute has no state of its own; its object and class attribute do",
+            );
+        }
         if let (AdtRef::Object(o), State::Destroyed) = (target, to)
             && let Some((&key, _)) = (self.modalities.iter())
                 .find(|((_, a, b), m)| **m == Modality::Must && (*a == o || *b == o))
@@ -1680,9 +1754,6 @@ impl Store {
         language: &str,
         text: &str,
     ) -> Stored<()> {
-        if matches!(target, AdtRef::ObjectLink(_)) {
-            return error("an object link carries no property; its class link does");
-        }
         self.commit(Change::Property {
             target,
             name: name.to_string(),
@@ -1843,10 +1914,10 @@ impl Store {
                 name: o.name.clone(),
             });
         }
-        for (&id, o) in self.objects.iter() {
-            for (&attribute, value) in &o.values {
+        for (&(object, attribute), oa) in self.object_attributes.iter() {
+            if let Some(value) = &oa.value {
                 out.push(Change::Set {
-                    object: id,
+                    object,
                     attribute,
                     value: value.clone(),
                 });
@@ -1882,6 +1953,16 @@ impl Store {
             self.objects
                 .iter()
                 .map(|(&id, o)| (AdtRef::Object(id), &o.props)),
+        )
+        .chain(
+            self.object_attributes
+                .iter()
+                .map(|(&(o, a), oa)| (AdtRef::ObjectAttribute(o, a), &oa.props)),
+        )
+        .chain(
+            self.object_links
+                .iter()
+                .map(|(&id, l)| (AdtRef::ObjectLink(id), &l.props)),
         );
         for (target, p) in carriers {
             if p.spec.is_some() || p.unit.is_some() || p.computed {
@@ -2025,17 +2106,23 @@ impl Store {
             for oid in self.objects_of(*id) {
                 let o = &self.objects[&oid];
                 out += &format!("  object {}{}{}\n", o.name, state(o.state), props(&o.props));
-                for (a, v) in &o.values {
-                    let name = self.attributes.get(a).map_or("?", |a| a.name.as_str());
-                    out += &format!("    {name} = {}\n", self.show(v));
+                for a in self.attributes_held(oid) {
+                    let oa = &self.object_attributes[&(oid, a)];
+                    let name = self.attributes.get(&a).map_or("?", |a| a.name.as_str());
+                    let value = oa
+                        .value
+                        .as_ref()
+                        .map_or(String::new(), |v| format!(" = {}", self.show(v)));
+                    out += &format!("    {name}{value}{}\n", props(&oa.props));
                 }
                 for lid in self.links_from(oid) {
                     let l = &self.object_links[&lid];
                     let p = l.probability.map_or(String::new(), |p| format!(" % {p}"));
                     out += &format!(
-                        "    link {}{p}{}\n",
+                        "    link {}{p}{}{}\n",
                         self.describe(AdtRef::ObjectLink(lid)),
-                        state(l.state)
+                        state(l.state),
+                        props(&l.props)
                     );
                 }
             }
@@ -2432,5 +2519,51 @@ mod tests {
         s.end(true).unwrap();
         assert!(s.pending().is_empty());
         assert_eq!(s.get(lyon, ids["AREA"]), Some(&Value::integer(48)));
+    }
+
+    #[test]
+    fn an_object_attribute_carries_its_own_and_goes_with_what_it_depends_on() {
+        let (mut s, ids) = world();
+        let (town, area) = (ids["TOWN"], ids["AREA"]);
+        let lyon = s.find_object(town, "Lyon").unwrap();
+        let arles = s.find_object(town, "Arles").unwrap();
+        let own = AdtRef::ObjectAttribute(lyon, area);
+        s.set_property(own, "ACTION", "ADT81", "PRINT 1").unwrap();
+        s.set(arles, area, Value::integer(3)).unwrap();
+        assert!(s.props(own).unwrap().properties.contains_key("ACTION"));
+        assert!(
+            s.props(AdtRef::ClassAttribute(area))
+                .unwrap()
+                .properties
+                .is_empty()
+        );
+        assert!(
+            s.props(AdtRef::ObjectAttribute(arles, area))
+                .unwrap()
+                .properties
+                .is_empty()
+        );
+        assert!(
+            s.change_state(own, State::Active, State::Hibernating)
+                .is_err()
+        );
+        let mut replayed = Store::memory();
+        for c in s.changes() {
+            replayed.replay(c);
+        }
+        assert_eq!(replayed.dump(), s.dump());
+        s.change_state(AdtRef::Object(lyon), State::Active, State::Destroyed)
+            .unwrap();
+        s.purge_adt(AdtRef::Object(lyon)).unwrap();
+        assert!(s.props(own).is_none());
+        s.change_state(
+            AdtRef::ClassAttribute(area),
+            State::Active,
+            State::Destroyed,
+        )
+        .unwrap();
+        s.purge_adt(AdtRef::ClassAttribute(area)).unwrap();
+        assert_eq!(s.get(arles, area), None);
+        s.verify().unwrap();
     }
 }

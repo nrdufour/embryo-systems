@@ -1,0 +1,12 @@
+-- A COND on one object attribute refuses its changes, and no other --
+-- object's. --
+
+PROGRAM E ;
+BEGIN
+        CREATE "AREA" ; CREATE "AREA" . "temp" ;
+        CREATE "a1" [ "AREA" ], "a2" [ "AREA" ] ;
+        LET "a1" [ "AREA" ] . "temp" ' COND := "THIS . ""temp"" > 0." ;
+        LET "a2" [ "AREA" ] . "temp" := -5. ;
+        PRINT "a2" [ "AREA" ] . "temp" ;
+        LET "a1" [ "AREA" ] . "temp" := -5.
+END ;

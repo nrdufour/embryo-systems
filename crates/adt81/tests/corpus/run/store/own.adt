@@ -1,0 +1,24 @@
+-- An object attribute and an object link are a.d.t. of their own --
+-- (pages 156 and 157): what one carries is not its neighbours'. A --
+-- change runs the class attribute's or class link's, then its own, then --
+-- the object's. Written for the store's tests. --
+
+PROGRAM OWN ;
+BEGIN
+        CREATE "TOWN" ; CREATE "TOWN" . "pop" ;
+        CREATE "TOWN" "road" "TOWN" REVERSE "road back" ;
+        CREATE "Lyon" [ "TOWN" ], "Arles" [ "TOWN" ], "Nimes" [ "TOWN" ] ;
+        LET "TOWN" . "pop" ' ACTION := "PRINT ""the class attribute""" ;
+        LET "Lyon" [ "TOWN" ] . "pop" ' ACTION := "PRINT ""the pop of Lyon""" ;
+        LET "Lyon" [ "TOWN" ] ' ACTION := "PRINT ""Lyon""" ;
+        LET "Arles" [ "TOWN" ] . "pop" := 50000 ;
+        LET "Lyon" [ "TOWN" ] . "pop" := 500000 ;
+        ASSERT "Lyon" [ "TOWN" ] "road" "Arles" [ "TOWN" ] ;
+        ASSERT "Lyon" [ "TOWN" ] "road" "Nimes" [ "TOWN" ] ;
+        LET "Lyon" [ "TOWN" ] "road" "Arles" [ "TOWN" ] ' ACTION :=
+            "PRINT ""the road to Arles""" ;
+        PRINT "again" ;
+        ASSERT "Lyon" [ "TOWN" ] "road" "Nimes" [ "TOWN" ] ;
+        ASSERT "Lyon" [ "TOWN" ] "road" "Arles" [ "TOWN" ] ;
+        PRINT "Arles" [ "TOWN" ] . "pop", "Lyon" [ "TOWN" ] . "pop"
+END ;

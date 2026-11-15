@@ -18,8 +18,10 @@
 //!
 //! A line is a sequence of terms: words, numbers, quoted strings, and
 //! parenthesised lists of terms. `class 1 "TOWN" class`, `set 7 3 (f 2.5)`.
-//! Version 2 starts with `journal 2`; version 1, without a header or
-//! commits, each line its own transaction, is read and rewritten as 2.
+//! Version 3 starts with `journal 3`, and is read and written. Version 2,
+//! the same format, set an object attribute's properties on its class
+//! attribute; version 1 had no header or commits, each line its own
+//! transaction. Both are read as they meant, and rewritten as 3.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::Write;
@@ -28,13 +30,16 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use hbds_core::AdtRef;
 use hbds_core::terms::{
     Reader, Term, adt_ref, float, list, optional, read_terms, text, value, word, write_term,
 };
 use hbds_gtad::{Change, ClassKind, Error, Modality, Recorder, State, Store, state_name};
 
 /// The journal's format, decision 10: older ones read, newer refused.
-pub const VERSION: u32 = 2;
+/// Version 3 gives object attributes properties of their own; before it,
+/// a property set on one was its class attribute's.
+pub const VERSION: u32 = 3;
 
 const COMMIT: &str = "commit";
 
@@ -177,7 +182,13 @@ fn opened(dir: &Path) -> Result<Opened, Error> {
             (kept, count) = (offset, n as u64 + 1);
             continue;
         }
-        let change = decode(line).map_err(|e| Error(format!("journal line {}: {e}", n + 1)))?;
+        let mut change = decode(line).map_err(|e| Error(format!("journal line {}: {e}", n + 1)))?;
+        if version < 3
+            && let Change::Property { target, .. } = &mut change
+            && let AdtRef::ObjectAttribute(_, a) = *target
+        {
+            *target = AdtRef::ClassAttribute(a);
+        }
         match version {
             1 => {
                 store.replay(change);
@@ -202,7 +213,7 @@ fn opened(dir: &Path) -> Result<Opened, Error> {
         dir: dir.to_path_buf(),
         file,
     };
-    // A new journal, or one of version 1, is written anew in this one's.
+    // A new journal, or an older one, is written anew in this one's.
     if version < VERSION || text.is_empty() {
         count = writer.rewrite(&store.changes()).map_err(io)?;
     }

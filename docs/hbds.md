@@ -114,9 +114,13 @@ invoked, the associated condition is implicitly tested", and the action
   runs its class's; setting an attribute's value runs the class
   attribute's; asserting a link between objects runs the class link's
   (page 158: "tested any time a new link between objects will be
-  instantiated"). Then the object's own. THIS is the object concerned:
-  the one created, whose attribute is set, from which the link goes.
-  Reading runs nothing.
+  instantiated"). Then the object attribute's or object link's own, then
+  the object's. THIS is the object concerned: the one created, whose
+  attribute is set, from which the link goes. Reading runs nothing.
+  (2026-11-15: until then the object attribute and the object link ran
+  nothing of their own, a property set on an object attribute landing on
+  its class attribute; page 156 puts a COND on "n'importe quel TAD,
+  extensions comprises".)
 - **A false COND refuses the change**, as page 158's constraints read (a
   temperature above zero, at most six neighbors): the statement fails
   with a runtime error naming the COND, and the store is as it was before
@@ -543,7 +547,11 @@ flowchart LR
   `ASSERT ... NOT` removes it. `a "r" b` in an expression tells whether
   the link is there.
 - **Attributes** are created on classes; objects carry their values (LET
-  sets one). An attribute specified COMPUTED, or with a `FUNCTION "CLASS" .
+  sets one). An object attribute is an a.d.t. of its own: it carries its
+  value and its own properties, COND and ACTION among them (pages 156 and
+  157), and so does an object link. Neither has a state of its own (page
+  23 changes none): each is seen while what it depends on is, and
+  specified by its class attribute (page 24). An attribute specified COMPUTED, or with a `FUNCTION "CLASS" .
   "ATTRIBUTE"` in the program, is computed when read, by that function,
   THIS being the object (pages 127 and 128).
 - **States**: HIBERN and AWAKE, DESTROY and RESUR, and PURGE, which removes
