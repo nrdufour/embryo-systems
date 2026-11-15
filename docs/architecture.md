@@ -251,8 +251,11 @@ up in one go; `Durable` says how far it has got, and each event to a
 client waits for the transactions made before it. The daemon compacts
 once the journal is past `--compact-at` lines (10 000) and twice what the
 last compaction wrote, looked at after each turn and, idle, every 100 ms
-(the journal may still be catching up); the executor hands the thread `changes()` in
-the queue's order, so that what follows lands in the new file;
+(the journal may still be catching up); the executor hands the thread an
+image of the store (`Store::image()`, its maps shared) in the queue's
+order, so that what follows lands in the new file, and the thread builds
+its `changes()` (2026-11-15: built on the executor, they paused it for
+290 ms at a million objects; now 2 µs);
 `embryo-systems compact DIR` does it for a store no daemon holds. A write
 that fails stops the journal: what follows is refused, and waiting
 clients hear why. Not built: a benchmark of the journal, whose syncs
