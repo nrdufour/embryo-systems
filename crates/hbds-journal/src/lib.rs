@@ -27,7 +27,7 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use hbds_core::AdtRef;
@@ -305,6 +305,8 @@ struct Progress {
     failed: Option<String>,
     /// A compaction asked for and not yet done.
     compacting: bool,
+    /// The journal's thread panicked: `failed` says so too.
+    panicked: bool,
 }
 
 struct Shared {
@@ -312,9 +314,39 @@ struct Shared {
     changed: Condvar,
 }
 
+impl Shared {
+    /// The progress, whoever panicked holding it: what it says of the
+    /// disk stays true, and a waiter must hear of the panic, not join it.
+    fn lock(&self) -> MutexGuard<'_, Progress> {
+        self.progress.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn wait<'a>(&self, p: MutexGuard<'a, Progress>) -> MutexGuard<'a, Progress> {
+        self.changed.wait(p).unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Held by the journal's thread: if it ends on a panic, the journal has
+/// stopped, and those who wait on it hear so.
+struct Watch(Arc<Shared>);
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let mut p = self.0.lock();
+            p.panicked = true;
+            p.failed
+                .get_or_insert_with(|| "the journal's thread panicked".into());
+            self.0.changed.notify_all();
+        }
+    }
+}
+
 enum Job {
     Write(String, u64),
     Compact(Box<Image>),
+    #[cfg(test)]
+    Panic,
 }
 
 /// The grouped journal's progress, shared: what a client waits on before
@@ -327,20 +359,20 @@ pub struct Durable {
 
 impl Durable {
     pub fn stats(&self) -> Stats {
-        self.shared.progress.lock().unwrap().stats
+        self.shared.lock().stats
     }
 
     /// What a client waits for before it hears of what it did: the
     /// transactions submitted, and the one held back, if one is.
     pub fn stamp(&self) -> u64 {
-        let p = self.shared.progress.lock().unwrap();
+        let p = self.shared.lock();
         p.stats.submitted + p.held.is_some() as u64
     }
 
     /// Waits until `submitted` transactions are on disk; the journal's
     /// failure if it stopped first.
     pub fn wait(&self, submitted: u64) -> Result<(), String> {
-        let mut p = self.shared.progress.lock().unwrap();
+        let mut p = self.shared.lock();
         loop {
             if p.stats.synced >= submitted {
                 return Ok(());
@@ -348,7 +380,16 @@ impl Durable {
             if let Some(e) = &p.failed {
                 return Err(e.clone());
             }
-            p = self.shared.changed.wait(p).unwrap();
+            p = self.shared.wait(p);
+        }
+    }
+
+    /// Returns once the journal's thread has panicked: never, when all
+    /// goes well. What the daemon's watcher waits on, to end the process.
+    pub fn panicked(&self) {
+        let mut p = self.shared.lock();
+        while !p.panicked {
+            p = self.shared.wait(p);
         }
     }
 
@@ -358,7 +399,7 @@ impl Durable {
     /// its changes from an image of it, so the store goes on meanwhile.
     pub fn maybe_compact(&self, store: &Store, at: u64) {
         {
-            let mut p = self.shared.progress.lock().unwrap();
+            let mut p = self.shared.lock();
             let s = p.stats;
             // Not while the kernel holds a step back: compaction would
             // keep half of it.
@@ -386,7 +427,7 @@ impl Recorder for Grouped {
     /// Queued, not written: the journal's thread writes and syncs it with
     /// what else is queued. A journal that stopped refuses it.
     fn record_all(&mut self, changes: &[Change]) -> Result<(), String> {
-        let mut p = self.shared.progress.lock().unwrap();
+        let mut p = self.shared.lock();
         if let Some(e) = &p.failed {
             return Err(e.clone());
         }
@@ -402,14 +443,14 @@ impl Recorder for Grouped {
     }
 
     fn hold(&mut self) {
-        let mut p = self.shared.progress.lock().unwrap();
+        let mut p = self.shared.lock();
         p.held.get_or_insert_with(Vec::new);
     }
 
     /// Under one lock, so that no stamp falls between the held write
     /// and its submission.
     fn release(&mut self, extra: &[Change]) -> Result<(), String> {
-        let mut p = self.shared.progress.lock().unwrap();
+        let mut p = self.shared.lock();
         let mut changes = p.held.take().unwrap_or_default();
         changes.extend_from_slice(extra);
         if changes.is_empty() {
@@ -458,8 +499,9 @@ pub fn open_grouped(dir: &Path, delay: Duration) -> Result<(Store, Durable, Vec<
 }
 
 fn journal_thread(mut writer: Writer, queue: Receiver<Job>, shared: Arc<Shared>, delay: Duration) {
+    let _watch = Watch(shared.clone());
     let fail = |e: std::io::Error| {
-        let mut p = shared.progress.lock().unwrap();
+        let mut p = shared.lock();
         p.failed = Some(format!("the journal cannot be written: {e}"));
         shared.changed.notify_all();
     };
@@ -476,7 +518,7 @@ fn journal_thread(mut writer: Writer, queue: Receiver<Job>, shared: Arc<Shared>,
                 fail(e);
                 return false;
             }
-            let mut p = shared.progress.lock().unwrap();
+            let mut p = shared.lock();
             p.stats.synced += *count;
             p.stats.syncs += 1;
             p.stats.lines += *lines;
@@ -501,7 +543,7 @@ fn journal_thread(mut writer: Writer, queue: Receiver<Job>, shared: Arc<Shared>,
                     }
                     match writer.rewrite(&image) {
                         Ok(n) => {
-                            let mut p = shared.progress.lock().unwrap();
+                            let mut p = shared.lock();
                             p.stats.compactions += 1;
                             p.stats.lines = n;
                             p.stats.compacted = n;
@@ -510,6 +552,8 @@ fn journal_thread(mut writer: Writer, queue: Receiver<Job>, shared: Arc<Shared>,
                         Err(e) => return fail(e),
                     }
                 }
+                #[cfg(test)]
+                Job::Panic => panic!("asked to, by a test"),
             }
         }
         if !flush(&mut batch, &mut count, &mut lines, &mut writer) {
@@ -976,5 +1020,27 @@ mod tests {
         assert!(decode("class 1 \"A\" class extra").is_err());
         assert!(decode("set 1 2 (f").is_err());
         assert!(decode("teleport 1").is_err());
+    }
+
+    #[test]
+    fn a_panic_on_the_journals_thread_wakes_its_waiters() {
+        let dir = std::env::temp_dir().join(format!("hbds-journal-panic-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (mut store, durable, _) = open_grouped(&dir, Duration::ZERO).unwrap();
+        let waiter = durable.clone();
+        let waiting = std::thread::spawn(move || waiter.wait(1));
+        durable.jobs.send(Job::Panic).unwrap();
+        assert_eq!(
+            waiting.join().unwrap(),
+            Err("the journal's thread panicked".to_string())
+        );
+        durable.panicked();
+        // And nothing more is taken.
+        assert!(
+            store
+                .create_class("A", hbds_gtad::ClassKind::Class)
+                .is_err()
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }
