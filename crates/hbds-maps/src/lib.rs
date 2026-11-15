@@ -8,16 +8,22 @@
 //!
 //! The deletion is the textbook's, top-down: a node is given a key to
 //! spare, by a sibling or by a merge, before the descent enters it.
+//!
+//! The insertion is too, but for where a full node splits: where the new
+//! key goes, if that is past its middle, and not at the middle. Ids
+//! ascend, so most inserts land at the end of a run of keys, a whole map
+//! or one class in an index, and a split at the middle would leave every
+//! node behind them half empty. A node is always allocated for `MAX`
+//! entries, so it never grows.
 
 use std::fmt;
 use std::sync::Arc;
 
-/// The minimum degree: a node holds `T - 1` to `2T - 1` entries, the root
-/// as few as one.
+/// The minimum degree: a node holds up to `2T - 1` entries, and at least
+/// one; a split at the middle leaves `T - 1` on each side.
 const T: usize = 8;
 const MAX: usize = 2 * T - 1;
 
-#[derive(Clone)]
 struct Node<K, V> {
     keys: Vec<K>,
     vals: Vec<V>,
@@ -26,8 +32,28 @@ struct Node<K, V> {
 }
 
 impl<K, V> Node<K, V> {
+    /// An empty node, with room for `MAX` entries.
+    fn new(internal: bool) -> Self {
+        Node {
+            keys: Vec::with_capacity(MAX),
+            vals: Vec::with_capacity(MAX),
+            children: Vec::with_capacity(if internal { MAX + 1 } else { 0 }),
+        }
+    }
+
     fn leaf(&self) -> bool {
         self.children.is_empty()
+    }
+}
+
+/// A copy with room for `MAX` entries, as every node has.
+impl<K: Clone, V: Clone> Clone for Node<K, V> {
+    fn clone(&self) -> Self {
+        let mut n = Node::new(!self.leaf());
+        n.keys.extend_from_slice(&self.keys);
+        n.vals.extend_from_slice(&self.vals);
+        n.children.extend_from_slice(&self.children);
+        n
     }
 }
 
@@ -134,24 +160,21 @@ impl<K: Ord + Clone, V: Clone> PMap<K, V> {
     /// Sets `key` to `val`; the value it had, if any.
     pub fn insert(&mut self, key: K, val: V) -> Option<V> {
         if self.root.is_none() {
-            self.root = Some(Arc::new(Node {
-                keys: vec![key],
-                vals: vec![val],
-                children: Vec::new(),
-            }));
+            let mut node = Node::new(false);
+            node.keys.push(key);
+            node.vals.push(val);
+            self.root = Some(Arc::new(node));
             self.len = 1;
             return None;
         }
         let PMap { root, copied, .. } = self;
         let root = root.as_mut().unwrap();
         if root.keys.len() == MAX {
-            let old = root.clone();
-            *root = Arc::new(Node {
-                keys: Vec::new(),
-                vals: Vec::new(),
-                children: vec![old],
-            });
-            split(cow(root, copied), 0, copied);
+            let at = position(&root.keys, &key);
+            let mut node = Node::new(true);
+            node.children.push(root.clone());
+            *root = Arc::new(node);
+            split(cow(root, copied), 0, at, copied);
         }
         let old = insert(cow(root, copied), key, val, copied);
         if old.is_none() {
@@ -226,24 +249,27 @@ impl<K: Ord + Clone, V: Clone> PMap<K, V> {
     }
 }
 
-/// Splits the full child `i` of `node` around its median, which moves up.
-fn split<K: Clone, V: Clone>(node: &mut Node<K, V>, i: usize, copied: &mut u64) {
+/// Where `key` goes in `keys`.
+fn position<K: Ord>(keys: &[K], key: &K) -> usize {
+    keys.binary_search(key).unwrap_or_else(|i| i)
+}
+
+/// Splits the full child `i` of `node`, for a key that goes at `at` in it;
+/// the entry between the halves moves up. That is the one at `at`, so the
+/// key ends the left half, if `at` is past the middle; the median if not.
+/// Each half keeps one entry at least.
+fn split<K: Clone, V: Clone>(node: &mut Node<K, V>, i: usize, at: usize, copied: &mut u64) {
+    let mid = at.clamp(T - 1, MAX - 2);
     let child = cow(&mut node.children[i], copied);
-    let keys = child.keys.split_off(T);
-    let vals = child.vals.split_off(T);
-    let children = if child.leaf() {
-        Vec::new()
-    } else {
-        child.children.split_off(T)
-    };
+    let mut right = Node::new(!child.leaf());
+    right.keys.extend(child.keys.drain(mid + 1..));
+    right.vals.extend(child.vals.drain(mid + 1..));
+    if !child.leaf() {
+        right.children.extend(child.children.drain(mid + 1..));
+    }
     let (k, v) = (child.keys.pop().unwrap(), child.vals.pop().unwrap());
     node.keys.insert(i, k);
     node.vals.insert(i, v);
-    let right = Node {
-        keys,
-        vals,
-        children,
-    };
     node.children.insert(i + 1, Arc::new(right));
 }
 
@@ -264,8 +290,10 @@ fn insert<K: Ord + Clone, V: Clone>(
             node.vals.insert(i, val);
             return None;
         }
-        if node.children[i].keys.len() == MAX {
-            split(node, i, copied);
+        let child = &node.children[i];
+        if child.keys.len() == MAX {
+            let at = position(&child.keys, &key);
+            split(node, i, at, copied);
             match key.cmp(&node.keys[i]) {
                 std::cmp::Ordering::Equal => {
                     return Some(std::mem::replace(&mut node.vals[i], val));
@@ -465,7 +493,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// The B-tree's invariants: keys sorted within and across nodes, every
-    /// node but the root between `T - 1` and `MAX` entries, an internal
+    /// node but the root between one and `MAX` entries, an internal
     /// node one child more than its keys, every leaf at one depth. The
     /// number of entries.
     fn check<K: Ord + Clone + fmt::Debug, V: Clone>(map: &PMap<K, V>) {
@@ -479,8 +507,7 @@ mod tests {
         ) -> usize {
             assert_eq!(n.keys.len(), n.vals.len());
             assert!(n.keys.len() <= MAX, "a node over full");
-            assert!(root || n.keys.len() >= T - 1, "a node under half");
-            assert!(!n.keys.is_empty(), "an empty node");
+            assert!(root || !n.keys.is_empty(), "an empty node");
             assert!(n.keys.windows(2).all(|w| w[0] < w[1]), "keys out of order");
             assert!(lo.is_none_or(|lo| lo < &n.keys[0]));
             assert!(hi.is_none_or(|hi| n.keys.last().unwrap() < hi));
@@ -623,6 +650,37 @@ mod tests {
         map.restore(before);
         assert_eq!(map.get(&5), Some(&0));
         assert_eq!(map.copied(), path);
+    }
+
+    /// Keys that ascend, in one run or in several interleaved (an index
+    /// by class, then id), leave the nodes nearly full; removals then go
+    /// through the one-entry nodes the splits left at the edges.
+    #[test]
+    fn ascending_keys_fill_the_nodes() {
+        fn nodes<K, V>(n: &Node<K, V>) -> usize {
+            1 + n.children.iter().map(|c| nodes(c)).sum::<usize>()
+        }
+        for runs in [1, 5] {
+            let mut map = PMap::new();
+            let mut model = BTreeMap::new();
+            for k in 0..10_000u64 {
+                let key = (k % runs) * 1_000_000 + k;
+                map.insert(key, k);
+                model.insert(key, k);
+            }
+            same(&map, &model);
+            let per_node = map.len() as f64 / nodes(map.root.as_deref().unwrap()) as f64;
+            assert!(
+                per_node >= (MAX - 3) as f64,
+                "{runs}: {per_node:.1} entries a node"
+            );
+            let mut next = generator(0x5851_F42D_4C95_7F2D);
+            for _ in 0..8_000 {
+                let k = *model.keys().nth(next(model.len() as u64) as usize).unwrap();
+                assert_eq!(map.remove(&k), model.remove(&k));
+            }
+            same(&map, &model);
+        }
     }
 
     #[test]
