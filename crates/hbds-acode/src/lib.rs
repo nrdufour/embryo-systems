@@ -10,6 +10,10 @@
 //! values are written as hbds-core's terms. A newer version is refused
 //! (decision 10).
 
+mod verify;
+
+pub use verify::depth_at;
+
 use std::fmt::{self, Write as _};
 
 use hbds_core::spec::Spec;
@@ -922,8 +926,16 @@ impl Unit {
         out
     }
 
-    /// A unit from its text form.
+    /// A unit from its text form, verified: what a file or a client
+    /// gives is not run as it is written (decision 1).
     pub fn read(text: &str) -> Result<Unit, Error> {
+        let unit = Unit::parse(text)?;
+        unit.verify()?;
+        Ok(unit)
+    }
+
+    /// A unit as its text writes it, whatever its code does.
+    fn parse(text: &str) -> Result<Unit, Error> {
         let mut lines = text
             .lines()
             .enumerate()
@@ -1167,14 +1179,14 @@ mod tests {
     fn text_round_trips() {
         let unit = sample();
         let text = unit.text();
-        assert_eq!(Unit::read(&text), Ok(unit), "{text}");
+        assert_eq!(Unit::parse(&text), Ok(unit), "{text}");
     }
 
     #[test]
     fn a_newer_version_is_refused() {
         let text = sample().text().replacen("acode 1", "acode 2", 1);
         assert_eq!(
-            Unit::read(&text),
+            Unit::parse(&text),
             Err(Error(
                 "A-code version 2 is newer than this reader's, 1".into()
             ))
@@ -1184,17 +1196,17 @@ mod tests {
     #[test]
     fn a_unit_says_its_language() {
         let text = sample().text().replacen("language \"ADT'81\"\n", "", 1);
-        let e = Unit::read(&text).unwrap_err().0;
+        let e = Unit::parse(&text).unwrap_err().0;
         assert!(e.contains("a `language \"NAME\"` line expected"), "{e}");
     }
 
     #[test]
     fn errors_say_where() {
         let text = sample().text().replace("op array.dot", "op array.cross");
-        let e = Unit::read(&text).unwrap_err().0;
+        let e = Unit::parse(&text).unwrap_err().0;
         assert!(e.contains("\"array.cross\" is not an operation"), "{e}");
         let text = sample().text().replace("   1 -", "   2 -");
-        let e = Unit::read(&text).unwrap_err().0;
+        let e = Unit::parse(&text).unwrap_err().0;
         assert!(e.contains("instruction 2 where 1 is next"), "{e}");
     }
 }

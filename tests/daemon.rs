@@ -1075,21 +1075,24 @@ fn a_constraint_refuses_a_session_and_the_store_keeps_its_law() {
     assert!(dump.contains("    t = 6.0\n"), "{dump}");
 }
 
-/// A-code that reads well and runs badly: a slot its module does not have.
-const PANICS: &str =
-    "acode 1\nlanguage \"ADT'81\"\n\nmodule program \"BAD\" \"BAD\" 1:1\n   0 1:1      load 7\n";
-
 #[test]
 fn a_daemon_whose_executor_panics_ends_and_starts_again() {
     let dir = store_dir("daemon-panic-store");
     let start = write("daemon-panic", "start.adt", COUNTER);
-    let bad = write("daemon-panic", "bad.acode", PANICS);
     {
-        let mut daemon = Daemon::with("panic", &["--store", &dir, "--pace", "paused"]);
+        // No session can make the executor panic, as far as is known:
+        // it is asked to, when the store's time reaches 3.
+        let args = ["--store", &dir, "--pace", "paused", "--crash-at", "3"];
+        let mut daemon = Daemon::with("panic", &args);
         assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
-        let mut exec = Command::new(BIN);
-        exec.args(["exec", "--connect", daemon.socket(), &bad]);
-        assert!(!spawn(exec).wait_with_output().unwrap().status.success());
+        let mut s = UnixStream::connect(&daemon.socket).unwrap();
+        let body = "{\"pace\": \"fast\"}";
+        write!(
+            s,
+            "POST /pace HTTP/1.1\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
         // Not left answering with nothing: gone, with an error.
         let t = Instant::now();
         let status = loop {
@@ -1108,6 +1111,58 @@ fn a_daemon_whose_executor_panics_ends_and_starts_again() {
     let daemon = Daemon::with("panic", &["--store", &dir, "--pace", "paused"]);
     let time = daemon.get("/time");
     assert!(time.contains("\"agent\":\"w1[w]\""), "{time}");
+}
+
+/// A-code that reads well and would run badly: a slot its module does
+/// not have.
+const MALFORMED: &str =
+    "acode 1\nlanguage \"ADT'81\"\n\nmodule program \"BAD\" \"BAD\" 1:1\n   0 1:1      load 7\n";
+
+#[test]
+fn malformed_a_code_is_refused_and_the_daemon_goes_on() {
+    let daemon = Daemon::start("malformed");
+    let bad = write("daemon-malformed", "bad.acode", MALFORMED);
+    let mut exec = Command::new(BIN);
+    exec.args(["exec", "--connect", daemon.socket(), &bad]);
+    let out = spawn(exec).wait_with_output().unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains("slot 7, and the module has 0"), "{err}");
+    assert_eq!(daemon.get("/sessions"), "");
+}
+
+/// A process's ACTION calls a subroutine: its own program's, whatever
+/// other programs the daemon has loaded since.
+#[test]
+fn kept_code_calls_the_modules_of_the_program_that_runs_it() {
+    let daemon = Daemon::with("homes", &["--pace", "paused"]);
+    let note = |who: &str| {
+        format!(
+            "subroutine note ;\nbegin\n        let \"w1\" [ \"w\" ] . \"who\" := \"{who}\"\nend ;\n"
+        )
+    };
+    let a = format!(
+        "program a ;\nbegin\n        create \"w\" ; include \"w\" into \"process\" ; create \"w\" . \"v\" ; create \"w\" . \"who\" ;\n        let \"w\" . \"v\" ' ACTION := \"CALL NOTE\" ;\n        create \"w1\" [ \"w\" ] ;\n        activate \"w1\" [ \"w\" ] ;\n        print \"started\"\nend ;\n\n{}\ncoroutine \"w\" ;\nbegin\n        hold for 5 ;\n        let this . \"v\" := 1 ;\n        hold for 1\nend ;\n",
+        note("a's")
+    );
+    let b = format!(
+        "program b ;\nbegin\n        print \"here\"\nend ;\n\nsubroutine other ;\nbegin\n        print \"other\"\nend ;\n\n{}",
+        note("b's")
+    );
+    let a = write("daemon-homes", "a.adt", &a);
+    let b = write("daemon-homes", "b.adt", &b);
+    assert_eq!(within(spawn(daemon.client(&a)), 20), "started\n");
+    assert_eq!(within(spawn(daemon.client(&b)), 20), "here\n");
+    daemon.post("/pace", "{\"pace\": \"fast\"}");
+    let t = Instant::now();
+    while !daemon.get("/store").contains("who = ") {
+        assert!(
+            t.elapsed() < Duration::from_secs(20),
+            "the process never ran"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let store = daemon.get("/store");
+    assert!(store.contains("who = a's"), "{store}");
 }
 
 #[test]
@@ -1172,4 +1227,114 @@ fn a_refused_statement_activates_nothing() {
         store.contains("n = 0") && !store.contains("object new"),
         "{store}"
     );
+}
+
+/// A process whose body waits inside a function, in the middle of an
+/// expression, and inside a subroutine that changes its caller's
+/// variable: frames on frames, an operand below, a reference above.
+const DEEP: &str = "program start ;\nbegin\n        create \"w\" ; include \"w\" into \"process\" ; create \"w\" . \"n\" ;\n        create \"w1\" [ \"w\" ] ;\n        activate \"w1\" [ \"w\" ] ;\n        print \"started\"\nend ;\n\nfunction wait (x) returns integer ;\n        x : integer in ;\nbegin\n        hold for 1 ;\n        result x + 1\nend ;\n\nsubroutine bump (x) ;\n        x : integer inout ;\nbegin\n        hold for 1 ;\n        x := x + 1000\nend ;\n\ncoroutine \"w\" ;\nlocal\n        i : integer init 0 ;\nbegin\n        loop while true do\n                i := 100 + wait(i) ;\n                call bump(i) ;\n                let this . \"n\" := i\n        endloop\nend ;\n";
+
+#[test]
+fn a_process_resumes_inside_the_modules_it_called() {
+    let dir = store_dir("daemon-deep-store");
+    let start = write("daemon-deep", "start.adt", DEEP);
+    let reads = write("daemon-deep", "reads.adt", READS);
+    let reads = reads.as_str();
+    let until = |daemon: &Daemon, time: f64| {
+        daemon.post(
+            "/pace",
+            &format!("{{\"pace\": \"fast\", \"horizon\": {time}}}"),
+        );
+        let t = Instant::now();
+        while daemon.now() < time {
+            assert!(t.elapsed() < Duration::from_secs(20), "time stands still");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    {
+        // Stopped at 1, inside the function; then at 2, inside the
+        // subroutine.
+        let daemon = Daemon::with("deep", &["--store", &dir, "--pace", "paused"]);
+        assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+        until(&daemon, 1.0);
+    }
+    {
+        let daemon = Daemon::with("deep", &["--store", &dir, "--pace", "paused"]);
+        until(&daemon, 2.0);
+    }
+    let daemon = Daemon::with("deep", &["--store", &dir, "--pace", "paused"]);
+    until(&daemon, 4.0);
+    // 0 + 1 + 100 + 1000, twice over: every frame went on where it was.
+    let t = Instant::now();
+    while count(&daemon, reads).0 != 2202.0 {
+        let n = count(&daemon, reads).0;
+        assert!(t.elapsed() < Duration::from_secs(20), "{n} counted");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// The journal's last `fibers` line, changed by `damage`.
+fn damaged(journal: &str, damage: impl Fn(&str) -> String) -> String {
+    let at = journal.rfind("\nfibers ").expect("fibers kept") + 1;
+    let end = at + journal[at..].find('\n').unwrap();
+    format!(
+        "{}{}{}",
+        &journal[..at],
+        damage(&journal[at..end]),
+        &journal[end..]
+    )
+}
+
+#[test]
+fn damaged_fibers_are_refused_not_run() {
+    let dir = store_dir("daemon-damaged-store");
+    let start = write("daemon-damaged", "start.adt", DEEP);
+    {
+        // Stopped inside the function: two frames, an operand below.
+        let daemon = Daemon::with("damaged", &["--store", &dir, "--pace", "paused"]);
+        assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+        daemon.post("/pace", "{\"pace\": \"fast\", \"horizon\": 0.5}");
+        let t = Instant::now();
+        while !daemon.get("/time").contains("\"at\":1") {
+            assert!(
+                t.elapsed() < Duration::from_secs(20),
+                "the process does not hold"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let journal = fs::read_to_string(Path::new(&dir).join("journal")).unwrap();
+    // The function's frame, module 1 of its unit: its pc, out of it.
+    let pc = |l: &str| {
+        let at = l.rfind(" 1) ").expect("the function's frame") + 4;
+        let end = at + l[at..].find(' ').unwrap();
+        format!("{}9999{}", &l[..at], &l[end..])
+    };
+    let operand = |l: &str| l.replacen("((value (i 100))) - running", "() - running", 1);
+    let fiber = |l: &str| l.replacen("((6 1))", "((6 7))", 1);
+    type Damage<'a> = &'a dyn Fn(&str) -> String;
+    let damages: [(&str, Damage); 3] = [
+        ("an instruction that is not there", &pc),
+        ("an operand missing", &operand),
+        ("a fiber that is not there", &fiber),
+    ];
+    for (what, damage) in damages {
+        let changed = damaged(&journal, damage);
+        assert_ne!(changed, journal, "{what}: nothing changed");
+        fs::write(Path::new(&dir).join("journal"), changed).unwrap();
+        // It starts, says what does not read, and goes on: the process
+        // is still due, and time passes it without a panic.
+        let mut daemon = Daemon::with("damaged", &["--store", &dir, "--pace", "fast"]);
+        let t = Instant::now();
+        while daemon.now() < 5.0 {
+            assert!(
+                t.elapsed() < Duration::from_secs(20),
+                "{what}: time stands still"
+            );
+            assert_eq!(daemon.child.try_wait().unwrap(), None, "{what}: gone");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(daemon.child.try_wait().unwrap(), None, "{what}: gone");
+    }
 }

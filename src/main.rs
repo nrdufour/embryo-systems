@@ -177,6 +177,7 @@ fn daemon(args: &[&str]) -> ExitCode {
         slice: 10_000,
         compact_at: 10_000,
         clock: hbds_daemon::Clock::Paused,
+        crash_at: None,
     };
     let (mut clock, mut horizon, mut factor) = ("paused", None, None);
     let real = |n: &str| n.parse::<f64>().ok().filter(|x| x.is_finite());
@@ -192,6 +193,8 @@ fn daemon(args: &[&str]) -> ExitCode {
             ["--pace", c @ ("paused" | "fast" | "real")] => clock = c,
             ["--horizon", t] if real(t).is_some() => horizon = real(t),
             ["--factor", f] if real(f).is_some_and(|f| f > 0.0) => factor = real(f),
+            // The executor panics at this time: for tests.
+            ["--crash-at", t] if real(t).is_some() => pace.crash_at = real(t),
             // Slows each sync of the journal: for tests.
             ["--sync-delay", ms] if ms.parse::<u64>().is_ok() => {
                 delay = ms.parse().expect("checked")
