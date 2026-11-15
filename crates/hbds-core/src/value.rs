@@ -44,8 +44,9 @@ pub enum Scalar {
     Float(f64),
     Gauss(i64, i64),
     Complex(f64, f64),
-    /// Real part, then the i, j and k parts.
-    Quaternion([f64; 4]),
+    /// Real part, then the i, j and k parts. Boxed: it would double
+    /// every value's size.
+    Quaternion(Box<[f64; 4]>),
     Boolean(bool),
     Character(char),
     String(Arc<str>),
@@ -55,21 +56,66 @@ pub enum Scalar {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fz {
     pub x: Scalar,
-    /// The half-width of the approximation, `+-`.
-    pub appr: Option<f64>,
-    /// The probability, `%`.
-    pub prob: Option<f64>,
-    /// The opinion, `@`.
-    pub subj: Option<String>,
+    /// None when exact, as nearly every value is: it then costs a pointer.
+    fuzz: Option<Box<Fuzz>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Fuzz {
+    appr: Option<f64>,
+    prob: Option<f64>,
+    subj: Option<String>,
 }
 
 impl Fz {
     pub fn exact(x: Scalar) -> Fz {
+        Fz { x, fuzz: None }
+    }
+
+    pub fn new(x: Scalar, appr: Option<f64>, prob: Option<f64>, subj: Option<String>) -> Fz {
+        let fuzz = (appr.is_some() || prob.is_some() || subj.is_some())
+            .then(|| Box::new(Fuzz { appr, prob, subj }));
+        Fz { x, fuzz }
+    }
+
+    /// The half-width of the approximation, `+-`.
+    pub fn appr(&self) -> Option<f64> {
+        self.fuzz.as_ref().and_then(|f| f.appr)
+    }
+
+    /// The probability, `%`.
+    pub fn prob(&self) -> Option<f64> {
+        self.fuzz.as_ref().and_then(|f| f.prob)
+    }
+
+    /// The opinion, `@`.
+    pub fn subj(&self) -> Option<&str> {
+        self.fuzz.as_ref().and_then(|f| f.subj.as_deref())
+    }
+
+    pub fn is_exact(&self) -> bool {
+        self.fuzz.is_none()
+    }
+
+    /// The same fuzziness on another value.
+    pub fn with(&self, x: Scalar) -> Fz {
         Fz {
             x,
-            appr: None,
-            prob: None,
-            subj: None,
+            fuzz: self.fuzz.clone(),
+        }
+    }
+
+    pub fn set_prob(&mut self, prob: Option<f64>) {
+        let fuzz = self.fuzz.get_or_insert_with(|| {
+            Box::new(Fuzz {
+                appr: None,
+                prob: None,
+                subj: None,
+            })
+        });
+        fuzz.prob = prob;
+        if fuzz.appr.is_none() && fuzz.prob.is_none() && fuzz.subj.is_none() {
+            self.fuzz = None;
         }
     }
 }
@@ -79,7 +125,8 @@ pub enum Value {
     One(Fz),
     /// Several values between which one cannot choose (MULT).
     Many(Vec<Fz>),
-    Array(Array),
+    /// Boxed, being three times the size of the others.
+    Array(Box<Array>),
     List(List),
     /// A class, an object, an attribute or a link, in the HBDS store.
     Adt(AdtRef),
@@ -154,14 +201,17 @@ impl fmt::Display for Scalar {
                 write!(f, "{a} {sign} {}i", b.unsigned_abs())
             }
             Scalar::Complex(a, b) => write!(f, "{}{}", float(*a), signed_part(*b, 'i')),
-            Scalar::Quaternion([r, i, j, k]) => write!(
-                f,
-                "{}{}{}{}",
-                float(*r),
-                signed_part(*i, 'i'),
-                signed_part(*j, 'j'),
-                signed_part(*k, 'k')
-            ),
+            Scalar::Quaternion(q) => {
+                let [r, i, j, k] = &**q;
+                write!(
+                    f,
+                    "{}{}{}{}",
+                    float(*r),
+                    signed_part(*i, 'i'),
+                    signed_part(*j, 'j'),
+                    signed_part(*k, 'k')
+                )
+            }
             Scalar::Boolean(b) => f.write_str(if *b { "TRUE" } else { "FALSE" }),
             Scalar::Character(c) => write!(f, "{c}"),
             Scalar::String(s) => f.write_str(s),
@@ -172,13 +222,13 @@ impl fmt::Display for Scalar {
 impl fmt::Display for Fz {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.x)?;
-        if let Some(a) = self.appr {
+        if let Some(a) = self.appr() {
             write!(f, " +- {}", float(a))?;
         }
-        if let Some(p) = self.prob {
+        if let Some(p) = self.prob() {
             write!(f, " % {}", float(p))?;
         }
-        if let Some(s) = &self.subj {
+        if let Some(s) = self.subj() {
             write!(f, " @\"{s}\"")?;
         }
         Ok(())

@@ -201,7 +201,7 @@ fn join(a: Level, b: Level) -> Level {
 /// `s` as a number of level `to`, which is at least its own.
 fn widen(s: &Scalar, to: Level) -> Scalar {
     use Scalar::*;
-    let quaternion = |r: f64, i: f64| Quaternion([r, i, 0.0, 0.0]);
+    let quaternion = |r: f64, i: f64| Quaternion(Box::new([r, i, 0.0, 0.0]));
     match (s, to) {
         (Integer(n), Level::Rational) => Rational(*n, 1),
         (Integer(n), Level::Float) => Float(*n as f64),
@@ -245,16 +245,13 @@ pub fn convert(v: Value, to: Base) -> Computed<Value> {
                     }
                     (x, _) => x.clone(),
                 };
-                Ok(Fz { x, ..fz.clone() })
+                Ok(fz.with(x))
             });
         }
         Base::Boolean | Base::Adt(_) => return Ok(v),
     };
     map_singles(v, &|fz| match level(&fz.x) {
-        Some(from) if join(from, target) == target => Ok(Fz {
-            x: widen(&fz.x, target),
-            ..fz.clone()
-        }),
+        Some(from) if join(from, target) == target => Ok(fz.with(widen(&fz.x, target))),
         Some(_) => fault(format!("cannot store {} in {}", fz.x, a(to))),
         None => Ok(fz.clone()),
     })
@@ -289,7 +286,7 @@ pub fn zero(base: Base) -> Value {
         Base::Float => Scalar::Float(0.0),
         Base::Gauss => Scalar::Gauss(0, 0),
         Base::Complex => Scalar::Complex(0.0, 0.0),
-        Base::Quaternion => Scalar::Quaternion([0.0; 4]),
+        Base::Quaternion => Scalar::Quaternion(Box::new([0.0; 4])),
         Base::Boolean => Scalar::Boolean(false),
         Base::Character => Scalar::Character(' '),
         Base::String => Scalar::String("".into()),
@@ -407,12 +404,12 @@ fn arith(op: Op, a: &Scalar, b: &Scalar) -> Computed<Scalar> {
                 Complex((a * c + b * d) / norm, (b * c - a * d) / norm)
             }
         },
-        (op, Quaternion(p), Quaternion(q)) => Quaternion(match op {
+        (op, Quaternion(p), Quaternion(q)) => Quaternion(Box::new(match op {
             Op::Add => [p[0] + q[0], p[1] + q[1], p[2] + q[2], p[3] + q[3]],
             Op::Sub => [p[0] - q[0], p[1] - q[1], p[2] - q[2], p[3] - q[3]],
-            Op::Mul => hamilton(p, q),
-            _ => hamilton(p, quaternion_inverse(q)?),
-        }),
+            Op::Mul => hamilton(*p, *q),
+            _ => hamilton(*p, quaternion_inverse(*q)?),
+        })),
         _ => unreachable!("numbers widened to one level"),
     })
 }
@@ -502,7 +499,7 @@ fn negate(s: &Scalar) -> Computed<Scalar> {
         Float(f) => Float(-f),
         Gauss(a, b) => Gauss(overflow(a.checked_neg())?, overflow(b.checked_neg())?),
         Complex(a, b) => Complex(-a, -b),
-        Quaternion(q) => Quaternion([-q[0], -q[1], -q[2], -q[3]]),
+        Quaternion(q) => Quaternion(Box::new(q.map(|x| -x))),
         _ => return fault("a sign applies to a number"),
     })
 }
@@ -577,23 +574,23 @@ fn probability(a: Option<f64>, b: Option<f64>) -> Option<f64> {
     }
 }
 
-fn opinion(a: &Option<String>, b: &Option<String>) -> Option<String> {
+fn opinion(a: Option<&str>, b: Option<&str>) -> Option<String> {
     match (a, b) {
         (Some(a), Some(b)) => Some(format!("{a}; {b}")),
-        (a, b) => a.clone().or_else(|| b.clone()),
+        (a, b) => a.or(b).map(str::to_string),
     }
 }
 
 /// The approximation of `a op b`, worst-case to first order.
 fn approximation(op: Op, a: &Fz, b: &Fz) -> Computed<Option<f64>> {
     use Op::*;
-    if a.appr.is_none() && b.appr.is_none() {
+    if a.appr().is_none() && b.appr().is_none() {
         return Ok(None);
     }
     let (Some(x), Some(y)) = (real(&a.x), real(&b.x)) else {
         return fault("the approximation of a complex number: not yet (page 153)");
     };
-    let (dx, dy) = (a.appr.unwrap_or(0.0), b.appr.unwrap_or(0.0));
+    let (dx, dy) = (a.appr().unwrap_or(0.0), b.appr().unwrap_or(0.0));
     Ok(Some(match op {
         Add | Sub => dx + dy,
         Mul => y.abs() * dx + x.abs() * dy,
@@ -640,12 +637,12 @@ pub fn binary_fz(op: Op, a: &Fz, b: &Fz) -> Computed<Fz> {
         }
         _ => return fault("an array operator on single values"),
     };
-    Ok(Fz {
+    Ok(Fz::new(
         x,
         appr,
-        prob: probability(a.prob, b.prob),
-        subj: opinion(&a.subj, &b.subj),
-    })
+        probability(a.prob(), b.prob()),
+        opinion(a.subj(), b.subj()),
+    ))
 }
 
 pub fn unary_fz(op: Unary, a: &Fz) -> Computed<Fz> {
@@ -660,7 +657,7 @@ pub fn unary_fz(op: Unary, a: &Fz) -> Computed<Fz> {
             _ => return fault("NOT takes a boolean"),
         },
     };
-    Ok(Fz { x, ..a.clone() })
+    Ok(a.with(x))
 }
 
 /// A function of a real variable and its derivative, applied with the
@@ -677,11 +674,12 @@ pub fn real_function(
     if v.is_nan() || v.is_infinite() {
         return fault("outside the function's domain");
     }
-    Ok(Fz {
-        x: Scalar::Float(v),
-        appr: a.appr.map(|d| derivative(x).abs() * d),
-        ..a.clone()
-    })
+    Ok(Fz::new(
+        Scalar::Float(v),
+        a.appr().map(|d| derivative(x).abs() * d),
+        a.prob(),
+        a.subj().map(str::to_string),
+    ))
 }
 
 // Values: multiple values combine each with each.
@@ -744,10 +742,10 @@ fn array_op(op: Op, a: &Value, b: &Value) -> Computed<Value> {
     use Op::*;
     let cellwise = |x: &Array, f: &dyn Fn(&Value) -> Computed<Value>| -> Computed<Value> {
         let cells = x.cells.iter().map(f).collect::<Computed<Vec<_>>>()?;
-        Ok(Value::Array(Array {
+        Ok(Value::Array(Box::new(Array {
             cells: cells.into(),
             ..x.clone()
-        }))
+        })))
     };
     match (op, a, b) {
         (ArrayAdd, Value::Array(x), Value::Array(y)) => {
@@ -760,10 +758,10 @@ fn array_op(op: Op, a: &Value, b: &Value) -> Computed<Value> {
                 .zip(y.cells.iter())
                 .map(|(p, q)| binary(Add, p, q))
                 .collect::<Computed<Vec<_>>>()?;
-            Ok(Value::Array(Array {
+            Ok(Value::Array(Box::new(Array {
                 cells: cells.into(),
-                ..x.clone()
-            }))
+                ..(**x).clone()
+            })))
         }
         (ArrayMul, Value::Array(x), Value::Array(y))
             if x.rank == Rank::Matrix && y.rank == Rank::Matrix =>
@@ -783,12 +781,12 @@ fn array_op(op: Op, a: &Value, b: &Value) -> Computed<Value> {
                     cells.push(sum);
                 }
             }
-            Ok(Value::Array(Array {
+            Ok(Value::Array(Box::new(Array {
                 rank: Rank::Matrix,
                 lows: vec![x.lows[0], y.lows[1]],
                 dims: vec![rows, cols],
                 cells: cells.into(),
-            }))
+            })))
         }
         (ArrayMul, s, Value::Array(x)) | (ArrayMul, Value::Array(x), s)
             if !matches!(s, Value::Array(_)) =>
@@ -821,10 +819,10 @@ fn array_op(op: Op, a: &Value, b: &Value) -> Computed<Value> {
                     &binary(Mul, &u[j], &v[i])?,
                 )
             };
-            Ok(Value::Array(Array {
+            Ok(Value::Array(Box::new(Array {
                 cells: vec![term(1, 2)?, term(2, 0)?, term(0, 1)?].into(),
-                ..x.clone()
-            }))
+                ..(**x).clone()
+            })))
         }
         _ => fault(format!(
             "`{}` does not apply to these operands (page 153)",
@@ -838,10 +836,7 @@ mod tests {
     use super::*;
 
     fn approx(x: f64, d: f64) -> Fz {
-        Fz {
-            appr: Some(d),
-            ..Fz::exact(Scalar::Float(x))
-        }
+        Fz::new(Scalar::Float(x), Some(d), None, None)
     }
 
     fn close(a: f64, b: f64) -> bool {
@@ -879,7 +874,7 @@ mod tests {
         for op in [Add, Sub, Mul, Div, Pow] {
             let z = binary_fz(op, &approx(x, dx), &approx(y, dy)).unwrap();
             let expected = measured(op, x, dx, y, dy);
-            let ours = z.appr.unwrap();
+            let ours = z.appr().unwrap();
             assert!(
                 (ours - expected).abs() <= 1e-3 * expected,
                 "{op:?}: {ours} vs {expected}"
@@ -892,30 +887,20 @@ mod tests {
         // X := 273.25 +- 0.22 ; Y := 122.34 +- 0.31 ; Z := X * Y
         let z = binary_fz(Op::Mul, &approx(273.25, 0.22), &approx(122.34, 0.31)).unwrap();
         assert!(matches!(z.x, Scalar::Float(v) if close(v, 273.25 * 122.34)));
-        assert!(close(z.appr.unwrap(), 122.34 * 0.22 + 273.25 * 0.31));
+        assert!(close(z.appr().unwrap(), 122.34 * 0.22 + 273.25 * 0.31));
     }
 
     #[test]
     fn probability_and_opinion() {
-        let a = Fz {
-            prob: Some(0.5),
-            subj: Some("doubtful".into()),
-            ..Fz::exact(Scalar::Integer(2))
-        };
-        let b = Fz {
-            prob: Some(0.4),
-            ..Fz::exact(Scalar::Integer(3))
-        };
+        let a = Fz::new(Scalar::Integer(2), None, Some(0.5), Some("doubtful".into()));
+        let b = Fz::new(Scalar::Integer(3), None, Some(0.4), None);
         let z = binary_fz(Op::Add, &a, &b).unwrap();
-        assert!(close(z.prob.unwrap(), 0.2));
-        assert_eq!(z.subj.as_deref(), Some("doubtful"));
-        let c = Fz {
-            subj: Some("unexpected".into()),
-            ..Fz::exact(Scalar::Integer(1))
-        };
+        assert!(close(z.prob().unwrap(), 0.2));
+        assert_eq!(z.subj(), Some("doubtful"));
+        let c = Fz::new(Scalar::Integer(1), None, None, Some("unexpected".into()));
         let z = binary_fz(Op::Mul, &a, &c).unwrap();
-        assert_eq!(z.subj.as_deref(), Some("doubtful; unexpected"));
-        assert_eq!(z.prob, Some(0.5));
+        assert_eq!(z.subj(), Some("doubtful; unexpected"));
+        assert_eq!(z.prob(), Some(0.5));
     }
 
     #[test]
@@ -957,16 +942,16 @@ mod tests {
         );
         // i j = k, j i = -k
         let (i, j) = (
-            Quaternion([0.0, 1.0, 0.0, 0.0]),
-            Quaternion([0.0, 0.0, 1.0, 0.0]),
+            Quaternion(Box::new([0.0, 1.0, 0.0, 0.0])),
+            Quaternion(Box::new([0.0, 0.0, 1.0, 0.0])),
         );
         assert_eq!(
             arith(Mul, &i, &j).unwrap(),
-            Quaternion([0.0, 0.0, 0.0, 1.0])
+            Quaternion(Box::new([0.0, 0.0, 0.0, 1.0]))
         );
         assert_eq!(
             arith(Mul, &j, &i).unwrap(),
-            Quaternion([0.0, 0.0, 0.0, -1.0])
+            Quaternion(Box::new([0.0, 0.0, 0.0, -1.0]))
         );
         assert_eq!(pow(&Integer(2), &Integer(-2)).unwrap(), Rational(1, 4));
         assert_eq!(pow(&Integer(2), &Integer(10)).unwrap(), Integer(1024));
@@ -986,22 +971,22 @@ mod tests {
 
     #[test]
     fn formatting() {
-        let v = Value::One(Fz {
-            x: Scalar::Float(25.3),
-            appr: Some(0.37),
-            prob: Some(0.73),
-            subj: Some("conform".into()),
-        });
+        let v = Value::One(Fz::new(
+            Scalar::Float(25.3),
+            Some(0.37),
+            Some(0.73),
+            Some("conform".into()),
+        ));
         assert_eq!(v.to_string(), "25.3 +- 0.37 % 0.73 @\"conform\"");
         assert_eq!(Scalar::Complex(1.0, -2.0).to_string(), "1.0 - 2.0i");
         assert_eq!(Scalar::Gauss(1, -2).to_string(), "1 - 2i");
         assert_eq!(Scalar::Rational(3, 4).to_string(), "3 // 4");
-        let m = Value::Array(Array {
+        let m = Value::Array(Box::new(Array {
             rank: Rank::Matrix,
             lows: vec![1, 1],
             dims: vec![2, 2],
             cells: (1..=4).map(Value::integer).collect::<Vec<_>>().into(),
-        });
+        }));
         assert_eq!(m.to_string(), "[[1, 2], [3, 4]]");
     }
 }

@@ -648,7 +648,9 @@ enum Invoked {
 enum Next {
     Go,
     Jump(usize),
-    Return(Option<Value>),
+    /// Boxed: unboxed, `Next` shares the value's tag byte, and copying it
+    /// back from `step` stalls every instruction (about 20% on values-vm).
+    Return(Option<Box<Value>>),
     End(End),
     /// The instruction waits for input: it runs again next turn.
     Wait,
@@ -1604,6 +1606,7 @@ impl<'r> Vm<'r> {
                 }
                 Next::Stop(stop) => return Ok(Exit::Stop(stop)),
                 Next::Return(value) => {
+                    let value = value.map(|v| *v);
                     let callee = self.o.frames.pop().expect("a frame");
                     let kind = self.o.modules[callee.module].kind;
                     let result = match kind {
@@ -1710,7 +1713,7 @@ impl<'r> Vm<'r> {
     fn stamped(&self, v: Value) -> Value {
         match (self.o.ses.stamp, v) {
             (Some(p), Value::One(mut fz)) => {
-                fz.prob = Some(p);
+                fz.set_prob(Some(p));
                 Value::One(fz)
             }
             (_, v) => v,
@@ -1740,7 +1743,7 @@ impl<'r> Vm<'r> {
                         return Ok(Next::End(end));
                     }
                     if let Value::One(fz) = &v {
-                        self.read_fact(fz.prob);
+                        self.read_fact(fz.prob());
                     }
                     self.push(v);
                     return Ok(Next::Go);
@@ -1975,7 +1978,7 @@ impl<'r> Vm<'r> {
         match self.store.get(o, a).cloned() {
             Some(v) => {
                 if let Value::One(fz) = &v {
-                    self.read_fact(fz.prob);
+                    self.read_fact(fz.prob());
                 }
                 self.push(v);
             }
@@ -2092,12 +2095,12 @@ impl<'r> Vm<'r> {
                 } else {
                     dims.iter().product()
                 };
-                let a = Value::Array(hbds_values::Array {
+                let a = Value::Array(Box::new(hbds_values::Array {
                     rank: *rank,
                     lows,
                     dims,
                     cells: vec![fill; size].into(),
-                });
+                }));
                 *self.var_mut(*s) = Var {
                     value: Some(a.clone()),
                     initial: Some(a),
@@ -2233,7 +2236,7 @@ impl<'r> Vm<'r> {
                 let within = self.frame().within;
                 self.enter(*callee, args, None, 0, within);
             }
-            Instr::Result => return Ok(Next::Return(Some(self.pop()))),
+            Instr::Result => return Ok(Next::Return(Some(Box::new(self.pop())))),
             Instr::Return => return Ok(Next::Return(None)),
             Instr::NoResult => return Err("the function ended without a RESULT".into()),
             Instr::ExpectOne(message) => {
