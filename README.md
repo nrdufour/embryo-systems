@@ -170,7 +170,7 @@ services.embryo-systems = {
 
 ## Develop
 
-The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs, on Forgejo where the project lives:
+The flake's dev shell, loaded by direnv, carries every tool, and `just` lists the recipes. `just check` is exactly what CI runs, on a private Forgejo where development happens; GitHub carries the public copy:
 
 - formatting and clippy
 - every test
