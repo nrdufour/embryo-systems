@@ -1,4 +1,4 @@
-acode 1
+acode 2
 language "ADT'81"
 
 module program "calls" "CALLS" 4:1
@@ -30,11 +30,14 @@ param 1 out
 
 module function "half" "HALF" 19:1
 slot "x" integer
+slot "RESULT" float
 param 0 in
    0 19:16    bind 0 0
    1 22:9     stmt
    2 22:16    load 0
    3 22:20    const (f 2.0)
    4 22:16    op div
-   5 22:9     result
-   6 19:1     no.result
+   5 22:16    store 1
+   6 22:16    load 1
+   7 22:9     result
+   8 19:1     no.result

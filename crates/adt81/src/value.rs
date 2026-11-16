@@ -4,7 +4,7 @@
 //! docs/adt81.md, "Running", gives the rules.
 
 use super::ast::{BinaryOp, UnaryOp};
-use super::types::Ty;
+use super::types::{Fuzz, Ty};
 pub use hbds_values::{
     Array, Base, Computed, Fault, Fz, List, Op, Rank, Scalar, Unary, Value, float, rational,
     real_function,
@@ -120,6 +120,26 @@ pub fn convert(v: Value, to: &Ty) -> Computed<Value> {
         Some(b) => hbds_values::convert(v, b),
         None => Ok(v),
     }
+}
+
+/// The fuzziness a declaration takes, in the engines' words.
+pub fn fuzziness(f: Fuzz) -> hbds_values::Fuzziness {
+    hbds_values::Fuzziness {
+        appr: f.appr,
+        prob: f.prob,
+        subj: f.subj,
+        mult: f.mult,
+    }
+}
+
+/// A value as the variable `name`, declared `to`, stores it: converted to
+/// its type, and with no fuzziness it is not declared with (page 152).
+/// What has no type takes anything.
+pub fn fits(v: Value, to: &Ty, fuzz: Fuzz, name: &str) -> Computed<Value> {
+    let Some(b) = base(to) else { return Ok(v) };
+    let v = hbds_values::convert(v, b)?;
+    hbds_values::plain(&v, fuzziness(fuzz), name)?;
+    Ok(v)
 }
 
 /// The value an array's cells start with.

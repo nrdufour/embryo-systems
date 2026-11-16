@@ -340,8 +340,9 @@ fn slot(value: Option<Value>, ty: Typed, constant: bool) -> Slot {
 #[derive(Default)]
 struct Frame {
     vars: HashMap<String, Slot>,
-    /// A function's RESULT.
+    /// A function's RESULT, and the type it converts to.
     result: Option<Value>,
+    returns: Option<Typed>,
     /// The object a computed attribute is computed for, or the one whose
     /// change runs a COND or an ACTION.
     this: Option<AdtRef>,
@@ -634,13 +635,20 @@ impl Machine {
     ) -> Exec<Option<Value>> {
         let mut f = Frame {
             this,
+            returns: match &m.kind {
+                ModuleKind::Function { returns } => Some(Typed::of_scalar(returns)),
+                _ => None,
+            },
             ..Frame::default()
         };
         for (p, arg) in m.parameters.iter().zip(args) {
             let spec = m.specifications.iter().find(|s| s.names.contains(p));
             let ty = spec.map_or(Typed::UNKNOWN, |s| Typed::of(&s.ty));
             let s = match arg {
-                Arg::Value(v) => slot(Some(at(value::convert(v, &ty.ty), p.span)?), ty, false),
+                Arg::Value(v) => {
+                    let v = at(value::fits(v, &ty.ty, ty.fuzz, &p.spelling), p.span)?;
+                    slot(Some(v), ty, false)
+                }
                 Arg::Ref(s) => s,
             };
             f.vars.insert(p.key.clone(), s);
@@ -894,15 +902,16 @@ impl Machine {
                 format!("`{}` is a constant", target.name.spelling),
             ));
         }
+        let name = &target.name.spelling;
         if indices.is_empty() {
-            var.value = Some(at(value::convert(v, &var.ty.ty), span)?);
+            var.value = Some(at(value::fits(v, &var.ty.ty, var.ty.fuzz, name), span)?);
             return Ok(());
         }
         let element = match &var.ty.ty {
             Ty::Array(_, e) => (**e).clone(),
             _ => Ty::Unknown,
         };
-        let v = at(value::convert(v, &element), span)?;
+        let v = at(value::fits(v, &element, var.ty.fuzz, name), span)?;
         match &mut var.value {
             Some(Value::Array(a)) => {
                 let i = at(hbds_values::offset(a, &indices), target.name.span)?;
@@ -960,14 +969,17 @@ impl Machine {
         )
     }
 
-    fn advance(&self, r: &Range, step: &Value, f: &mut Frame) -> Exec<()> {
+    /// The counter, one step on; false if that is past what its type
+    /// holds: the loop is over, the counter as it was.
+    fn advance(&self, r: &Range, step: &Value, f: &mut Frame) -> Exec<bool> {
         let var = Variable {
             name: r.name.clone(),
             indices: Vec::new(),
         };
         let i = self.read(&var, f)?;
-        let next = at(value::binary(BinaryOp::Add, &i, step), r.name.span)?;
-        self.assign(&var, next, f, r.name.span)
+        let next = at(hbds_values::step(&i, step), r.name.span)?;
+        self.assign(&var, next.clone().unwrap_or(i), f, r.name.span)?;
+        Ok(next.is_some())
     }
 
     fn for_loop(
@@ -1004,8 +1016,10 @@ impl Machine {
                 {
                     return Ok(());
                 }
-                if let (Some(r), Some((step, _))) = (range, &counter) {
-                    self.advance(r, step, f)?;
+                if let (Some(r), Some((step, _))) = (range, &counter)
+                    && !self.advance(r, step, f)?
+                {
+                    return Ok(());
                 }
             }
         }
@@ -1170,7 +1184,11 @@ impl Machine {
                 Ok(())
             }
             StmtKind::Result(e) => {
-                f.result = Some(self.eval(e, f)?);
+                let v = self.eval(e, f)?;
+                f.result = Some(match &f.returns {
+                    Some(t) => at(value::fits(v, &t.ty, t.fuzz, "RESULT"), e.span)?,
+                    None => v,
+                });
                 Err(Flow::Return)
             }
             StmtKind::Insert {
@@ -1483,10 +1501,12 @@ impl Machine {
             StmtKind::Resume(c) => self.resume(c, f),
             StmtKind::Read(vs) => {
                 for v in vs {
+                    // What it reads into, before it reads: no line is
+                    // taken for a name that is no variable.
+                    let ty = self.var(&v.name, f)?.lock().unwrap().ty.ty.clone();
                     let line = self.io.lock().unwrap().read_line();
                     let line =
                         line.ok_or_else(|| error(v.name.span, "READ finds no more input"))?;
-                    let ty = self.var(&v.name, f)?.lock().unwrap().ty.ty.clone();
                     let value = self.parse_input(&line, &ty, v.name.span)?;
                     self.assign(v, value, f, v.name.span)?;
                 }
@@ -2833,7 +2853,8 @@ impl Machine {
         let ty = Typed::of(&d.ty);
         let init = match &d.init {
             Some(Init::Initial(c) | Init::Constant(c)) => {
-                Some(at(value::convert(constant(c), &ty.ty), d.span)?)
+                let name = d.names.first().map_or("", |n| n.spelling.as_str());
+                Some(at(value::fits(constant(c), &ty.ty, ty.fuzz, name), d.span)?)
             }
             None => None,
         };

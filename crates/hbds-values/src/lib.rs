@@ -13,7 +13,7 @@
 use std::cmp::Ordering;
 use std::fmt;
 
-pub use hbds_core::spec::Base;
+pub use hbds_core::spec::{Base, Fuzziness};
 pub use hbds_core::value::{Array, Fz, List, Rank, Scalar, Value, float};
 
 /// What went wrong, without where: a language adds the position.
@@ -246,7 +246,8 @@ fn widen(s: &Scalar, to: Level) -> Scalar {
 
 /// A value converted to be stored as `to`: numbers widen, a character
 /// becomes a string, a one-character string a character. Narrowing is a
-/// fault; a.d.t. are not converted.
+/// fault, and so is a value of another sort, a string for a number;
+/// a.d.t. are not converted.
 pub fn convert(v: Value, to: Base) -> Computed<Value> {
     let target = match to {
         Base::Integer => Level::Integer,
@@ -267,18 +268,94 @@ pub fn convert(v: Value, to: Base) -> Computed<Value> {
                             _ => return fault(format!("\"{s}\" is not one character")),
                         }
                     }
-                    (x, _) => x.clone(),
+                    (x @ (Scalar::Character(_) | Scalar::String(_)), _) => x.clone(),
+                    (x, _) => return fault(format!("cannot store {x} in {}", a(to))),
                 };
                 Ok(fz.with(x))
             });
         }
-        Base::Boolean | Base::Adt(_) => return Ok(v),
+        Base::Boolean => {
+            return map_singles(v, &|fz| match fz.x {
+                Scalar::Boolean(_) => Ok(fz.clone()),
+                _ => fault(format!("cannot store {} in {}", fz.x, a(to))),
+            });
+        }
+        Base::Adt(_) => return Ok(v),
     };
     map_singles(v, &|fz| match level(&fz.x) {
         Some(from) if join(from, target) == target => Ok(fz.with(widen(&fz.x, target))),
-        Some(_) => fault(format!("cannot store {} in {}", fz.x, a(to))),
-        None => Ok(fz.clone()),
+        _ => fault(format!("cannot store {} in {}", fz.x, a(to))),
     })
+}
+
+/// The aspects of fuzziness `v` carries that `allowed` does not take, by
+/// keyword: what a variable not declared so may not receive (page 152).
+pub fn beyond(v: &Value, allowed: Fuzziness) -> Vec<&'static str> {
+    let singles: &[Fz] = match v {
+        Value::One(fz) => std::slice::from_ref(fz),
+        Value::Many(fzs) => fzs,
+        _ => &[],
+    };
+    let carried = [
+        (
+            singles.iter().any(|fz| fz.appr().is_some()),
+            allowed.appr,
+            "APPR",
+        ),
+        (
+            singles.iter().any(|fz| fz.prob().is_some()),
+            allowed.prob,
+            "PROB",
+        ),
+        (
+            singles.iter().any(|fz| fz.subj().is_some()),
+            allowed.subj,
+            "SUBJ",
+        ),
+        (matches!(v, Value::Many(_)), allowed.mult, "MULT"),
+    ];
+    (carried.into_iter())
+        .filter(|(carried, allowed, _)| *carried && !*allowed)
+        .map(|(_, _, word)| word)
+        .collect()
+}
+
+/// Refuses `v` for the variable `name`, declared with the fuzziness
+/// `allowed`, if it carries more: what the checker says of a value whose
+/// fuzziness it knows, said here of one known only when it arrives.
+pub fn plain(v: &Value, allowed: Fuzziness, name: &str) -> Computed<()> {
+    let beyond = beyond(v, allowed);
+    if beyond.is_empty() {
+        return Ok(());
+    }
+    fault(format!(
+        "`{name}` is not declared {}, yet receives such a value (page 152)",
+        beyond.join(" ")
+    ))
+}
+
+/// A loop's counter after a step, or none when the sum is past what its
+/// type holds: the loop is over, whatever its bound.
+pub fn step(i: &Value, by: &Value) -> Computed<Option<Value>> {
+    match binary(Op::Add, i, by) {
+        Ok(v) => Ok(Some(v)),
+        Err(Fault(m)) if m == INTEGER_OVERFLOW || m == FLOAT_OVERFLOW => Ok(None),
+        Err(f) => Err(f),
+    }
+}
+
+const INTEGER_OVERFLOW: &str = "integer overflow";
+const FLOAT_OVERFLOW: &str = "float overflow";
+
+/// A float that is a number: a result too large for a float is a fault,
+/// as an integer's is, and so no infinity is ever stored, nor the NaN
+/// that two of them make.
+fn finite(x: f64) -> Computed<f64> {
+    if x.is_finite() {
+        Ok(x)
+    } else {
+        fault(FLOAT_OVERFLOW)
+    }
 }
 
 /// A number type with its article, as messages name it.
@@ -290,6 +367,9 @@ fn a(base: Base) -> &'static str {
         Base::Gauss => "a Gauss integer",
         Base::Complex => "a complex number",
         Base::Quaternion => "a quaternion",
+        Base::Boolean => "a boolean",
+        Base::Character => "a character",
+        Base::String => "a string",
         _ => "this type",
     }
 }
@@ -342,7 +422,7 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
 }
 
 fn overflow<T>(v: Option<T>) -> Computed<T> {
-    v.ok_or_else(|| Fault("integer overflow".into()))
+    v.ok_or_else(|| Fault(INTEGER_OVERFLOW.into()))
 }
 
 fn hamilton(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
@@ -388,11 +468,11 @@ fn arith(op: Op, a: &Scalar, b: &Scalar) -> Computed<Scalar> {
                 _ => rational(n1 * d2, d1 * n2)?,
             }
         }
-        (Op::Add, Float(x), Float(y)) => Float(x + y),
-        (Op::Sub, Float(x), Float(y)) => Float(x - y),
-        (Op::Mul, Float(x), Float(y)) => Float(x * y),
+        (Op::Add, Float(x), Float(y)) => Float(finite(x + y)?),
+        (Op::Sub, Float(x), Float(y)) => Float(finite(x - y)?),
+        (Op::Mul, Float(x), Float(y)) => Float(finite(x * y)?),
         (Op::Div, Float(_), Float(0.0)) => return fault("division by zero"),
-        (Op::Div, Float(x), Float(y)) => Float(x / y),
+        (Op::Div, Float(x), Float(y)) => Float(finite(x / y)?),
         (op, Gauss(a, b), Gauss(c, d)) => {
             // Each product fits an i128; a sum of two may not.
             let (a, b, c, d) = (a as i128, b as i128, c as i128, d as i128);
@@ -421,24 +501,33 @@ fn arith(op: Op, a: &Scalar, b: &Scalar) -> Computed<Scalar> {
                 _ => return fault("integer overflow"),
             }
         }
-        (op, Complex(a, b), Complex(c, d)) => match op {
-            Op::Add => Complex(a + c, b + d),
-            Op::Sub => Complex(a - c, b - d),
-            Op::Mul => Complex(a * c - b * d, a * d + b * c),
-            _ => {
-                let norm = c * c + d * d;
-                if norm == 0.0 {
-                    return fault("division by zero");
+        (op, Complex(a, b), Complex(c, d)) => {
+            let (re, im) = match op {
+                Op::Add => (a + c, b + d),
+                Op::Sub => (a - c, b - d),
+                Op::Mul => (a * c - b * d, a * d + b * c),
+                _ => {
+                    let norm = c * c + d * d;
+                    if norm == 0.0 {
+                        return fault("division by zero");
+                    }
+                    ((a * c + b * d) / norm, (b * c - a * d) / norm)
                 }
-                Complex((a * c + b * d) / norm, (b * c - a * d) / norm)
+            };
+            Complex(finite(re)?, finite(im)?)
+        }
+        (op, Quaternion(p), Quaternion(q)) => {
+            let r = match op {
+                Op::Add => [p[0] + q[0], p[1] + q[1], p[2] + q[2], p[3] + q[3]],
+                Op::Sub => [p[0] - q[0], p[1] - q[1], p[2] - q[2], p[3] - q[3]],
+                Op::Mul => hamilton(*p, *q),
+                _ => hamilton(*p, quaternion_inverse(*q)?),
+            };
+            for x in r {
+                finite(x)?;
             }
-        },
-        (op, Quaternion(p), Quaternion(q)) => Quaternion(Box::new(match op {
-            Op::Add => [p[0] + q[0], p[1] + q[1], p[2] + q[2], p[3] + q[3]],
-            Op::Sub => [p[0] - q[0], p[1] - q[1], p[2] - q[2], p[3] - q[3]],
-            Op::Mul => hamilton(*p, *q),
-            _ => hamilton(*p, quaternion_inverse(*q)?),
-        })),
+            Quaternion(Box::new(r))
+        }
         _ => unreachable!("numbers widened to one level"),
     })
 }
@@ -515,8 +604,14 @@ fn pow(a: &Scalar, b: &Scalar) -> Computed<Scalar> {
                 unreachable!()
             };
             let (r, theta) = (re.hypot(im), im.atan2(re));
+            if r == 0.0 && e < 0.0 {
+                return fault("division by zero");
+            }
             let r = r.powf(e);
-            Complex(r * (theta * e).cos(), r * (theta * e).sin())
+            Complex(
+                finite(r * (theta * e).cos())?,
+                finite(r * (theta * e).sin())?,
+            )
         }
         (Quaternion(_), _) => return fault("a quaternion to a non-integer power: not yet"),
         (x, e) => match (real(x), real(e)) {
@@ -525,10 +620,10 @@ fn pow(a: &Scalar, b: &Scalar) -> Computed<Scalar> {
                 if v.is_nan() {
                     return fault("not a real number");
                 }
-                if v.is_infinite() {
+                if v.is_infinite() && x == 0.0 {
                     return fault("division by zero");
                 }
-                Float(v)
+                Float(finite(v)?)
             }
             _ => return fault("`^` takes numbers"),
         },
@@ -673,7 +768,9 @@ pub fn binary_fz(op: Op, a: &Fz, b: &Fz) -> Computed<Fz> {
                 return fault("division by zero");
             }
             let x = if op == Mod {
-                Scalar::Integer(overflow(x.checked_rem_euclid(*y))?)
+                // The smallest integer by -1 overflows as a division;
+                // its remainder is 0.
+                Scalar::Integer(x.checked_rem_euclid(*y).unwrap_or(0))
             } else {
                 rational(*x as i128, *y as i128)?
             };
@@ -1037,6 +1134,78 @@ mod tests {
         for (x, y) in [(&[2, 0][..], &[0, 2][..]), (&[], &[])] {
             assert!(binary(Op::ArrayMul, &matrix(x), &matrix(y)).is_err());
         }
+    }
+
+    #[test]
+    fn a_type_takes_its_sort_only() {
+        use Scalar::*;
+        let one = |x| Value::exact(x);
+        assert_eq!(convert(one(Integer(3)), Base::Float), Ok(one(Float(3.0))));
+        assert_eq!(
+            convert(one(Character('a')), Base::String),
+            Ok(one(String("a".into())))
+        );
+        for (x, to) in [
+            (String("abc".into()), Base::Integer),
+            (Boolean(true), Base::Float),
+            (Integer(1), Base::String),
+            (Integer(1), Base::Boolean),
+            (Float(1.5), Base::Integer),
+        ] {
+            assert!(convert(one(x.clone()), to).is_err(), "{x:?} as {to:?}");
+        }
+    }
+
+    #[test]
+    fn fuzziness_beyond_what_is_declared() {
+        let none = Fuzziness::default();
+        let exact = Value::integer(1);
+        assert!(beyond(&exact, none).is_empty());
+        let approximate = Value::One(approx(1.0, 0.5));
+        assert_eq!(beyond(&approximate, none), ["APPR"]);
+        let appr = Fuzziness { appr: true, ..none };
+        assert!(beyond(&approximate, appr).is_empty());
+        let doubted = Fz::new(Scalar::Integer(1), None, Some(0.5), Some("so".into()));
+        let many = Value::Many(vec![doubted]);
+        assert_eq!(beyond(&many, appr), ["PROB", "SUBJ", "MULT"]);
+        let e = plain(&many, appr, "n").unwrap_err().0;
+        assert_eq!(
+            e,
+            "`n` is not declared PROB SUBJ MULT, yet receives such a value (page 152)"
+        );
+    }
+
+    #[test]
+    fn floats_stay_finite() {
+        use Scalar::*;
+        let big = Float(f64::MAX);
+        for op in [Op::Add, Op::Mul] {
+            assert_eq!(arith(op, &big, &big), fault("float overflow"));
+        }
+        assert_eq!(
+            arith(Op::Sub, &big, &Float(-f64::MAX)),
+            fault("float overflow")
+        );
+        assert_eq!(
+            arith(Op::Div, &big, &Float(f64::MIN_POSITIVE)),
+            fault("float overflow")
+        );
+        assert_eq!(pow(&Float(10.0), &Integer(400)), fault("float overflow"));
+        assert_eq!(pow(&Float(0.0), &Integer(-1)), fault("division by zero"));
+        let z = Complex(f64::MAX, 1.0);
+        assert_eq!(arith(Op::Add, &z, &z), fault("float overflow"));
+    }
+
+    #[test]
+    fn results_that_exist_at_the_edges() {
+        let int = Value::integer;
+        assert_eq!(binary(Op::Mod, &int(i64::MIN), &int(-1)), Ok(int(0)));
+        assert_eq!(step(&int(i64::MAX - 1), &int(1)), Ok(Some(int(i64::MAX))));
+        assert_eq!(step(&int(i64::MAX), &int(1)), Ok(None));
+        assert_eq!(step(&int(i64::MIN), &int(-1)), Ok(None));
+        let float = |x| Value::exact(Scalar::Float(x));
+        assert_eq!(step(&float(f64::MAX), &float(f64::MAX)), Ok(None));
+        assert!(step(&int(1), &Value::boolean(true)).is_err());
     }
 
     #[test]

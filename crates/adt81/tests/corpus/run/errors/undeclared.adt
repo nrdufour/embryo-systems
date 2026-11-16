@@ -1,0 +1,14 @@
+-- Runtime error: what is read carries fuzziness only where the --
+-- variable is declared with it (page 152), as what is assigned does. --
+-- Written for the tests of what both engines had wrong together. --
+
+PROGRAM E ;
+LOCAL m : INTEGER MULT ; a : FLOAT APPR ; n : INTEGER ;
+BEGIN
+        READ m, a ;
+        PRINT m, a ;
+        READ n ;
+        PRINT n ;
+        READ n ;
+        PRINT n
+END ;

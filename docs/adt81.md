@@ -381,6 +381,51 @@ Defaults taken, the print being silent:
   value. A CONSTANTE cannot be assigned.
 - Two integers divide truncating, MOD is the Euclidean remainder, an
   integer to a negative power is a rational, overflow is an error.
+
+What runs holds to what is declared (decided 2026-11-15). The checker
+proves it of what it can type; these are the same rules where it
+cannot, and where both engines agreed on something else, which the gate
+that compares them could not see.
+
+- **RESULT gives a value of the function's type.** Pages 19 and 20
+  declare it, `FUNCTION ... RETURNS <type> <flou>`, and page 22's
+  `RESULT <expression>` is what gives it: the value is converted as an
+  assignment's is. A FLOAT function that gave back an integer gave an
+  integer, and its half was an integer division.
+- **A variable of a type takes a value of that sort**: a number for a
+  number, text for text, a boolean for a boolean, checked when the value
+  arrives if the checker could not: the element of a list declared
+  without its elements' type, an object's attribute. A string went into
+  an INTEGER unnoticed.
+- **A variable receives only the fuzziness it is declared with**, when
+  it runs as when it is checked (page 152): what READ reads, and any
+  value the checker could not type, is refused with the checker's words.
+  `{1, 2}` typed at a READ went into a plain INTEGER. Not chosen:
+  dropping what is not declared, which page 152's example can be read
+  as ("Z having been declared fuzzy by approximation, it is computed and
+  its approximation likewise"): a value silently made exact is a wrong
+  value.
+- **A float is a number**: a result too large for one is an overflow,
+  `float overflow`, as an integer's is, in `+ - * /` as it already was
+  in `^` and the functions. No infinity is stored, and so none of what
+  two of them make, which compared equal to everything. *Not the
+  print's*, which says nothing of a float's limits.
+- **A result that exists is given.** The smallest integer `MOD (-1)` is
+  0; a loop whose counter cannot take one more step is over, its counter
+  as it was: `LOOP FOR i : a TO b` runs up to the largest integer and
+  down to the smallest. Both reported an overflow.
+- **`/` and `MOD` stay as they are.** Page 26 names them, the integer
+  quotient (which it writes `%`) and `MOD`, and gives neither a meaning
+  for a negative operand; page 156 only asks for "division entière" of
+  long numbers. The quotient goes towards zero and the remainder is
+  never negative, as ISO Pascal's `div` and `mod` are: `(-7) / 2` is -3
+  and `(-7) MOD 2` is 1, so that `(a / b) * b + a MOD b` is `a` for
+  operands of one sign only. Kept, since no page says otherwise and the
+  corpus is written to it; `run/edges.adt` prints the table.
+- **READ looks at what it reads into before it reads**: in text the
+  checker does not see, an ACTION's, a READ into a name that is no
+  variable is refused and takes no line. The reference took the line
+  first, the VM did not: the one place the two differed.
 - The approximation of a complex number, a Gauss integer or a quaternion
   is not computed yet (page 153 has one per component).
 

@@ -1,0 +1,14 @@
+-- Runtime error: a variable of a type takes a value of that sort only, --
+-- which the checker cannot tell of a list declared without its --
+-- elements' type. Written for the tests of what both engines had wrong --
+-- together. --
+
+PROGRAM E ;
+LOCAL n : INTEGER ; s : STRING ; K : LIST ;
+BEGIN
+        INSERT (12), ("abc") INTO K ;
+        n := K ' FIRST ; PRINT n ;
+        s := K ' LAST ; PRINT s ;
+        n := K ' LAST ;
+        PRINT n
+END ;

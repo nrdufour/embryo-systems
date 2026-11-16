@@ -1590,10 +1590,24 @@ impl<'r> Vm<'r> {
         Ok(out)
     }
 
-    fn convert(v: Value, ty: SlotType) -> Run<Value> {
-        match ty {
-            SlotType::Base(b) => hbds_values::convert(v, b).map_err(fault),
-            _ => Ok(v),
+    /// `v` as the variable `d` declares stores it: converted to its type,
+    /// and with no fuzziness it is not declared with.
+    fn fits(v: Value, d: &hbds_acode::Slot) -> Run<Value> {
+        let v = match d.ty {
+            SlotType::Base(b) => hbds_values::convert(v, b).map_err(fault)?,
+            _ => v,
+        };
+        Self::plain(&v, d)?;
+        Ok(v)
+    }
+
+    /// A slot of a type takes the fuzziness it says; version 1 said none.
+    fn plain(v: &Value, d: &hbds_acode::Slot) -> Run<()> {
+        match (d.fuzziness, d.ty) {
+            (Some(allowed), SlotType::Base(_) | SlotType::Array(_, Some(_))) => {
+                hbds_values::plain(v, allowed, &d.name).map_err(fault)
+            }
+            _ => Ok(()),
         }
     }
 
@@ -2136,7 +2150,8 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::Store(s) => {
-                let v = Self::convert(self.pop(), self.decl(*s).ty)?;
+                let v = self.pop();
+                let v = Self::fits(v, self.decl(*s))?;
                 self.var_mut(*s).value = Some(v);
             }
             Instr::StoreIndex(s, n, convert_at) => {
@@ -2145,10 +2160,13 @@ impl<'r> Vm<'r> {
                 let v = match self.decl(*s).ty {
                     // The conversion fails where the value was written.
                     SlotType::Array(_, Some(b)) => {
-                        hbds_values::convert(v, b).map_err(|f| Failure {
-                            message: f.0,
-                            at: Some(*convert_at),
-                        })?
+                        let d = self.decl(*s);
+                        (hbds_values::convert(v, b).map_err(fault))
+                            .and_then(|v| Self::plain(&v, d).map(|()| v))
+                            .map_err(|f| Failure {
+                                message: f.message,
+                                at: Some(*convert_at),
+                            })?
                     }
                     _ => v,
                 };
@@ -2162,7 +2180,7 @@ impl<'r> Vm<'r> {
                 }
             }
             Instr::Init(s) => {
-                let v = Self::convert(self.pop(), m.slots[*s].ty)?;
+                let v = Self::fits(self.pop(), &m.slots[*s])?;
                 *self.var_mut(*s) = Var {
                     value: Some(v.clone()),
                     initial: Some(v),
@@ -2201,7 +2219,7 @@ impl<'r> Vm<'r> {
                 };
                 self.o.frames[f].cells[*s] = match arg {
                     Item::Value(v) => {
-                        let v = Self::convert(v, m.slots[*s].ty)?;
+                        let v = Self::fits(v, &m.slots[*s])?;
                         Cell::Own(Var {
                             value: Some(v.clone()),
                             initial: Some(v),
@@ -2278,9 +2296,25 @@ impl<'r> Vm<'r> {
                 self.var_mut(*step).value = Some(v);
                 self.var_mut(*up).value = Some(Value::boolean(gt));
             }
+            Instr::LoopAdd(up) => {
+                let by = self.pop();
+                let i = self.pop();
+                match hbds_values::step(&i, &by).map_err(fault)? {
+                    Some(next) => self.push(next),
+                    // Past what the counter holds: the loop is over.
+                    None => {
+                        self.var_mut(*up).value = None;
+                        self.push(i);
+                    }
+                }
+            }
             Instr::Within(up) => {
                 let to = self.pop();
                 let i = self.pop();
+                if self.var(*up).value.is_none() {
+                    self.push(Value::boolean(false));
+                    return Ok(Next::Go);
+                }
                 let up = self.var(*up).value == Some(Value::boolean(true));
                 let op = if up { Op::Le } else { Op::Ge };
                 let within = hbds_values::binary(op, &i, &to)

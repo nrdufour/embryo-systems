@@ -1,0 +1,10 @@
+-- An ACTION's text is not checked: a READ into a name that is no --
+-- variable is refused before it reads, no line taken, with or without --
+-- input. Written for the tests of what both engines had wrong together. --
+
+PROGRAM TARGET ;
+BEGIN
+        CREATE "c" ;
+        LET "c" ' ACTION := "READ nowhere" ;
+        CREATE "o" [ "c" ]
+END ;
