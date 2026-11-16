@@ -1,0 +1,33 @@
+-- An object created in REFLEX itself, or in NEURON itself, is a reflex, --
+-- a neuron: launched, it can be canceled as any other, and a neuron's --
+-- thresholds are its own. Written for the reflex and neural engines --
+-- (docs/hbds.md, "Reflexes" and "Neurons"). --
+
+program direct ;
+begin
+        create "valve" ; create "valve" . "state", "valve" . "pressure" ;
+        create "v1" [ "valve" ] ;
+        create "alarm" [ "reflex" ] ;
+        let "alarm" [ "reflex" ] . "event" := "set" ;
+        let "alarm" [ "reflex" ] . "delay" := 5 ;
+        assoc "valve" . "state" with "alarm" [ "reflex" ] ;
+        let "alarm" [ "reflex" ] ' reaction := "print ""alarm rings at"", time" ;
+        create "gauge" [ "neuron" ] ;
+        let "gauge" [ "neuron" ] . "event" := "set" ;
+        let "gauge" [ "neuron" ] . "detection" := 2 ;
+        assoc "valve" . "pressure" with "gauge" [ "neuron" ] ;
+        let "gauge" [ "neuron" ] ' reaction :=
+            "print ""gauge feels"", ""gauge"" [ ""neuron"" ] . ""input""" ;
+
+        let "v1" [ "valve" ] . "pressure" := 1 ;
+        print "below detection, nothing felt" ;
+        let "v1" [ "valve" ] . "pressure" := 3 ;
+        let "v1" [ "valve" ] . "state" := "open" ;
+        hold for 1 ;
+        cancel "alarm" [ "reflex" ] ;
+        print "canceled at", time ;
+        hold for 10 ;
+        print "silent until", time ;
+        reactivate "alarm" [ "reflex" ] ;
+        hold for 1
+end ;

@@ -282,6 +282,24 @@ impl Sequencing {
         }
     }
 
+    /// After a PURGE: the launches out of time, canceled, whose reflex
+    /// is gone are forgotten, nothing being left to reactivate them by.
+    /// One still due is forgotten when its time comes.
+    pub fn purged(&mut self, store: &mut Store) {
+        let gone: Vec<Agent> = (self.reflexes.iter())
+            .filter(|(_, (r, _))| !store.exists(AdtRef::Object(*r)))
+            .map(|(n, _)| Agent::Reflex(*n))
+            .filter(|a| self.state(*a) == State::Passive)
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        self.changing(store);
+        for a in gone {
+            self.forget(a);
+        }
+    }
+
     pub fn current(&self) -> Agent {
         self.current
     }
@@ -411,6 +429,12 @@ impl Sequencing {
     pub fn kill(&mut self, p: Agent, d: Describe) -> Result<(), String> {
         self.engage();
         self.expect(p, &[State::Hold, State::Passive], d)?;
+        // A launch has no name of its own: killed, nothing acts on it
+        // any more, and it is forgotten.
+        if let Agent::Reflex(_) = p {
+            self.forget(p);
+            return Ok(());
+        }
         self.remove(p);
         let clock = self.clock(p);
         self.set_state(p, State::Terminated, clock);

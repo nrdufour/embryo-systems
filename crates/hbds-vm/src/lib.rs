@@ -200,8 +200,9 @@ struct Owned {
     /// The kernel's bound for this turn, and the process it runs.
     bound: Bound,
     running: Option<Agent>,
-    /// The process the kernel's last turn ended on an error, if one did.
-    failed: Option<Agent>,
+    /// The agent the kernel's last turn ended on an error, if one did,
+    /// and who it reported to: read before a reflex in time is forgotten.
+    failed: Option<(Agent, Option<Agent>)>,
     /// Whether the store's records wait for the running process's pause.
     holding: bool,
     /// Whether a reflex's reaction runs: it launches, but does not run,
@@ -402,9 +403,10 @@ impl Session {
         self.o.running.is_some()
     }
 
-    /// The process the kernel's last turn ended on an error, if one did.
+    /// Who the agent the kernel's last turn ended on an error reported
+    /// to, if one did and it had an owner.
     pub fn failed(&self) -> Option<Agent> {
-        self.o.failed
+        self.o.failed.and_then(|(_, owner)| owner)
     }
 
     /// The agents due the kernel may still run, if they are counted.
@@ -530,7 +532,7 @@ impl Vm<'_> {
             if let Some(a) = self.o.running.take() {
                 self.sim.run_as(a);
                 let _ = self.sim.terminate();
-                self.o.failed = Some(a);
+                self.o.failed = Some((a, self.sim.owner(a)));
                 if let Agent::Reflex(n) = a {
                     self.o.activations.remove(&n);
                     self.sim.forget(a);
@@ -1284,6 +1286,19 @@ impl<'r> Vm<'r> {
         if self.o.mode == Mode::Kernel {
             self.checkpoint()?;
         }
+        // A launch killed since it paused, or forgotten with its reflex,
+        // leaves its fiber: ended. Not while a transaction may yet bring
+        // the launch back.
+        if !self.o.activations.is_empty() && self.store.began().is_none() {
+            let (sim, fibers) = (&*self.sim, &mut self.o.fibers);
+            self.o.activations.retain(|n, f| {
+                let known = sim.reflex(*n).is_some();
+                if !known {
+                    fibers[*f].state = FiberState::Ended;
+                }
+                known
+            });
+        }
         let next = match self.o.mode {
             Mode::Client(_) => return Ok(Some(Stop::Held)),
             Mode::Standalone => self.sim.advance(),
@@ -1301,6 +1316,25 @@ impl<'r> Vm<'r> {
                 self.sim.advance()
             }
         };
+        let given = self.give(next, at);
+        // In the kernel, an agent whose turn cannot start ends, as one
+        // whose body fails; the one that was running is not the one that
+        // failed, and goes on.
+        if let (Err(_), Mode::Kernel, Some(a), None) = (&given, self.o.mode, next, self.o.failed) {
+            let _ = self.sim.terminate();
+            self.o.failed = Some((a, self.sim.owner(a)));
+            if let Agent::Reflex(n) = a {
+                self.o.activations.remove(&n);
+                self.sim.forget(a);
+            }
+            self.o.running = None;
+            let _ = self.checkpoint();
+        }
+        given
+    }
+
+    /// The agent the set gave, running: its fiber, or a new one.
+    fn give(&mut self, next: Option<Agent>, at: Span) -> Run<Option<Stop>> {
         match next {
             Some(Agent::Reflex(n)) => {
                 let agent = Agent::Reflex(n);
@@ -2690,6 +2724,9 @@ impl<'r> Vm<'r> {
                         StateOp::Purge => self.store.purge_adt(t),
                     };
                     stored(r)?;
+                    if let StateOp::Purge = op {
+                        self.sim.purged(self.store);
+                    }
                 }
             }
             Instr::SetAttribute => {

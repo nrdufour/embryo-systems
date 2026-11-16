@@ -2368,6 +2368,13 @@ impl Machine {
             return self.pause();
         }
         loop {
+            // A launch killed since it paused leaves its thread, which
+            // ends; not while a transaction may yet bring it back.
+            if self.store.lock().unwrap().began().is_none() {
+                let sim = self.sim.lock().unwrap();
+                let mut reflexes = self.reflexes.lock().unwrap();
+                reflexes.retain(|n, _| sim.reflex(*n).is_some());
+            }
             let next = self.sim.lock().unwrap().advance();
             match next {
                 Some(Agent::Process(p)) => self.run_process(p, span)?,
@@ -2989,6 +2996,11 @@ impl Machine {
                 StateOp::Purge => store.purge_adt(t),
             };
             stored(r, span)?;
+        }
+        drop(store);
+        if let StateOp::Purge = op {
+            let mut sim = self.sim.lock().unwrap();
+            sim.purged(&mut self.store.lock().unwrap());
         }
         Ok(())
     }

@@ -9,10 +9,11 @@
 //! without describing it; ours is the code property LEARNING, run after
 //! each firing, THIS the neuron. docs/hbds.md, "Neurons", gives the rules.
 
+use hbds_core::AdtRef;
 use hbds_core::Id;
 use hbds_core::same;
 use hbds_core::value::{Scalar, Value};
-use hbds_gtad::{ClassKind, Store, Stored};
+use hbds_gtad::{ClassKind, Error, Store, Stored};
 
 /// The system hyperclass of neuron classes and its attributes: figure
 /// 58's three intensities and three delays, what is stored, what the
@@ -68,7 +69,7 @@ pub fn install(store: &mut Store) -> Stored<()> {
     Ok(())
 }
 
-/// Whether a reflex is a neuron: its class is in NEURON's lineage.
+/// Whether a reflex is a neuron: its class is NEURON or in its lineage.
 pub fn is_neuron(store: &Store, reflex: Id) -> bool {
     let Some(neuron) = store.find_class(NEURON) else {
         return false;
@@ -76,7 +77,7 @@ pub fn is_neuron(store: &Store, reflex: Id) -> bool {
     let Some(o) = store.objects().get(&reflex) else {
         return false;
     };
-    o.class != neuron && store.lineage(o.class).contains(&neuron)
+    store.lineage(o.class).contains(&neuron)
 }
 
 fn number(v: Option<&Value>) -> Option<f64> {
@@ -107,10 +108,38 @@ pub fn intensity(value: Option<&Value>) -> f64 {
     number(value).unwrap_or(1.0)
 }
 
+/// Figure 58 draws intensities above zero only: a neuron whose
+/// SATURATION is not, which would pass on nothing and store ever more,
+/// or whose STORAGE is negative, is refused.
+fn thresholds(store: &Store, neuron: Id) -> Stored<()> {
+    let refused = |name, x: f64, wanted| {
+        let what = store.describe(AdtRef::Object(neuron));
+        Err(Error(format!("the {name} of {what} is {x}: {wanted}")))
+    };
+    match read(store, neuron, SATURATION) {
+        Some(x) if x.is_nan() || x <= 0.0 => {
+            return refused(SATURATION, x, "a neuron passes on more than nothing");
+        }
+        _ => {}
+    }
+    match read(store, neuron, STORAGE) {
+        Some(x) if x.is_nan() || x < 0.0 => refused(STORAGE, x, "a neuron stores nothing negative"),
+        _ => Ok(()),
+    }
+}
+
 /// A stimulus received: ignored below DETECTION (false), else stored,
-/// LEVEL capped at STORAGE.
+/// LEVEL capped at STORAGE. A negative one is refused, as a neuron
+/// whose thresholds make no sense.
 pub fn stimulate(store: &mut Store, neuron: Id, value: Option<&Value>) -> Stored<bool> {
     let i = intensity(value);
+    if i.is_nan() || i < 0.0 {
+        let what = store.describe(AdtRef::Object(neuron));
+        return Err(Error(format!(
+            "a stimulus of {i} for {what}: an intensity is not negative"
+        )));
+    }
+    thresholds(store, neuron)?;
     if read(store, neuron, DETECTION).is_some_and(|d| i < d) {
         return Ok(false);
     }
@@ -136,6 +165,7 @@ pub fn delay(store: &Store, neuron: Id) -> f64 {
 /// LEVEL. Nothing stored, it does not fire (false): stimuli summed by an
 /// earlier firing.
 pub fn discharge(store: &mut Store, neuron: Id) -> Stored<bool> {
+    thresholds(store, neuron)?;
     let level = read(store, neuron, LEVEL).unwrap_or(0.0);
     if level <= 0.0 {
         return Ok(false);

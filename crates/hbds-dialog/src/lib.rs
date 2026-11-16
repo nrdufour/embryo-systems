@@ -355,7 +355,15 @@ fn answer(host: &mut dyn Host, run: Id, place: Id, line: &str) -> Result<bool, S
         if !flag(&host.store(), place, FACULTATIVE, false) {
             return again(host, place, "an answer is required");
         }
-        set(&mut host.store(), run, LAST, string(""))?;
+        {
+            // A choice made here before going back is taken back: a place
+            // this one controls must not branch as if it still stood.
+            let mut store = host.store();
+            set(&mut store, run, LAST, string(""))?;
+            if mcq {
+                unchoose(&mut store, run, place)?;
+            }
+        }
         task(host, BLANK, place, run)?;
         let to = {
             let store = host.store();
@@ -468,13 +476,19 @@ fn choose(
         }
     };
     let mut store = host.store();
-    for old in targets(&store, run, CHOSE) {
-        if sources(&store, old, PROPOSES).contains(&place) {
+    unchoose(&mut store, run, place)?;
+    store.assert_link(run, CHOSE, pa, None).or_else(fail)?;
+    Ok(Some((text(&store, pa, TEXT).unwrap_or_default(), pa)))
+}
+
+/// The run's choice at an MCQ, taken back.
+fn unchoose(store: &mut Store, run: Id, place: Id) -> Result<(), String> {
+    for old in targets(store, run, CHOSE) {
+        if sources(store, old, PROPOSES).contains(&place) {
             store.retract_link(run, CHOSE, old).or_else(fail)?;
         }
     }
-    store.assert_link(run, CHOSE, pa, None).or_else(fail)?;
-    Ok(Some((text(&store, pa, TEXT).unwrap_or_default(), pa)))
+    Ok(())
 }
 
 /// Where a run goes from `place`: a place controlled by an MCQ follows

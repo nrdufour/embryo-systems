@@ -310,3 +310,32 @@ fn a_failing_task_and_a_dialog_without_start_are_errors() {
         "lone[DIALOG] has no \"initial\" place"
     );
 }
+
+/// Back at an MCQ and answering blank, the choice made the first time
+/// was still the run's: the place it controls branched by it, as if the
+/// blank answer had not been given.
+#[test]
+fn a_blank_answer_after_going_back_takes_the_choice_back() {
+    let mut f = new();
+    let (q, pas) = f.mcq("q", "Theme", &["roads", "rivers"]);
+    let where_ = f.sq("where", "Where");
+    let road = f.sq("road", "Road");
+    f.set(q, FACULTATIVE, Scalar::Boolean(true));
+    f.link(q, NEXT, where_);
+    f.link(where_, CONTROLLED_BY, q);
+    f.link(pas[0], DELAYED, road);
+    let d = f.dialog(q);
+    let e = f.talk(d, &["roads", "/back", "", "here"]).unwrap_err();
+    assert_eq!(
+        e,
+        "where[SQ] branches as q[MCQ] was answered, and it was not"
+    );
+    assert_eq!(
+        f.out,
+        "Theme\n1. roads\n2. rivers\n? Where ? Theme\n1. roads\n2. rivers\n? Where ? "
+    );
+    // Answered again, it branches by the new choice.
+    f.out.clear();
+    f.talk(d, &["roads", "/back", "1", "here"]).unwrap();
+    assert!(f.out.ends_with("Where ? Road ? "), "{}", f.out);
+}

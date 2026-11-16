@@ -261,3 +261,60 @@ fn a_rollback_takes_the_set_to_its_savepoint() {
     s.follow(&mut store);
     assert_eq!(names(&s), []);
 }
+
+/// A launch has no name of its own: killed, nothing can act on it, and
+/// it stayed in the set a daemon saves, for as long as the daemon lived.
+#[test]
+fn a_killed_launch_is_forgotten() {
+    let mut s = Sequencing::new();
+    let empty = s.save();
+    let due = s.launch(7, 9, 2.5).unwrap();
+    let canceled = s.launch(7, 9, 3.0).unwrap();
+    s.cancel(canceled, &d).unwrap();
+    s.kill(due, &d).unwrap();
+    s.kill(canceled, &d).unwrap();
+    assert_eq!(s.launches(7, &STATES), []);
+    assert!(!s.knows(due) && !s.knows(canceled));
+    assert_eq!(s.reflex(1), None);
+    // But for the number the next launch takes, as if none had been.
+    assert_eq!(s.save(), empty.replace(" 1", " 3"));
+    // A process killed is still one, terminated.
+    s.reactivate(P, When::Now, &d).unwrap();
+    s.kill(P, &d).unwrap();
+    assert_eq!(s.state(P), State::Terminated);
+}
+
+const STATES: [State; 4] = [
+    State::Active,
+    State::Hold,
+    State::Passive,
+    State::Terminated,
+];
+
+/// A canceled launch waits to be reactivated, by its reflex's name: its
+/// reflex purged, nothing names it.
+#[test]
+fn a_canceled_launch_is_forgotten_with_its_reflex() {
+    let mut store = hbds_gtad::Store::memory();
+    let class = (store.create_class("watch", hbds_gtad::ClassKind::Class)).unwrap();
+    let kept = store.create_object(class, "kept").unwrap();
+    let gone = store.create_object(class, "gone").unwrap();
+    let mut s = Sequencing::new();
+    let launches = [kept, gone, gone].map(|r| s.launch(r, r, 2.5).unwrap());
+    s.cancel(launches[0], &d).unwrap();
+    s.cancel(launches[1], &d).unwrap();
+    s.purged(&mut store);
+    assert_eq!(s.launches(gone, &STATES).len(), 2);
+    let target = hbds_core::AdtRef::Object(gone);
+    (store.change_state(
+        target,
+        hbds_gtad::State::Active,
+        hbds_gtad::State::Destroyed,
+    ))
+    .unwrap();
+    store.purge_adt(target).unwrap();
+    s.purged(&mut store);
+    // The one still due is forgotten when its time comes.
+    assert_eq!(s.launches(gone, &STATES), [launches[2]]);
+    assert_eq!(s.launches(kept, &STATES), [launches[0]]);
+}

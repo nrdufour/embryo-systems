@@ -97,3 +97,46 @@ fn a_non_number_counts_as_one() {
     );
     assert_eq!(intensity(None), 1.0);
 }
+
+/// Figure 58 draws intensities above zero only: a negative stimulus
+/// took LEVEL below zero.
+#[test]
+fn a_negative_stimulus_is_refused() {
+    let (mut store, n) = neuron();
+    let refused = stimulate(&mut store, n, Some(&x(-3.0))).unwrap_err();
+    assert_eq!(
+        refused.0,
+        "a stimulus of -3 for n[cell]: an intensity is not negative"
+    );
+    assert_eq!(get(&store, n, LEVEL), "");
+    // Nothing is not negative: stored, and nothing to fire with.
+    assert!(stimulate(&mut store, n, Some(&x(0.0))).unwrap());
+    assert!(!discharge(&mut store, n).unwrap());
+}
+
+/// A SATURATION of zero or less passed on nothing, or less, at each
+/// firing, and LEVEL grew.
+#[test]
+fn a_saturation_not_above_zero_is_refused() {
+    for saturation in [0.0, -1.0] {
+        let (mut store, n) = neuron();
+        stimulate(&mut store, n, Some(&x(3.0))).unwrap();
+        set(&mut store, n, SATURATION, saturation);
+        assert!(stimulate(&mut store, n, Some(&x(3.0))).is_err());
+        let refused = discharge(&mut store, n).unwrap_err();
+        assert!(refused.0.contains("the SATURATION of n[cell]"), "{refused}");
+        assert_eq!(get(&store, n, LEVEL), "3.0");
+    }
+    let (mut store, n) = neuron();
+    set(&mut store, n, STORAGE, -1.0);
+    assert!(stimulate(&mut store, n, Some(&x(3.0))).is_err());
+}
+
+#[test]
+fn an_object_of_neuron_itself_is_a_neuron() {
+    let (mut store, _) = neuron();
+    let class = store.find_class(NEURON).unwrap();
+    let n = store.create_object(class, "bare").unwrap();
+    assert!(is_neuron(&store, n));
+    assert!(hbds_reflexes::is_reflex(&store, n));
+}

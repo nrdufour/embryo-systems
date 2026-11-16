@@ -1,0 +1,1 @@
+16:9: runtime error: the SATURATION of n[cell] is 0: a neuron passes on more than nothing
