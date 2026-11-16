@@ -1367,7 +1367,7 @@ fn executor(
                 // standalone run ends; with no client, the daemon's log
                 // says it.
                 Turn::Failed(e) => {
-                    let owner = kernel.failed().and_then(|a| sim.owner(a));
+                    let owner = kernel.failed();
                     match owner {
                         Some(Agent::Client(id)) if clients.contains_key(&id) => {
                             let c = clients.remove(&id).expect("a client");

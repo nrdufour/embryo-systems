@@ -359,6 +359,19 @@ syntax and no algorithm; ours, decided on 2026-10-16:
   reflex mean its launch due first, and are an error if none is. Any
   code may do it, another reflex's REACTION or the main program; a
   launch already running (its reaction holding) is moved too.
+- **What is launched is a reflex** (decided 2026-11-16): an object
+  created in REFLEX itself, `"alarm" ["REFLEX"]`, was launched and yet
+  was no reflex to CANCEL, which took it for a process. It is one, as an
+  object of PROCESS itself is a process. Not chosen: launching only the
+  objects of included classes, which would make a reflex written the
+  short way silently inert.
+- **A launch is forgotten when nothing names it any more** (decided
+  2026-11-16): once its reaction is done, as before; once killed, a
+  launch having no name of its own to be terminated under, where a
+  process stays, TERMINATED; and, canceled, once its reflex is purged.
+  A canceled launch whose reflex lives waits to be reactivated, however
+  long: a program that cancels without ever reactivating or killing
+  keeps them all.
 
 `store/reflexes.adt` is figures 55 to 57 on a small graph,
 `store/network.adt` figure 59's water network, in time,
@@ -398,7 +411,19 @@ print no algorithm and no word on how it learns; ours, decided on
   own thresholds and delays. `store/neurons.adt` habituates so: each
   firing raises DETECTION, until the same pressure is no longer felt.
 - **A neuron in time is moved as a reflex is** ("Reflexes"): CANCEL,
-  DELAY, REACTIVATE and KILL of a neuron act on its firings due.
+  DELAY, REACTIVATE and KILL of a neuron act on its firings due. An
+  object of NEURON itself is a neuron, as one of REFLEX is a reflex.
+- **Intensities are not negative** (decided 2026-11-15; figure 58
+  draws them above zero only): a negative stimulus took LEVEL below
+  zero, and a SATURATION of zero or less passed on nothing, or less, so
+  that LEVEL grew at each firing. A negative stimulus is an error, and
+  so is a stimulus or a firing of a neuron whose SATURATION is not above
+  zero or whose STORAGE is negative. The error is the stimulus's, raised
+  when the launch is drained, as a failing REACTION's is: the statement
+  that set the launcher stands, and the program ends there. Not chosen:
+  clamping at zero, which would hide the mistake; refusing the LET that
+  sets SATURATION, which only the languages could do, each its own way,
+  where the engine refuses for both.
 - **Not yet**: the three delays act only as their sum (acquisition apart
   from transmission would need a launch carried through time); weights
   on its launchers.
@@ -497,7 +522,10 @@ but is the course's. Ours, decided on 2026-11-14:
 - **Commands** (figure 72's COMMANDES, page 143: going backwards): a line
   `/back` goes back a place, asked again from its PROLOG, the answers
   memorized kept as history; `/quit` ends the run; `//` begins an answer
-  with a slash. A LEARNING MCQ takes a line that is no PA's as a new one
+  with a slash. Back at an MCQ, a blank answer takes back the choice
+  made there the first time (decided 2026-11-16): the place it controls
+  then finds it not answered, an error, where it branched by the choice
+  given up. A LEARNING MCQ takes a line that is no PA's as a new one
   (page 138's "new answers which may enrich the list"), without a way on
   until a designer gives it one.
 - **Not yet**: PERIPHERAL_DEVICE, INPUT and OUTPUT (figure 71), the

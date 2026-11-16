@@ -1615,3 +1615,49 @@ fn a_file_where_the_socket_goes_is_not_removed() {
     assert!(err.contains("not a socket"), "{err}");
     assert_eq!(fs::read_to_string(&file).unwrap(), "not a socket\n");
 }
+
+/// A process "w1" that holds for 1 until 40, its client waiting until 30.
+const BYSTANDER: &str = "program bystander ;\nbegin\n        create \"w\" ; include \"w\" into \"process\" ;\n        create \"w1\" [ \"w\" ] ; activate \"w1\" [ \"w\" ] ;\n        hold for 30 ;\n        print \"bystander after\", time\nend ;\n\ncoroutine \"w\" ;\nbegin\n        loop while time < 40 do\n                hold for 1\n        endloop\nend ;\n";
+
+/// A neuron due to fire at 2.5 whose SATURATION, set to 0 at 1, refuses
+/// the firing.
+const UNSTARTED: &str = "program unstarted ;\nbegin\n        create \"valve\" ; create \"valve\" . \"pressure\" ; create \"v1\" [ \"valve\" ] ;\n        create \"cell\" ; include \"cell\" into \"neuron\" ; create \"n\" [ \"cell\" ] ;\n        let \"n\" [ \"cell\" ] . \"event\" := \"set\" ;\n        let \"n\" [ \"cell\" ] . \"processing\" := 2.5 ;\n        assoc \"valve\" . \"pressure\" with \"n\" [ \"cell\" ] ;\n        let \"n\" [ \"cell\" ] ' reaction := \"print \"\"fires\"\"\" ;\n        let \"v1\" [ \"valve\" ] . \"pressure\" := 3 ;\n        hold for 1 ;\n        let \"n\" [ \"cell\" ] . \"saturation\" := 0 ;\n        print \"set\" ;\n        hold for 10 ;\n        print \"after\", time\nend ;\n";
+
+/// A reflex in time whose REACTION fails when it runs, at 2.5.
+const FAILING: &str = "program failing ;\nbegin\n        create \"c\" ; create \"c\" . \"a\" ; create \"o\" [ \"c\" ] ;\n        create \"rx\" ; include \"rx\" into \"reflex\" ; create \"watch\" [ \"rx\" ] ;\n        let \"watch\" [ \"rx\" ] . \"event\" := \"set\" ;\n        let \"watch\" [ \"rx\" ] . \"delay\" := 2.5 ;\n        assoc \"c\" . \"a\" with \"watch\" [ \"rx\" ] ;\n        let \"watch\" [ \"rx\" ] ' reaction := \"print 1 / (time - time)\" ;\n        let \"o\" [ \"c\" ] . \"a\" := 1 ;\n        hold for 10 ;\n        print \"after\", time\nend ;\n";
+
+/// The kernel, giving the turn to an agent that could not take it,
+/// ended the process that had just held instead, and its client's run,
+/// or told no one; and a reflex in time that failed was forgotten
+/// before its client was found.
+#[test]
+fn an_agent_that_fails_in_time_ends_alone_and_its_client_hears() {
+    let daemon = Daemon::with("unstarted", &["--pace", "paused"]);
+    let waits = |n: usize| {
+        let t = Instant::now();
+        while daemon.get("/time").matches("client").count() < n {
+            assert!(t.elapsed() < Duration::from_secs(20), "no client holds");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let bystander = write("daemon-unstarted", "bystander.adt", BYSTANDER);
+    let bystander = spawn(daemon.client(&bystander));
+    waits(1);
+    let start = write("daemon-unstarted", "start.adt", UNSTARTED);
+    let client = spawn(daemon.client(&start));
+    waits(2);
+    daemon.post("/pace", "{\"pace\": \"fast\"}");
+    let out = client.wait_with_output().unwrap();
+    assert_eq!(
+        outcome(out, &start),
+        "set\n0:0: runtime error: the SATURATION of n[cell] is 0: a neuron passes on more than nothing\n"
+    );
+    // The process that held when the neuron was due, and its client, go on.
+    assert_eq!(within(bystander, 20), "bystander after 30.0\n");
+    let failing = write("daemon-unstarted", "failing.adt", FAILING);
+    let out = daemon.client(&failing).output().unwrap();
+    assert_eq!(
+        outcome(out, &failing),
+        "1:7: runtime error: division by zero\n"
+    );
+}

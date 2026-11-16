@@ -1,0 +1,17 @@
+-- A neuron whose SATURATION is not above zero would pass on nothing at --
+-- each firing, or less, and store ever more: its stimulus is refused. --
+-- Written for the neural engine (docs/hbds.md, "Neurons"). --
+
+program saturation ;
+begin
+        create "valve" ; create "valve" . "pressure" ;
+        create "v1" [ "valve" ] ;
+        create "cell" ; include "cell" into "neuron" ;
+        create "n" [ "cell" ] ;
+        let "n" [ "cell" ] . "event" := "set" ;
+        let "n" [ "cell" ] . "saturation" := 0 ;
+        assoc "valve" . "pressure" with "n" [ "cell" ] ;
+        let "n" [ "cell" ] ' reaction := "print ""fires""" ;
+        let "v1" [ "valve" ] . "pressure" := 2 ;
+        print "never"
+end ;

@@ -1,0 +1,28 @@
+-- A launch killed while its reaction holds never goes on, and is --
+-- forgotten: the reflex launched again starts from its first statement. --
+-- Written for the simulation engine (docs/hbds.md, "Reflexes"). --
+
+program killed ;
+begin
+        create "valve" ; create "valve" . "state" ;
+        create "v1" [ "valve" ] ;
+        create "watch" ; include "watch" into "reflex" ;
+        create "alarm" [ "watch" ] ;
+        let "alarm" [ "watch" ] . "event" := "set" ;
+        let "alarm" [ "watch" ] . "delay" := 1 ;
+        assoc "valve" . "state" with "alarm" [ "watch" ] ;
+        let "alarm" [ "watch" ] ' reaction :=
+            "print ""alarm starts at"", time ; hold for 5 ; print ""alarm rings at"", time" ;
+
+        let "v1" [ "valve" ] . "state" := "open" ;
+        hold for 2 ;
+        kill "alarm" [ "watch" ] ;
+        print "killed at", time ;
+        hold for 10 ;
+        print "silent until", time ;
+        kill "alarm" [ "watch" ] ;
+        reactivate "alarm" [ "watch" ] ;
+        print "nothing left to kill or to reactivate" ;
+        let "v1" [ "valve" ] . "state" := "shut" ;
+        hold for 10
+end ;

@@ -392,7 +392,11 @@ a lone client sees what a standalone run shows (the whole corpus passes
 through the daemon), and a client that never touches time stays outside
 it. Its processes outlive it: what they print goes to their client while
 it is connected, else to the daemon's output; an error ends the process,
-and its client's run if it is there. The pace, `paused` (the default),
+and its client's run if it is there. So does an error before its turn
+starts, a neuron whose firing is refused when its time comes: it is that
+agent which ends, not the process whose HOLD handed the turn over, and
+its client is found before a reflex in time is forgotten (2026-11-16:
+the kernel told no one, or blamed the process that had held). The pace, `paused` (the default),
 `step`, `fast` up to a horizon or `real` times a factor, is set by
 `daemon --pace` and live by `POST /pace`; `GET /time` shows the time and
 who is due. Every unit a client brings is kept by the store, once, by
