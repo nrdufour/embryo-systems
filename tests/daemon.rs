@@ -507,9 +507,18 @@ fn processes_resume_where_they_were() {
         // As fast as it goes: the kill falls in the middle of a step.
         let daemon = Daemon::with("exact", &["--store", &dir, "--pace", "fast"]);
         assert_eq!(within(spawn(daemon.client(&start)), 20), "started\n");
+        // Waited for in the journal, not on the clock, which runs ahead
+        // of it: 16 pauses written are 15 steps a restart finds.
+        let journal = Path::new(&dir).join("journal");
         let t = Instant::now();
-        while daemon.now() < 20.0 {
-            assert!(t.elapsed() < Duration::from_secs(20), "time stands still");
+        let pauses = || {
+            let text = fs::read_to_string(&journal).unwrap_or_default();
+            text.lines()
+                .filter(|l| l.starts_with("sequencing "))
+                .count()
+        };
+        while pauses() < 16 {
+            assert!(t.elapsed() < Duration::from_secs(20), "nothing is written");
             std::thread::sleep(Duration::from_millis(5));
         }
         // Killed in the middle of whatever it does.

@@ -154,14 +154,26 @@ fn the_corpus() {
 }
 
 /// Random programs: those that check run both ways, under a budget small
-/// enough that one that never ends ends both runs alike.
+/// enough that one that never ends ends both runs alike. The same seeds
+/// at each run, so that what passed passes, then seeds never run before,
+/// so that the gate keeps looking: one that differs is named, and
+/// `VM_SEED=n` runs it alone.
 #[test]
 fn random_programs() {
     const SEEDS: u64 = 2000;
+    const FRESH: u64 = 500;
     const SMALL: u64 = 3000;
     let (mut checked, mut errors, mut spent, mut differ) = (0, 0, 0, Vec::new());
     let mut rejected = Vec::new();
-    for seed in 0..SEEDS {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    // Past every fixed seed, and apart from one second to the next.
+    let fresh = (1 << 32) + now.unwrap().as_secs() * FRESH;
+    let seeds: Vec<u64> = match std::env::var("VM_SEED") {
+        Ok(seed) => vec![seed.parse().expect("VM_SEED is a seed, a number")],
+        Err(_) => (0..SEEDS).chain(fresh..fresh + FRESH).collect(),
+    };
+    let total = seeds.len() as u64;
+    for seed in seeds {
         let (source, input) = adt81::sample::runnable(seed);
         let program = lower::parse_program(&source)
             .unwrap_or_else(|e| panic!("seed {seed} does not parse: {e}\n{source}"));
@@ -195,11 +207,19 @@ fn random_programs() {
     }
     rejected.sort();
     println!(
-        "random: {checked} of {SEEDS} check; {errors} end in a runtime error, {spent} past the budget"
+        "random: {checked} of {total} check, the fresh ones from seed {fresh}; {errors} end in a runtime error, {spent} past the budget"
     );
     if let Some(r) = rejected.first() {
         println!("a rejection: {r}");
     }
+    if std::env::var("VM_ERRORS").is_ok() {
+        for r in &rejected {
+            println!("REJECTED {}", r.split("error: ").nth(1).unwrap_or(r));
+        }
+    }
     assert!(differ.is_empty(), "\n{}", differ.join("\n"));
-    assert!(checked * 2 > SEEDS, "too few random programs check");
+    assert!(
+        checked * 2 > total || total == 1,
+        "too few random programs check"
+    );
 }

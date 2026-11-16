@@ -67,13 +67,23 @@ check: fmt-check lint test check-grammar engines docs confusables module bench
 confusables:
     #!/usr/bin/env bash
     pattern='[\x{2010}-\x{2015}\x{2212}\x{2018}\x{2019}\x{201A}\x{201C}\x{201D}\x{201E}\x{2032}\x{2033}\x{00B7}\x{2026}\x{00D7}\x{00A0}\x{200B}-\x{200D}\x{2060}\x{FEFF}]'
-    if hits=$(git ls-files | xargs grep -nIP "$pattern" 2>/dev/null); then
-        echo "characters confusable with ASCII, or invisible:"
-        echo "$hits"
-        echo
-        echo "Use - . ... x and a plain space instead."
-        exit 1
-    fi
+    # 0 is a hit, 1 none; anything else is a grep that did not run, which
+    # must not pass for no hit.
+    hits=$(git grep -nIP "$pattern")
+    case $? in
+        0)
+            echo "characters confusable with ASCII, or invisible:"
+            echo "$hits"
+            echo
+            echo "Use - . ... x and a plain space instead."
+            exit 1
+            ;;
+        1) ;;
+        *)
+            echo "the grep for confusable characters failed"
+            exit 2
+            ;;
+    esac
 
 # Remove build output.
 clean:

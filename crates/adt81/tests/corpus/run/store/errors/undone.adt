@@ -1,0 +1,17 @@
+-- A reaction whose change a FORMULA refuses is undone, the program's --
+-- last statement's too: nothing comes after it to undo it. Written for --
+-- the VM's gate (docs/hbds.md, "Reflexes" and "Constraints"). --
+
+program undone ;
+begin
+        create "c" ; create "c" . "a", "c" . "b" ; create "o" [ "c" ] ;
+        create "rx" ; include "rx" into "reflex" ; create "x" [ "rx" ] ;
+        let "x" [ "rx" ] . "event" := "set" ;
+        assoc "c" . "a" with "x" [ "rx" ] ;
+        let "x" [ "rx" ] ' reaction := "let this . ""b"" := 2" ;
+        create "kx" ; include "kx" into "constraint" ; create "k" [ "kx" ] ;
+        assoc "c" . "b" with "k" [ "kx" ] ;
+        let "k" [ "kx" ] ' formula := "formula := false" ;
+        print "set" ;
+        let "o" [ "c" ] . "a" := 1
+end ;

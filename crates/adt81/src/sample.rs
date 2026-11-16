@@ -763,6 +763,8 @@ enum T {
     Float,
     Appr,
     Rational,
+    Gauss,
+    Quaternion,
     Bool,
     Str,
     List,
@@ -775,6 +777,8 @@ const SCALARS: &[T] = &[
     T::Float,
     T::Appr,
     T::Rational,
+    T::Gauss,
+    T::Quaternion,
     T::Bool,
     T::Str,
 ];
@@ -785,10 +789,12 @@ fn declared(t: T) -> &'static str {
         T::Float => "float",
         T::Appr => "float appr",
         T::Rational => "rational",
+        T::Gauss => "gauss",
+        T::Quaternion => "quaternion",
         T::Bool => "boolean",
         T::Str => "string",
         T::List => "list of integer",
-        T::Vector => "vector [1:4] of integer",
+        T::Vector => "vector [1:3] of integer",
     }
 }
 
@@ -853,9 +859,34 @@ impl Writer<'_> {
             T::Int => format!("{}", self.rng.below(6)),
             T::Float | T::Appr => format!("{}.5", self.rng.below(9)),
             T::Rational => format!("{} // {}", self.rng.below(5), 1 + self.rng.below(4)),
+            T::Gauss | T::Quaternion => self.number(t),
             T::Bool => self.rng.pick(&["true", "false"]).into(),
             T::Str => self.rng.pick(&["\"a\"", "\"bc\""]).into(),
             T::List | T::Vector => unreachable!("lists and vectors start with a value"),
+        }
+    }
+
+    /// A Gauss integer or a quaternion, written out.
+    fn number(&mut self, t: T) -> String {
+        let shape = self.rng.below(3);
+        let sign = self.rng.pick(&["+", "-"]);
+        let unit = self.rng.pick(&["i", "j", "k"]);
+        let mut part = |unit: &str| match t {
+            T::Gauss => format!("{}{unit}", self.rng.below(7)),
+            _ => format!("{}.{}{unit}", self.rng.below(7), self.rng.below(10)),
+        };
+        match (t, shape) {
+            (T::Gauss, 0) => part("i"),
+            (T::Gauss, _) => format!("({} {sign} {})", part(""), part("i")),
+            (_, 0) => part(unit),
+            (_, 1) => format!("({} {sign} {})", part(""), part("j")),
+            _ => format!(
+                "({} + {} - {} + {})",
+                part(""),
+                part("i"),
+                part("j"),
+                part("k")
+            ),
         }
     }
 
@@ -867,7 +898,7 @@ impl Writer<'_> {
         let d = depth.saturating_sub(1);
         match t {
             T::Int if leaf => self.int_literal(),
-            T::Int => match self.rng.below(9) {
+            T::Int => match self.rng.below(12) {
                 0..=3 => {
                     let op = self.rng.pick(&["+", "-", "*", "/", "MOD"]);
                     format!("({} {op} {})", self.expr(T::Int, d), self.expr(T::Int, d))
@@ -885,6 +916,23 @@ impl Writer<'_> {
                     Some(v) => format!("{v}[{}]", self.expr(T::Int, d)),
                     None => self.int_literal(),
                 },
+                8 => match self.var(T::List) {
+                    Some(l) => match self.rng.below(4) {
+                        0 => format!(
+                            "{l} ' {}",
+                            self.rng.pick(&["succ", "pred", "current", "firstout"])
+                        ),
+                        1 => format!("{l} ' elmt({})", self.expr(T::Int, d)),
+                        2 => format!("{l} ' occur({}, 1)", self.expr(T::Int, d)),
+                        _ => format!("{l} ' poslp({}, 1)", self.expr(T::Int, d)),
+                    },
+                    None => self.int_literal(),
+                },
+                9 => format!(
+                    "({} [.] {})",
+                    self.expr(T::Vector, d),
+                    self.expr(T::Vector, d)
+                ),
                 _ => self
                     .call_expr(T::Int, d)
                     .unwrap_or_else(|| self.int_literal()),
@@ -920,11 +968,26 @@ impl Writer<'_> {
                 1 => format!("({} * {})", self.expr(T::Rational, d), self.expr(T::Int, d)),
                 _ => self.expr(T::Int, d),
             },
+            T::Gauss | T::Quaternion if leaf => self.number(t),
+            T::Gauss | T::Quaternion => match self.rng.below(8) {
+                0..=4 => {
+                    let op = self.rng.pick(&["+", "-", "*", "*", "/"]);
+                    format!("({} {op} {})", self.expr(t, d), self.expr(t, d))
+                }
+                5 => format!("({} ^ {})", self.expr(t, d), self.rng.below(4)),
+                6 => format!("(-{})", self.expr(t, d)),
+                _ => format!("({} * {})", self.expr(T::Int, d), self.expr(t, d)),
+            },
             T::Bool if leaf => self.rng.pick(&["true", "false"]).into(),
             T::Bool => match self.rng.below(6) {
                 0 | 1 => {
                     let op = self.rng.pick(&["<", "<=", ">", ">=", "=", "/="]);
                     let u = self.rng.pick(&[T::Int, T::Float, T::Rational]);
+                    format!("({} {op} {})", self.expr(u, d), self.expr(u, d))
+                }
+                2 if self.rng.one_in(3) => {
+                    let u = self.rng.pick(&[T::Gauss, T::Quaternion]);
+                    let op = self.rng.pick(&["=", "/="]);
                     format!("({} {op} {})", self.expr(u, d), self.expr(u, d))
                 }
                 2 => {
@@ -933,7 +996,10 @@ impl Writer<'_> {
                 }
                 3 => format!("not {}", self.expr(T::Bool, d)),
                 4 => match self.var(T::List) {
-                    Some(l) => format!("({} in {l})", self.expr(T::Int, d)),
+                    Some(l) => {
+                        let op = self.rng.pick(&["in", "notin"]);
+                        format!("({} {op} {l})", self.expr(T::Int, d))
+                    }
                     None => "true".into(),
                 },
                 _ => format!("({} = {})", self.expr(T::Str, d), self.expr(T::Str, d)),
@@ -949,6 +1015,10 @@ impl Writer<'_> {
                 format!("({} & {tail})", self.expr(T::Str, d))
             }
             T::List => match self.var(T::List) {
+                Some(l) if !leaf && self.rng.one_in(4) => {
+                    let (a, b) = (self.expr(T::Int, d), self.expr(T::Int, d));
+                    format!("{l} ' sublist({a}, {b})")
+                }
                 Some(l) if !leaf => {
                     let op = self.rng.pick(&["union", "inter", "compl"]);
                     format!("({l} {op} {})", self.expr(T::List, d))
@@ -956,7 +1026,19 @@ impl Writer<'_> {
                 Some(l) => l,
                 None => unreachable!("lists are always declared"),
             },
-            T::Vector => self.var(T::Vector).expect("a vector is always declared"),
+            T::Vector if leaf => self.var(T::Vector).expect("a vector is always declared"),
+            T::Vector => match self.rng.below(4) {
+                0 => format!("({} [*] {})", self.expr(T::Vector, d), self.expr(T::Int, d)),
+                1 => format!("({} [*] {})", self.expr(T::Int, d), self.expr(T::Vector, d)),
+                _ => {
+                    let op = self.rng.pick(&["[+]", "[+]", "[^]"]);
+                    format!(
+                        "({} {op} {})",
+                        self.expr(T::Vector, d),
+                        self.expr(T::Vector, d)
+                    )
+                }
+            },
         }
     }
 
@@ -1088,8 +1170,12 @@ impl Writer<'_> {
                     T::Float,
                     T::Appr,
                     T::Rational,
+                    T::Gauss,
+                    T::Quaternion,
                     T::Bool,
                     T::Str,
+                    T::List,
+                    T::Vector,
                 ]);
                 match self.target(t) {
                     Some(v) => {
@@ -1108,9 +1194,12 @@ impl Writer<'_> {
                             T::Float,
                             T::Appr,
                             T::Rational,
+                            T::Gauss,
+                            T::Quaternion,
                             T::Bool,
                             T::Str,
                             T::List,
+                            T::Vector,
                         ]);
                         self.expr(t, 2)
                     })
@@ -1120,12 +1209,14 @@ impl Writer<'_> {
             5 => {
                 let l = self.var(T::List).expect("declared");
                 let e = self.expr(T::Int, 2);
-                match self.rng.below(5) {
+                match self.rng.below(7) {
                     0 => self.line(&format!("extract ({e}) outof {l}")),
                     1 => {
                         let k = self.expr(T::Int, 1);
-                        self.line(&format!("insert ({e}) into {l} after {k}"))
+                        let side = self.rng.pick(&["after", "before"]);
+                        self.line(&format!("insert ({e}) into {l} {side} {k}"))
                     }
+                    5 if self.rng.one_in(3) => self.line(&format!("circular {l}")),
                     2 if self.rng.one_in(3) => self.line(&format!("empty {l}")),
                     _ => self.line(&format!("insert ({e}) into {l}")),
                 }
@@ -1488,7 +1579,9 @@ pub fn runnable(seed: u64) -> (String, String) {
             ("n".to_string(), T::Int),
             ("k".to_string(), T::Int),
             ("l".to_string(), T::List),
+            ("m".to_string(), T::List),
             ("v".to_string(), T::Vector),
+            ("u".to_string(), T::Vector),
         ];
         for i in 0..2 + rng.below(4) {
             locals.push((format!("x{i}"), rng.pick(SCALARS)));
@@ -1571,6 +1664,15 @@ pub fn runnable(seed: u64) -> (String, String) {
             if !w.rng.one_in(12) {
                 let e = w.literal(t);
                 w.line(&format!("{n} := {e} ;\n"));
+            }
+        }
+        // The vectors' cells too, most of the time.
+        for v in ["v", "u"] {
+            if !w.rng.one_in(6) {
+                let cells: Vec<String> = (1..=3)
+                    .map(|i| format!("{v}[{i}] := {}", w.rng.below(6)))
+                    .collect();
+                w.line(&format!("{} ;\n", cells.join(" ; ")));
             }
         }
         w.block(8, 3);
