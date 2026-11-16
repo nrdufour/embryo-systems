@@ -224,6 +224,17 @@ coroutine and hold among processes. `simulation-vm` does the same work
 as the reference in a quarter of the time: a fiber switch, not a thread
 handing over by channel.
 
+The gate keeps looking (2026-11-16): after its 2000 seeds, the same at
+each run, it runs 500 never run before, and names the one that differs,
+which `VM_SEED=n` runs alone. The random programs now write Gauss
+integers and quaternions, the arrays' operators and the rest of the
+list functors. Not chosen: fixed seeds alone, which find nothing after
+their first run. The price is a gate that may fail on a change that did
+not cause it; what it finds is a difference between the engines all the
+same. `crates/hbds-vm/tests/vm.rs` runs the VM with no language behind
+it, on A-code written as text: a unit whole, in turns, past its budget,
+and held in a kernel's time.
+
 A daemon whose executor dies, dies (2026-11-15): a panic on the
 executor's thread, or on the journal's, ends the process with an error,
 and its supervisor starts it again from the journal (the NixOS module's
@@ -467,11 +478,16 @@ flowchart LR
   the UI's live feed); plain HTTP for one-off requests (the schema, the
   pace, loading a module).
 - **One door, a Unix socket**, guarded by file permissions. The CLI uses
-  it directly, and the journal records the Unix user. Browsers come
-  through nginx, which terminates HTTPS, upgrades WebSockets and proxies
-  to the socket, authenticating by `auth_request` to oauth2-proxy against
-  Kanidm and passing the user in a header the journal records. The daemon
-  serves the UI's files, embedded in its binary.
+  it directly. Browsers come through nginx, which terminates HTTPS,
+  upgrades WebSockets and proxies to the socket, authenticating by
+  `auth_request` to oauth2-proxy against Kanidm. The daemon serves the
+  UI's files, embedded in its binary.
+- **Who did what is not recorded, yet** (said on 2026-11-16; the
+  decision had the journal record the Unix user, and the user the proxy
+  passes in a header): the daemon reads neither the peer's credentials
+  nor a header, and the journal names no one. It waits for the question
+  it serves, who may change which a.d.t., below. Until then the socket's
+  group is the only answer to "who".
 
 Not chosen: hyper or axum on tokio (an async runtime the single executor
 does not need); HTTP alone (a conversation split in two); a TCP port as

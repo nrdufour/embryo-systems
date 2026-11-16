@@ -73,16 +73,22 @@ A program goes through the language's layers, then reaches the engines:
 flowchart LR
     src[".adt source"] --> lexer --> parser --> lower["typed tree"]
     lower --> names["name resolution"] --> types["kinds and types"]
-    types --> interp[interpreter]
-    interp --> gtad["GTAD: a.d.t."]
-    interp --> lists["list engine"]
-    interp --> functors["functor engine"]
-    interp --> rules["expert systems"]
-    interp --> sim["simulation"]
-    interp --> reflexes["reflexes"]
-    interp --> neurons["neurons"]
-    interp --> constraints["constraints"]
-    interp --> dialog["dialog"]
+    types --> compiler --> acode["A-code"] --> vm["VM"]
+    types --> interp["interpreter, the VM's specification"]
+    daemon["daemon: sessions and a kernel, on a socket"] --> vm
+    vm --> engines
+    interp --> engines
+    subgraph engines
+        gtad["GTAD: a.d.t."]
+        lists["list engine"]
+        functors["functor engine"]
+        rules["expert systems"]
+        sim["simulation"]
+        reflexes["reflexes"]
+        neurons["neurons"]
+        constraints["constraints"]
+        dialog["dialog"]
+    end
     gtad -- "each change, through Recorder" --> journal[(journal)]
     grammar["grammar.lark"] -. "the parser builds Lark's tree" .-> parser
 ```
@@ -92,8 +98,20 @@ Each engine is a crate of its own, as in the print, where each engine (*moteur*)
 ```mermaid
 flowchart BT
     core["hbds-core<br/>values, a.d.t., specs"]
+    values["hbds-values<br/>operations on values"] --> core
+    maps["hbds-maps<br/>persistent B-tree"]
     lists["hbds-lists<br/>list engine, project 14"] --> core
+    lists --> values
     gtad["hbds-gtad<br/>a.d.t. engine, project 12"] --> core
+    gtad --> maps
+    acode["hbds-acode<br/>A-code"] --> values
+    acode --> core
+    vm["hbds-vm<br/>the VM"] --> acode
+    vm --> values & lists & gtad & functors & rules
+    vm --> sim & reflexes & neurons & constraints & dialog
+    http["hbds-http<br/>HTTP, WebSocket, JSON"] --> core
+    daemon["hbds-daemon<br/>the daemon"] --> vm
+    daemon --> http & journal & acode & gtad
     functors["hbds-functors<br/>functor engine, project 15"] --> gtad
     functors --> core
     journal["hbds-journal<br/>persistence, project 13"] --> gtad
@@ -120,8 +138,11 @@ flowchart BT
     adt81 --> rules
     adt81 --> functors
     adt81 --> gtad
+    adt81 --> values & acode
     cli["embryo-systems<br/>the command"] --> adt81
-    cli --> journal
+    cli --> journal & daemon & vm & acode & gtad
+    bench["embryo-systems-bench<br/>the benchmarks"] --> adt81
+    bench --> vm & gtad
 ```
 
 | crate | what |
@@ -139,7 +160,12 @@ flowchart BT
 | `crates/hbds-neurons` | the neural engine: NEURON, figure 58's intensities and delays, LEARNING |
 | `crates/hbds-constraints` | the constraint engine: CONSTRAINT, its FORMULA and components |
 | `crates/hbds-dialog` | the dialog engine: figure 71's Q-Graph, walked by CALL DIAL |
-| `crates/adt81` | ADT'81: grammar, parser, checker, interpreter |
+| `crates/hbds-acode` | A-code: its instructions, its text form, its verifier |
+| `crates/hbds-vm` | the VM that runs A-code: fibers as data, sessions in turns, the kernel |
+| `crates/hbds-http` | a minimal HTTP/1.1 and WebSocket server, and JSON |
+| `crates/hbds-daemon` | the daemon: one store on a Unix socket, its sessions, its time, its page |
+| `crates/adt81` | ADT'81: grammar, parser, checker, compiler to A-code, reference interpreter |
+| `crates/bench` | the benchmarks `just bench` runs |
 | `src/main.rs` | the `embryo-systems` command |
 
 ## Documentation
@@ -176,9 +202,10 @@ The flake's dev shell, loaded by direnv, carries every tool, and `just` lists th
 - every test
 - `just check-grammar`: the grammar parses each test program and 200 random ones one way only, to the Rust parser's tree
 - `just engines`: each crate depends only on what it may
-- `just docs`: every path and link in the documentation exists
+- `just docs`: every path and link in the documentation exists, and every crate is in the table above
 - the confusable-characters check
-- `just module`: a NixOS system with `nixosModules.default` enabled gets the daemon's service
+- `just module`: a NixOS system with `nixosModules.default` enabled gets the daemon's service, hardened, and the package it runs builds
+- `just bench`: the benchmarks do the work `bench/work.txt` records, in the time this host's `bench/<host>.txt` records
 
 ## License
 

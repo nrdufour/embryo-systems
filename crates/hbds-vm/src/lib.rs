@@ -1228,8 +1228,17 @@ impl<'r> Vm<'r> {
                 self.o.reacting = false;
                 match exit {
                     Ok(Exit::Returned(_)) => {
-                        if let Next::End(end) = self.settle()? {
-                            return Ok(Next::End(end));
+                        match self.settle() {
+                            Ok(Next::End(end)) => return Ok(Next::End(end)),
+                            Ok(_) => {}
+                            // A FORMULA refuses what the reaction did:
+                            // undone here, the program's last statements
+                            // having no one after them to undo it.
+                            Err(e) => {
+                                self.o.open -= 1;
+                                let _ = self.store.end(false);
+                                return Err(within(e, "REACTION", &what));
+                            }
                         }
                         self.o.open -= 1;
                         stored(self.store.end(true))?;
@@ -1440,8 +1449,14 @@ impl<'r> Vm<'r> {
                 return Err(e);
             }
         };
-        if let Next::End(end) = self.settle()? {
-            return Ok(Err(end));
+        match self.settle() {
+            Ok(Next::End(end)) => return Ok(Err(end)),
+            Ok(_) => {}
+            Err(e) => {
+                self.o.open -= 1;
+                let _ = self.store.end(false);
+                return Err(e);
+            }
         }
         self.o.open -= 1;
         stored(self.store.end(true))?;
